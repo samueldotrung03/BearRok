@@ -219,6 +219,8 @@ export class RunObserver {
   private runId: string | null = null;
   private times = new Map<string, Timing>();
   private now: () => Date;
+  /** True until the first update: a run already over then (restored after a restart) was not watched. */
+  private first = true;
   constructor(now: () => Date = () => new Date()) {
     this.now = now;
   }
@@ -232,6 +234,9 @@ export class RunObserver {
   update(run: RunSnapshot | null): { live: LiveActivity; agents: ActivityAgent[] } {
     if ((run?.id ?? null) !== this.runId) this.reset(run);
     const stamp = this.now().toISOString();
+    // A run that was over before anyone watched it has no timings to show.
+    const afterTheFact = this.first && run !== null && run.status !== 'running';
+    this.first = false;
     if (!run) return { live: { run: null, agents: [], flows: [], counts: countsOf([]), changed: [], serverTime: stamp }, agents: [] };
     const shapes = shapesOf(run);
     const changed: string[] = [];
@@ -241,7 +246,7 @@ export class RunObserver {
         changed.push(s.id);
         // The master and managers are created already running: they start when first seen.
         const queuedAt = t?.queuedAt ?? stamp;
-        const startedAt = t?.startedAt ?? (s.status === 'queued' || s.status === 'skipped' ? null : stamp);
+        const startedAt = t?.startedAt ?? (afterTheFact || s.status === 'queued' || s.status === 'skipped' ? null : stamp);
         const finishedAt = TERMINAL.includes(s.status) ? (t?.finishedAt ?? (run.finishedAt && !t ? run.finishedAt : stamp)) : null;
         t = { status: s.status, queuedAt, startedAt, finishedAt };
         this.times.set(s.id, t);

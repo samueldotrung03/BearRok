@@ -47,7 +47,10 @@ export class ActivityHub {
     if (this.entries.has(system)) return;
     const observer = new RunObserver(this.now);
     const current = system.currentRun();
-    const entry: Entry = { key, system, observer, viewers: new Set(), last: observer.update(current).live, current, reported: new Set(), changed: [], timer: null };
+    // A run already over when the agents were attached (restored after a restart) was not watched,
+    // so it is not reported again: its saved report or its outline stands.
+    const reported = new Set(current && current.status !== 'running' ? [runKey(current)] : []);
+    const entry: Entry = { key, system, observer, viewers: new Set(), last: observer.update(current).live, current, reported, changed: [], timer: null };
     this.entries.set(system, entry);
     system.observe((event, data) => {
       if (event === 'run') this.onRun(entry, data as RunSnapshot | null);

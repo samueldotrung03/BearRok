@@ -140,6 +140,7 @@ test('hub: runs recorded before reports were kept show as outlines', async () =>
   const s = system();
   const memory = s.memorySnapshot();
   memory.learned.runs = [{ number: 1, trigger: 'first', status: 'complete', startedAt: NOW.toISOString(), finishedAt: new Date(NOW.getTime() + 268_000).toISOString(), stats: { jobs: 24, skipped: 13, candidates: 0, merged: 1, kept: 0, rejected: 0, added: 0 } }];
+  memory.learned.runCount = 1;
   s.restore(memory);
   const hub = new ActivityHub();
   hub.attach('k', s);
@@ -148,7 +149,18 @@ test('hub: runs recorded before reports were kept show as outlines', async () =>
   assert.equal(r!.durationMs, 268_000);
   assert.equal(r!.skipped.count, 13);
   assert.equal(r!.results.found, 0);
-  assert.equal(hub.live(s).run, null);
+  // The run comes back after a restart as finished, without invented timings, and is not reported twice.
+  const live = hub.live(s);
+  assert.equal(live.run?.number, 1);
+  assert.equal(live.run?.outcome, 'finished');
+  assert.ok(live.agents.every((a) => a.startedAt === null));
+  await s.trigger('manual');
+  await s.idle();
+  await sleep(200);
+  const after = hub.reports(s);
+  assert.equal(after.filter((x) => x.number === 1).length, 1);
+  assert.equal(after.find((x) => x.number === 1)!.outlineOnly, true);
+  assert.equal(after.find((x) => x.number === 2)!.outlineOnly, false);
 });
 
 test('api: a simulated run shows live by level, then lands in the history with its report', async () => {

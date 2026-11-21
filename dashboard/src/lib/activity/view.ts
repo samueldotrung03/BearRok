@@ -1,6 +1,6 @@
 // Pure helpers that turn the activity feed into what the live view and the history show.
 // No React and no network here, so every state can be tested directly.
-import { LEVELS, type ActivityAgent, type ActivityFlow, type ActivityLevel, type ActivityStatus, type LiveActivity, type RunOutcome, type RunReport } from './types.ts';
+import { LEVELS, type ActivityAgent, type ActivityFlow, type ActivityLevel, type ActivityStatus, type LiveActivity, type ReasonCount, type RunFunnel, type RunOutcome, type RunReport } from './types.ts';
 
 export const LEVEL_TITLE: Record<ActivityLevel, string> = {
   master: 'Master',
@@ -200,4 +200,41 @@ export function outlineLine(r: RunReport): string {
   if (r.skipped.count) parts.push(`${r.skipped.count} skipped: ${r.skipped.reasons[0]?.reason ?? 'budget reached'}`);
   if (r.results.rejected) parts.push(`${r.results.rejected} rejected by validation`);
   return parts.join(' · ');
+}
+
+export interface FunnelStep {
+  label: string;
+  value: number;
+  unit: string;
+  /** What dropped at this stage and why, most important first. */
+  notes: string[];
+}
+
+const top = (reasons: ReasonCount[]) => (reasons[0] ? `: ${reasons[0].reason}${reasons.length > 1 ? ' and others' : ''}` : '');
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** The run's funnel as five stages, from searching to the feed, each with what it lost. */
+export function funnelSteps(f: RunFunnel): FunnelStep[] {
+  const searched: string[] = [];
+  if (f.duplicates) searched.push(`${plural(f.duplicates, 'duplicate')} already taken by another worker`);
+  if (f.scouts.failed) searched.push(`${plural(f.scouts.failed, 'search')} failed`);
+  if (f.scouts.skipped) searched.push(`${plural(f.scouts.skipped, 'search', 'searches')} skipped`);
+  const read: string[] = [];
+  if (f.readers.skipped) read.push(`${f.readers.skipped} not read${top(f.readers.skippedReasons)}`);
+  if (f.readers.empty) read.push(`${f.readers.empty} with no posting`);
+  if (f.readers.failed) read.push(`${f.readers.failed} failed`);
+  const reviewed: string[] = [];
+  if (f.noLink) reviewed.push(`${f.noLink} dropped with no usable link`);
+  if (f.alreadyRejected) reviewed.push(`${f.alreadyRejected} turned down in an earlier run`);
+  const kept: string[] = [];
+  if (f.rejected) kept.push(`${f.rejected} rejected${top(f.rejectedReasons)}`);
+  if (f.unfinishedReviews) kept.push(`${plural(f.unfinishedReviews, 'review')} did not finish; reviewed again next time`);
+  const saved = f.kept > f.saved ? [`${f.kept - f.saved} already in your feed`] : [];
+  return [
+    { label: 'Searched', value: f.leads, unit: f.leads === 1 ? 'lead' : 'leads', notes: [`from ${plural(f.scouts.done, 'search', 'searches')}`, ...searched] },
+    { label: 'Read', value: f.readers.done, unit: f.readers.done === 1 ? 'page' : 'pages', notes: read },
+    { label: 'Reviewed', value: f.reviewed, unit: f.reviewed === 1 ? 'posting' : 'postings', notes: reviewed },
+    { label: 'Kept', value: f.kept, unit: f.kept === 1 ? 'posting' : 'postings', notes: kept },
+    { label: 'Saved', value: f.saved, unit: 'new in your feed', notes: saved },
+  ];
 }

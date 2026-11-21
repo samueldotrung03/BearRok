@@ -122,8 +122,30 @@ export interface RunReport {
   outcomes: AgentOutcome[];
   /** True for runs recorded before per-agent reports were kept: only the outline is known. */
   outlineOnly: boolean;
-  /** Where postings dropped between search and review, as the worker fleet logged it. Null when the run did not log it. */
-  funnel?: string | null;
+  /** Where postings dropped, stage by stage. Null for runs from before it was counted. */
+  funnel?: RunFunnel | null;
+}
+
+export interface ReasonCount {
+  reason: string;
+  count: number;
+}
+
+/** Mirrors RunFunnel in backend/src/agents/types.ts. */
+export interface RunFunnel {
+  jobs: number;
+  scouts: { done: number; failed: number; skipped: number };
+  leads: number;
+  duplicates: number;
+  readers: { done: number; empty: number; failed: number; skipped: number; skippedReasons: ReasonCount[] };
+  noLink: number;
+  alreadyRejected: number;
+  reviewed: number;
+  rejected: number;
+  rejectedReasons: ReasonCount[];
+  unfinishedReviews: number;
+  kept: number;
+  saved: number;
 }
 
 /** Reports kept per student; the page shows 5 and up to 10 with Show more. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agent, at, liveOf, report, runOf, T0 } from './fixtures.ts';
 import { backoffMs } from './useActivity.ts';
-import { announcements, columnsOf, countsText, dayKey, elapsedMs, failureLine, formatDuration, historyDays, outlineLine, rowDetail, rowTitle, visibleHistory } from './view.ts';
+import { announcements, columnsOf, countsText, dayKey, elapsedMs, failureLine, formatDuration, funnelSteps, historyDays, outlineLine, rowDetail, rowTitle, visibleHistory } from './view.ts';
 
 describe('columnsOf', () => {
   it('puts every agent in one of five level columns, in the order work flows', () => {
@@ -130,5 +130,37 @@ describe('history', () => {
 describe('backoffMs', () => {
   it('waits 1, 2, 4 and 8 seconds, then every 15', () => {
     expect([1, 2, 3, 4, 5, 9].map(backoffMs)).toEqual([1000, 2000, 4000, 8000, 15_000, 15_000]);
+  });
+});
+
+describe('funnelSteps', () => {
+  it('reads as five stages from searching to the feed, each saying what dropped and why', () => {
+    const steps = funnelSteps({
+      jobs: 24,
+      scouts: { done: 8, failed: 0, skipped: 0 },
+      leads: 22,
+      duplicates: 2,
+      readers: { done: 10, empty: 3, failed: 1, skipped: 6, skippedReasons: [{ reason: 'manager budget reached', count: 6 }] },
+      noLink: 1,
+      alreadyRejected: 0,
+      reviewed: 6,
+      rejected: 4,
+      rejectedReasons: [{ reason: 'Status reviewer: Closed: the deadline passed', count: 3 }, { reason: 'Criteria reviewer: not open to freshmen', count: 1 }],
+      unfinishedReviews: 0,
+      kept: 2,
+      saved: 1,
+    });
+    expect(steps.map((s) => [s.label, s.value])).toEqual([
+      ['Searched', 22],
+      ['Read', 10],
+      ['Reviewed', 6],
+      ['Kept', 2],
+      ['Saved', 1],
+    ]);
+    expect(steps[0]!.notes).toEqual(['from 8 searches', '2 duplicates already taken by another worker']);
+    expect(steps[1]!.notes).toEqual(['6 not read: manager budget reached', '3 with no posting', '1 failed']);
+    expect(steps[2]!.notes).toEqual(['1 dropped with no usable link']);
+    expect(steps[3]!.notes).toEqual(['4 rejected: Status reviewer: Closed: the deadline passed and others']);
+    expect(steps[4]!.notes).toEqual(['1 already in your feed']);
   });
 });

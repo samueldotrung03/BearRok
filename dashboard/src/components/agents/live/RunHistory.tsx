@@ -5,7 +5,7 @@ import { ChevronDown } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ActivityStatus } from '../../../lib/activity/useActivity.ts';
 import type { RunReport } from '../../../lib/activity/types.ts';
-import { dayLabel, failureLine, formatDuration, historyDays, LEVEL_SHORT, OUTCOME_WORD, outlineLine, STATUS_WORD, visibleHistory, whenText } from '../../../lib/activity/view.ts';
+import { dayLabel, failureLine, formatDuration, funnelSteps, historyDays, LEVEL_SHORT, OUTCOME_WORD, outlineLine, STATUS_WORD, visibleHistory, whenText } from '../../../lib/activity/view.ts';
 import { Card } from '../../Page.tsx';
 
 const keyOf = (r: RunReport) => `${r.id}@${r.startedAt}`;
@@ -70,10 +70,20 @@ function ReportRow({ report, open, onToggle, fresh }: { report: RunReport; open:
             </p>
           )}
           {report.funnel && (
-            <p className="ag-hist-reasons">
-              <span className="ag-hist-caption">Where postings dropped</span>
-              {report.funnel}
-            </p>
+            <div className="ag-hist-reasons">
+              <p className="ag-hist-caption">Where postings dropped</p>
+              <ol className="ag-hist-funnel">
+                {funnelSteps(report.funnel).map((s) => (
+                  <li key={s.label}>
+                    <span className="ag-hist-level">{s.label}</span>
+                    <span>
+                      <span className="tabular-nums text-ink">{s.value}</span> {s.unit}
+                    </span>
+                    <span className="ag-hist-text">{s.notes.join(' · ')}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
           )}
           <p className="ag-hist-caption">Agents, failures first</p>
           <ul>

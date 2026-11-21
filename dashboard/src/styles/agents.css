@@ -1879,6 +1879,13 @@ button.ag-hist-head:hover { background: var(--surface-3); }
 }
 .ag-hist-caption { display: block; margin-bottom: 6px; color: var(--color-ink-3); }
 .ag-hist-reasons { margin-bottom: 12px; font-size: 13px; color: var(--color-ink-2); }
+.ag-hist-funnel { display: grid; gap: 4px; }
+.ag-hist-funnel li { display: grid; grid-template-columns: 96px 160px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 2px 8px; }
+.ag-hist-funnel .tabular-nums { font-family: var(--ag-mono, ui-monospace, monospace); }
+@media (max-width: 1023px) {
+  .ag-hist-funnel li { grid-template-columns: 96px minmax(0, 1fr); }
+  .ag-hist-funnel li .ag-hist-text { grid-column: 1 / -1; }
+}
 .ag-hist-outcome {
   display: grid;
   grid-template-columns: 96px minmax(0, 2fr) 84px minmax(0, 3fr) 48px;

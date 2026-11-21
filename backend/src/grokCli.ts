@@ -2,7 +2,7 @@
 // Same job as the API client in grok.ts: send one prompt, get one JSON answer back.
 // Usage is counted against the subscription of whoever ran `grok login` on this machine.
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -25,36 +25,96 @@ function startCli(args: string[]) {
   return spawn(bin, args, opts);
 }
 
-function run(args: string[], timeoutMs: number): Promise<string> {
+/** Set `AGENT_DEBUG=1` to keep every prompt and the CLI's raw stdout. Off for normal runs. */
+export const agentDebug = () => process.env.AGENT_DEBUG === '1';
+
+const debugFile = () => join(tmpdir(), 'bearok-agent-debug.jsonl');
+
+function debugLog(entry: Record<string, unknown>) {
+  const name = String(entry.name ?? 'grok');
+  const event = String(entry.event ?? '');
+  const detail = entry.detail ? ` ${entry.detail}` : '';
+  if (event === 'fail' || agentDebug()) console.error(`[agent] ${name} ${event}${detail}`);
+  if (!agentDebug()) return;
+  try {
+    appendFileSync(debugFile(), `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+  } catch {
+    // A debug log must not sink a search.
+  }
+}
+
+/**
+ * `grok-4.3` is the API low-tier default and is not a model this CLI lists
+ * (`grok models`: grok-4.7, grok-4.7-build-fast, grok-4.6, grok-4.5). Passing it fails the call.
+ */
+export function cliModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  if (model === 'grok-4.3') {
+    console.warn('grok CLI has no grok-4.3 model; this call uses the CLI default.');
+    return undefined;
+  }
+  return model;
+}
+
+/**
+ * Arguments for one headless call. Web search and opening pages are allowed by name.
+ * A headless run cannot ask, so without `--allow WebFetch` the CLI cancels every page open
+ * and the reader returns an empty record. `--always-approve` is not used unless the operator
+ * sets GROK_CLI_ALWAYS_APPROVE=1; it would also approve shell and file tools.
+ */
+export function cliArguments(opts: { prompt: string; model?: string; tools: boolean; schema?: string; effort?: string; alwaysApprove?: boolean; cwd: string }): string[] {
+  const args = ['-p', opts.prompt, '--output-format', 'json', '--cwd', opts.cwd, '--no-subagents'];
+  const model = cliModel(opts.model);
+  if (model) args.push('-m', model);
+  if (opts.effort) args.push('--reasoning-effort', opts.effort);
+  if (!opts.tools) args.push('--disable-web-search');
+  else args.push('--allow', 'WebSearch', '--allow', 'WebFetch');
+  if (opts.schema) args.push('--json-schema', opts.schema);
+  if (opts.tools && opts.alwaysApprove) args.push('--always-approve');
+  return args;
+}
+
+type CliRun = { stdout: string; stderr: string; code: number | null; timedOut: boolean };
+
+function run(args: string[], timeoutMs: number): Promise<CliRun> {
   const stop = currentSignal();
   if (stop?.aborted) return Promise.reject(new StoppedError());
   return new Promise((resolve, reject) => {
     const child = startCli(args);
     let out = '';
     let err = '';
+    let settled = false;
+    let timedOut = false;
+    const finish = (result: CliRun) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      stop?.removeEventListener('abort', onStop);
+      resolve(result);
+    };
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill('SIGKILL');
-      reject(new Error(`grok CLI timed out after ${Math.round(timeoutMs / 1000)}s`));
     }, timeoutMs);
     // The student stopped the search: end this call now rather than when it finishes.
     const onStop = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       child.kill('SIGKILL');
       reject(new StoppedError());
     };
     stop?.addEventListener('abort', onStop, { once: true });
-    child.on('close', () => stop?.removeEventListener('abort', onStop));
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e: NodeJS.ErrnoException) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      stop?.removeEventListener('abort', onStop);
       reject(new Error(e.code === 'ENOENT' ? `grok CLI not found at "${config.grokCli.bin}". Install it and run "grok login".` : e.message));
     });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(`grok CLI exited ${code}: ${(err || out).trim().slice(0, 400)}`));
-    });
+    child.on('close', (code) => finish({ stdout: out, stderr: err, code, timedOut }));
   });
 }
 
@@ -124,9 +184,21 @@ export function jsonObjects(text: string): unknown[] {
  * copy of the shape before or between its searches, in its text or as its checked answer, so the
  * first object found is not always the real one.
  */
+/**
+ * How much of an object is a real answer. The CLI sometimes fills the schema with the word
+ * "placeholder" or blank strings, and that stub can be longer than the real object written later.
+ * Blanks and the literal placeholder lose to a shorter answer that has actual text.
+ */
+export function answerSubstance(value: unknown): number {
+  const text = JSON.stringify(value);
+  const placeholders = text.match(/"placeholder"/gi)?.length ?? 0;
+  const blanks = text.match(/""/g)?.length ?? 0;
+  return text.length - placeholders * 400 - blanks * 30;
+}
+
 export function fullestAnswer<S extends z.ZodType>(stdout: string, schema: S): z.infer<S> {
   const candidates = [structuredAnswer(stdout), ...jsonObjects(answerText(stdout))].filter((c) => c !== undefined);
-  let best: { data: z.infer<S>; size: number } | null = null;
+  let best: { data: z.infer<S>; score: number } | null = null;
   let firstError: unknown;
   for (const c of candidates) {
     const parsed = schema.safeParse(c);
@@ -134,11 +206,13 @@ export function fullestAnswer<S extends z.ZodType>(stdout: string, schema: S): z
       firstError ??= parsed.error;
       continue;
     }
-    const size = JSON.stringify(parsed.data).length;
-    if (!best || size > best.size) best = { data: parsed.data, size };
+    const score = answerSubstance(parsed.data);
+    if (!best || score > best.score) best = { data: parsed.data, score };
   }
   if (best) return best.data;
-  throw firstError ?? new Error('the reply contained no JSON object');
+  const issues = firstError && typeof firstError === 'object' && 'issues' in firstError && Array.isArray(firstError.issues) ? firstError.issues : [];
+  const hint = issues.slice(0, 3).map((i) => `${(Array.isArray(i.path) ? i.path : []).join('.') || '(root)'}: ${i.message}`).join('; ');
+  throw new Error(hint ? `the reply did not match the schema (${hint})` : 'the reply contained no JSON object');
 }
 
 /** Pull the first complete JSON object out of a reply that may have prose or code fences around it. */
@@ -180,32 +254,58 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
 }): Promise<GrokResult<z.infer<S>>> {
   const schema = z.toJSONSchema(opts.schema) as Record<string, unknown>;
   delete schema.$schema;
+  const schemaJson = JSON.stringify(schema);
   const prompt = [
     opts.system,
-    opts.tools?.length ? 'Use your web search tool to find and open pages. Do not read, write or run anything on this computer.' : 'Answer from the information given. Do not use any tools.',
-    `Reply with one JSON object and nothing else: no explanation, no code fence. Write it once, after your research is done, never as an empty placeholder. It must match this JSON Schema:\n${JSON.stringify(schema)}`,
+    opts.tools?.length
+      ? 'Use web search and open the pages (web fetch). Both are already allowed. Do not read, write or run anything on this computer, and do not use any other tool. If a page cannot be opened, say so in the JSON; do not invent the page.'
+      : 'Answer from the information given. Do not use any tools.',
+    `Reply with one JSON object and nothing else: no explanation, no code fence. Write it once, after your research is done, never as an empty placeholder and never with the word "placeholder" as a value. It must match this JSON Schema:\n${schemaJson}`,
     `---\n${opts.user}`,
   ].join('\n\n');
-
-  const args = ['-p', prompt, '--output-format', 'json', '--cwd', sandboxDir()];
-  if (opts.model) args.push('-m', opts.model);
-  // The CLI is a full agent: at its default effort one search takes minutes of thinking between steps.
-  if (config.grokCli.effort) args.push('--reasoning-effort', config.grokCli.effort);
-  if (!opts.tools?.length) args.push('--disable-web-search');
-  // The CLI holds the answer to the schema itself, which is quicker and surer than finding JSON in prose.
-  const withSchema = [...args, '--json-schema', JSON.stringify(schema)];
-  // Only when switched on: lets the CLI use tools (web search) without a person approving each one.
-  if (opts.tools?.length && config.grokCli.alwaysApprove) args.push('--always-approve');
+  const timeoutMs = opts.timeoutMs ?? config.grokCli.timeoutMs;
+  const base = { prompt, model: opts.model, tools: Boolean(opts.tools?.length), effort: config.grokCli.effort, alwaysApprove: config.grokCli.alwaysApprove, cwd: sandboxDir() };
 
   let lastError: unknown;
   // One retry, without the schema option in case the CLI turned the schema down: the prompt still asks for the JSON.
   for (let attempt = 0; attempt < 2; attempt++) {
+    const args = cliArguments({ ...base, schema: attempt === 0 ? schemaJson : undefined });
     try {
-      const stdout = await run(attempt === 0 ? withSchema : args, opts.timeoutMs ?? config.grokCli.timeoutMs);
-      return { data: fullestAnswer(stdout, opts.schema), citations: [] };
+      const result = await run(args, timeoutMs);
+      debugLog({
+        name: opts.name,
+        event: 'call',
+        detail: `attempt ${attempt + 1} exit ${result.code ?? 'none'}${result.timedOut ? ' timeout' : ''} stdout ${result.stdout.length}b`,
+        model: cliModel(opts.model) ?? 'cli default',
+        tools: base.tools,
+        prompt,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      });
+      try {
+        const data = fullestAnswer(result.stdout, opts.schema);
+        if (result.timedOut || result.code !== 0) {
+          console.warn(`grok ${opts.name}: kept a JSON answer from a CLI run that ${result.timedOut ? `timed out after ${Math.round(timeoutMs / 1000)}s` : `exited ${result.code}`}`);
+        }
+        return { data, citations: [] };
+      } catch (parseError) {
+        const parsed = parseError instanceof Error ? parseError.message : String(parseError);
+        const why = result.timedOut
+          ? `grok CLI timed out after ${Math.round(timeoutMs / 1000)}s`
+          : result.code !== 0
+            ? `grok CLI exited ${result.code}: ${(result.stderr || result.stdout).trim().slice(0, 400)}`
+            : parsed;
+        lastError = new Error(why);
+        console.warn(`grok ${opts.name}: dropped answer (${why})`);
+        debugLog({ name: opts.name, event: 'fail', detail: why, stdout: result.stdout, stderr: result.stderr });
+        if (result.timedOut || /not found/.test(why)) break;
+      }
     } catch (e) {
       lastError = e;
-      if (e instanceof StoppedError || (e instanceof Error && /not found|timed out/.test(e.message))) break;
+      const message = e instanceof Error ? e.message : String(e);
+      if (!(e instanceof StoppedError)) console.warn(`grok ${opts.name}: ${message}`);
+      debugLog({ name: opts.name, event: 'fail', detail: message });
+      if (e instanceof StoppedError || /not found|timed out/.test(message)) break;
     }
   }
   throw lastError;

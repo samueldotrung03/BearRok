@@ -62,6 +62,10 @@ test('grokJson goes through the CLI when GROK_TRANSPORT=cli', async () => {
   assert.match(args, /-m\nsome-model/);
   // Tools are not auto-approved unless the setting is turned on.
   assert.doesNotMatch(args, /--always-approve/);
+  // A headless call cannot ask, so page opens have to be allowed by name or the CLI cancels web_fetch.
+  assert.match(args, /--allow\nWebSearch\n--allow\nWebFetch/);
+  assert.match(args, /--json-schema\n/);
+  assert.match(args, /--no-subagents/);
 });
 
 test('a reply that is not valid JSON is asked for once more', async () => {
@@ -92,4 +96,32 @@ test('an empty placeholder written before the real answer does not win', () => {
   assert.deepEqual(fullestAnswer(out, schema), { items: ['a', 'b'] });
   assert.deepEqual(fullestAnswer(JSON.stringify({ text: 'done', structuredOutput: { items: ['x'] } }), schema), { items: ['x'] });
   assert.throws(() => fullestAnswer(JSON.stringify({ text: 'no answer here' }), schema));
+  // A schema stub filled with the word "placeholder" can be longer than the real answer. The real one still wins.
+  const fat = { items: ['placeholder', 'placeholder', 'placeholder', 'placeholder', 'placeholder'] };
+  const real = { items: ['https://example.org/intern'] };
+  assert.deepEqual(fullestAnswer(JSON.stringify({ text: JSON.stringify(real), structuredOutput: fat }), schema), real);
+});
+
+test('grok-4.3 is not sent to the CLI, and a failed exit that printed JSON is kept', async () => {
+  reset();
+  writeFileSync(join(dir, 'reply'), '{"title":"Kept","url":"https://example.org/k"}');
+  writeFileSync(join(dir, 'exit'), '1');
+  const { data } = await grokJson({ name: 't', system: 's', user: 'u', schema: Schema, model: 'grok-4.3', tools: [{ type: 'web_search' }] });
+  assert.equal(data.title, 'Kept');
+  const args = readFileSync(join(dir, 'args'), 'utf8');
+  assert.doesNotMatch(args, /grok-4\.3/);
+  assert.match(args, /--allow\nWebFetch/);
+});
+
+test('a cancelled page read is the empty record the readers used to drop', async () => {
+  const { readFileSync: read } = await import('node:fs');
+  const raw = read(new URL('../fixtures/agent-cli/extractor-cancelled.json', import.meta.url), 'utf8');
+  const schema = z.object({
+    found: z.boolean(),
+    record: z.object({ title: z.string(), sourceUrl: z.string() }).passthrough(),
+  });
+  const data = fullestAnswer(raw, schema);
+  assert.equal(data.found, false);
+  assert.equal(data.record.title, '');
+  assert.equal(data.record.sourceUrl, '');
 });

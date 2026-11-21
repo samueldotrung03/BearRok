@@ -215,6 +215,73 @@ function postingSummary(o: Opportunity): string | null {
 const idFor = (key: string) => `opp-${createHash('sha1').update(key).digest('hex').slice(0, 10)}`;
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** A review that came back blank is not a decision. The word "placeholder" is the CLI filling an empty schema. */
+export function unusableReview(reason: string | null | undefined): boolean {
+  const text = (reason ?? '').trim().toLowerCase();
+  return text === '' || text === 'placeholder' || text === 'null' || text === 'n/a' || text === 'none';
+}
+
+function reasonTally(lines: string[]): string {
+  const map = new Map<string, number>();
+  for (const line of lines) {
+    const key = line.replace(/\s+/g, ' ').trim().slice(0, 160) || '(no reason)';
+    map.set(key, (map.get(key) ?? 0) + 1);
+  }
+  return [...map.entries()].slice(0, 8).map(([k, n]) => `${n}× ${k}`).join('; ') || 'none';
+}
+
+const INTERRUPTED_RUN = 'The backend stopped while this search was still running, so this run is marked stopped.';
+
+/** An outline is all an older save kept. Enough to show the run again, without its agents or log. */
+function snapshotFromRecord(record: RunRecord, mode: RunSnapshot['mode']): RunSnapshot {
+  return {
+    id: `run-${record.number}`,
+    number: record.number,
+    trigger: record.trigger,
+    mode,
+    status: record.status,
+    startedAt: record.startedAt,
+    finishedAt: record.finishedAt,
+    brief: null,
+    agents: [],
+    assignments: [],
+    jobs: [],
+    validations: [],
+    log: [],
+    stats: { ...record.stats },
+    error: null,
+  };
+}
+
+/**
+ * A run still marked running did not finish: the process died. Mark it stopped and settle every
+ * agent, job and review that was still in progress, so a restart does not look like a live search.
+ */
+function stopInterruptedRun(run: RunSnapshot, at: string) {
+  run.status = 'stopped';
+  run.finishedAt = run.finishedAt ?? at;
+  run.error = INTERRUPTED_RUN;
+  for (const agent of run.agents) {
+    if (agent.status === 'running') Object.assign(agent, { status: 'done', detail: 'Stopped because the backend restarted.' });
+  }
+  for (const job of run.jobs) {
+    if (job.status === 'running' || job.status === 'queued') Object.assign(job, { status: 'skipped', result: 'Stopped because the backend restarted.' });
+  }
+  for (const validation of run.validations) {
+    if (validation.status === 'checking') {
+      validation.status = 'rejected';
+      validation.reason = 'Could not be reviewed: the backend stopped while this search was running.';
+    }
+    for (const review of validation.reviews) {
+      if (review.status === 'checking') {
+        review.status = 'rejected';
+        review.reason = 'Could not be reviewed: the backend stopped while this search was running.';
+      }
+    }
+  }
+  run.log.push({ seq: (run.log.at(-1)?.seq ?? 0) + 1, at, agent: 'System', text: run.error, tone: 'bad' });
+}
+
 export class AgentSystem {
   private brain: Brain;
   private opts: SystemOptions;
@@ -465,6 +532,7 @@ export class AgentSystem {
         searches: this.searches,
         pending: [...this.pending.values()],
         runs: this.runs,
+        lastRun: this.run ? structuredClone(this.run) : null,
         applications: [...this.applications.values()],
         runCount: this.runCount,
         autoDone: this.autoDone,
@@ -492,6 +560,7 @@ export class AgentSystem {
     this.searches = structuredClone(l.searches ?? []);
     this.pending = new Map((l.pending ?? []).map((p) => [p.key, structuredClone(p)]));
     this.runs = structuredClone(l.runs ?? []);
+    this.restoreRun(l.lastRun);
     // Applications saved before the portal existed get an empty one.
     this.applications = new Map((l.applications ?? []).map((a) => [a.opportunityId, { ...structuredClone(a), custom: a.custom ?? false, portal: a.portal ? structuredClone(a.portal) : emptyPortal() }]));
     this.runCount = l.runCount ?? this.runs.length;
@@ -502,6 +571,26 @@ export class AgentSystem {
     this.setSchedule(p?.scheduleSeconds ?? 0);
     this.saver = saver;
     this.syncAutoTimer();
+  }
+
+  /**
+   * Put the latest run back. A finished run stays finished. One that was still running when the
+   * process died is marked stopped. An older save has no full snapshot, so the newest outline is used.
+   */
+  private restoreRun(saved: RunSnapshot | null | undefined) {
+    const mode: RunSnapshot['mode'] = this.brain.mode === 'live' ? 'live' : 'simulated';
+    const run = saved ? structuredClone(saved) : this.runs.at(-1) ? snapshotFromRecord(this.runs.at(-1)!, mode) : null;
+    if (!run) {
+      this.run = null;
+      return;
+    }
+    if (run.status === 'running') stopInterruptedRun(run, this.opts.now().toISOString());
+    this.seq = run.log.reduce((max, entry) => Math.max(max, entry.seq), this.seq);
+    this.run = run;
+    const outline: RunRecord = { number: run.number, trigger: run.trigger, status: run.status, startedAt: run.startedAt, finishedAt: run.finishedAt, stats: { ...run.stats } };
+    const existing = this.runs.find((entry) => entry.number === run.number);
+    if (existing) Object.assign(existing, outline);
+    else this.runs.push(outline);
   }
 
   /** What the app has learned, in numbers and recent entries, for a page that shows it. */
@@ -1171,6 +1260,10 @@ export class AgentSystem {
         ...[...this.pending.values()].map((p) => p.candidate.sourceUrl),
       ]);
       let alreadyRejected = 0;
+      let leadsSeen = 0;
+      let extractEmpty = 0;
+      let noUrl = 0;
+      let duplicateLeads = 0;
       type Found = { candidate: Candidate; managerId: string; alsoSeenAt: string[] };
       const found = new Map<string, Found>();
 
@@ -1287,6 +1380,7 @@ export class AgentSystem {
             const r = v.reviews.find((x) => x.focus === reviewer.focus)!;
             try {
               const verdict = await this.brain.validate(f.candidate, brief, summary, reviewer.focus);
+              if (unusableReview(verdict.reason)) throw new Error('empty placeholder review');
               verdicts.set(key, { ...verdicts.get(key), [reviewer.focus]: verdict });
               r.status = verdict.keep ? 'kept' : 'rejected';
               r.reason = verdict.reason;
@@ -1361,6 +1455,7 @@ export class AgentSystem {
                   return { value, summary: `${value.length} leads` };
                 });
                 // Remembered, so later runs search somewhere else. The newest 400 are kept.
+                leadsSeen += leads?.length ?? 0;
                 if (leads) {
                   this.searches.push({ query: spec.query, label: spec.label, category: a.category, manager: a.name, at: now().toISOString(), run: run.number, leads });
                   if (this.searches.length > 400) this.searches.splice(0, this.searches.length - 400);
@@ -1371,14 +1466,23 @@ export class AgentSystem {
                     if (!fleet.claim(key)) {
                       run.stats.merged++;
                       duplicates++;
+                      duplicateLeads++;
                       return;
                     }
                     const candidate = await fleet.run({ kind: 'extract', managerId: a.managerId, label: `Read: ${lead.title}` }, async () => {
-                      const value = await this.brain.extract(lead, a);
+                      const value = await this.brain.extract(lead, a, brief);
                       return { value, summary: value ? `${value.organizer}` : 'page could not be read' };
                     });
-                    if (!candidate) return;
-                    const official = canonicalUrl(candidate.sourceUrl) ?? candidate.sourceUrl;
+                    if (!candidate) {
+                      extractEmpty++;
+                      return;
+                    }
+                    const official = canonicalUrl(candidate.sourceUrl);
+                    if (!official) {
+                      noUrl++;
+                      log(a.name, `Dropped "${candidate.title || lead.title}": the reader gave no usable link`, 'bad');
+                      return;
+                    }
                     if (this.rejected.has(official)) {
                       alreadyRejected++;
                       return;
@@ -1413,7 +1517,22 @@ export class AgentSystem {
       run.stats.candidates = found.size;
       run.stats.jobs = fleet.started;
       run.stats.skipped = fleet.jobs.filter((j) => j.status === 'skipped').length;
-      if (run.stats.skipped) log('Worker fleet', `${run.stats.skipped} jobs were not run: the run's budget was reached`);
+      const ofKind = (kind: string, status: string) => fleet.jobs.filter((j) => j.kind === kind && j.status === status).length;
+      const funnel = `Funnel: scouts ${ofKind('scout', 'done')} done, ${ofKind('scout', 'failed')} failed, ${ofKind('scout', 'skipped')} skipped; leads ${leadsSeen}; readers ${ofKind('extract', 'done')} done, ${extractEmpty} with no posting, ${ofKind('extract', 'failed')} failed, ${ofKind('extract', 'skipped')} skipped; duplicate leads ${duplicateLeads}; no link ${noUrl}; already turned down ${alreadyRejected}; sent to review ${found.size}.`;
+      log('Worker fleet', funnel, found.size ? 'good' : 'bad');
+      console.log(`[agents] ${funnel}`);
+      const failedJobs = fleet.jobs.filter((j) => j.status === 'failed').map((j) => `${j.kind}: ${j.result ?? 'failed'}`);
+      const skippedJobs = fleet.jobs.filter((j) => j.status === 'skipped').map((j) => `${j.kind}: ${j.result ?? 'skipped'}`);
+      if (failedJobs.length) {
+        const line = `Failed jobs: ${reasonTally(failedJobs)}`;
+        log('Worker fleet', line, 'bad');
+        console.log(`[agents] ${line}`);
+      }
+      if (skippedJobs.length) {
+        const line = `Skipped jobs: ${reasonTally(skippedJobs)}`;
+        log('Worker fleet', line);
+        console.log(`[agents] ${line}`);
+      }
 
       // 3. Waiting for the reviews and deadline finders still running -------------------
       while (working.length) await Promise.all(working.splice(0));
@@ -1422,6 +1541,18 @@ export class AgentSystem {
       run.stats.added = this.newIds.size;
       this.emitRun();
       log('Validation agents', `Reviewed all ${run.validations.length} postings, ${REVIEWERS.length} reviews each, as they came in: kept ${kept.length}, rejected ${run.stats.rejected}`, 'good');
+      const rejectedWhy = run.validations.filter((v) => v.status === 'rejected').map((v) => v.reason ?? '');
+      const unfinished = run.validations.flatMap((v) => v.reviews.filter((r) => r.reason?.startsWith('Could not be reviewed')).map((r) => r.reason ?? ''));
+      if (rejectedWhy.length) {
+        const line = `Rejected because: ${reasonTally(rejectedWhy)}`;
+        log('Validation agents', line, 'bad');
+        console.log(`[agents] ${line}`);
+      }
+      if (unfinished.length) {
+        const line = `Reviews that did not finish: ${reasonTally(unfinished)}`;
+        log('Validation agents', line, 'bad');
+        console.log(`[agents] ${line}`);
+      }
       if (finder && pictured) log('Worker fleet', `Found pictures for ${pictured} postings.`, 'good');
       if (undated) log('Worker fleet', `${undated} postings stated no deadline on the organizer's pages. Other listings gave one for ${filled}; the rest stay marked unknown.`, filled ? 'good' : 'info');
 

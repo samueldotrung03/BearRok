@@ -304,6 +304,8 @@ export function mergeAnswer(out: Answer, own: SearchResult[]): SearchAnswer {
     from.set(kept, i + 1);
     results.push(kept);
   }
+  const dropped = out.results.length - results.length;
+  if (dropped > 0) console.info(`[search] kept ${results.length} of ${out.results.length} model results (${dropped} dropped: weak own match under 50, duplicate, or no http link)`);
   results.sort((a, b) => b.score - a.score);
   // The answer cites the model's list by position; results were dropped and re-sorted since, so
   // each [n] is renumbered to where that result now is, and one citing a dropped result is removed.

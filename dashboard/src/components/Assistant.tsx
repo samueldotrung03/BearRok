@@ -1,11 +1,12 @@
 // "Ask BearRok": one assistant on every page. A button in the corner (or its shortcut) opens a
 // small chat that answers from the student's own data and offers the next action as a button.
 import { ArrowUp, Sparkles, X } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { opportunities } from '../data/sample.ts';
+import { postingPool } from '../lib/calendar.ts';
 import { matchesShortcut, useShortcuts } from '../lib/shortcuts.ts';
 import { respond, suggestionsFor, type AssistantAction, type AssistantReply } from '../lib/assistant.ts';
+import { useLive } from '../state/live.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import type { Opportunity } from '../types.ts';
 import { Details } from './OpportunityCard.tsx';
@@ -19,6 +20,8 @@ type Turn = { from: 'student'; text: string } | { from: 'assistant'; reply: Assi
 
 export function Assistant() {
   const { state, dispatch } = useStore();
+  const live = useLive();
+  const pool = useMemo(() => postingPool(live.sample, live.opportunities, live.savedCards), [live.sample, live.opportunities, live.savedCards]);
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -70,7 +73,7 @@ export function Assistant() {
     setThinking(true);
     // A short pause so the answer reads as a reply rather than a flash.
     timer.current = window.setTimeout(() => {
-      setThread((current) => [...current, { from: 'assistant', reply: respond(text, state), done: [] }]);
+      setThread((current) => [...current, { from: 'assistant', reply: respond(text, state, Date.now(), pool), done: [] }]);
       setThinking(false);
     }, 450);
   };
@@ -83,7 +86,7 @@ export function Assistant() {
 
   const run = (turn: number, action: AssistantAction) => {
     if (action.dispatch) dispatch(action.dispatch);
-    if (action.open) setDetails(opportunities.find((o) => o.id === action.open) ?? null);
+    if (action.open) setDetails(pool.find((o) => o.id === action.open) ?? null);
     if (action.to) navigate(action.to);
     // Store changes are marked done so the same button is not pressed twice by mistake.
     if (action.dispatch) {

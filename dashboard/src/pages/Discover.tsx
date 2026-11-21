@@ -14,14 +14,15 @@ import { Details } from '../components/OpportunityCard.tsx';
 import { Page } from '../components/Page.tsx';
 import { pathExtras, quizQuestions } from '../data/discover-extra.ts';
 import { pathGroups } from '../data/fields.ts';
-import { careerPaths, opportunities } from '../data/sample.ts';
+import { careerPaths, opportunities as sampleOpportunities } from '../data/sample.ts';
 import type { AnswerAction } from '../lib/discover/ask.ts';
 import { askerId, slugFor, useCareerGuide, useGuideList, type StudentContext } from '../lib/discover/guide.ts';
-import { SAMPLE_FEED } from '../state/live.tsx';
 import { rankPaths, type PathMatch, type QuizAnswers } from '../lib/discover/match.ts';
 import { currentRoadmap } from '../lib/roadmap.ts';
 import { useLocal } from '../lib/useLocal.ts';
 import { useAuth } from '../auth/AuthProvider.tsx';
+import { withCareerInterest } from '../lib/discover/careerMemory.ts';
+import { SAMPLE_FEED, useLive } from '../state/live.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import '../styles/discover.css';
 
@@ -50,6 +51,9 @@ export function Discover() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const auth = useAuth();
+  const live = useLive();
+  // The quiz and its details use the student's postings. The sample set is only the public showcase.
+  const cards = live.sample ? sampleOpportunities : live.opportunities;
   const by = useMemo(() => askerId(auth.user?.uid), [auth.user?.uid]);
   // What the agents may know about the student when they add to a part for them; their notes come first.
   const student: StudentContext = useMemo(
@@ -75,14 +79,14 @@ export function Discover() {
         paths: careerPaths,
         extras: pathExtras,
         roadmaps: orderedRoadmaps,
-        opportunities,
+        opportunities: cards,
         questions: quizQuestions,
         answers,
         profile: state.profile,
         history,
         doneSteps: state.doneSteps,
       }),
-    [answers, state.profile, history, state.doneSteps],
+    [answers, state.profile, history, state.doneSteps, cards],
   );
 
   // Quick picks: the goal, the best matches for this student, then guides already researched.
@@ -129,6 +133,15 @@ export function Discover() {
     if (clean.length < 2) return;
     setDraft(clean);
     setFinderOpen(false);
+    // The career the student typed is what the opportunity agents search for next. The public
+    // showcase has no agents, so it does not write one.
+    if (!SAMPLE_FEED) {
+      const next = withCareerInterest(state.profile.careerInterests, clean);
+      if (next) {
+        dispatch({ type: 'setProfile', profile: { careerInterests: next } });
+        void auth.saveProfile({ careerInterests: next });
+      }
+    }
     if (slugFor(clean) === slugFor(career ?? '')) retry();
     else setCareer(clean);
     requestAnimationFrame(() => guideRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' }));
@@ -166,7 +179,7 @@ export function Discover() {
 
   const goal = careerPaths.find((p) => p.id === state.goalId);
   const guidePath = guide ? pathBySlug[slugFor(guide.title)] ?? pathBySlug[guide.slug] : undefined;
-  const details = openOpportunity ? opportunities.find((o) => o.id === openOpportunity) : undefined;
+  const details = openOpportunity ? cards.find((o) => o.id === openOpportunity) : undefined;
 
   return (
     <Page

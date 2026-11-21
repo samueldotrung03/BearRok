@@ -3,7 +3,8 @@
 // notifications on in Settings and the system allowed them; it never asks for permission itself.
 import { useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { calendarItems } from '../lib/calendar.ts';
+import { calendarItems, postingPool } from '../lib/calendar.ts';
+import { useLive } from '../state/live.tsx';
 import { loadSent, notifyEnabled, notifyPermission, NOTIFY_CHANGED, saveSent, ENABLED_KEY, showNotification } from '../lib/notify/browser.ts';
 import { dueNotifications } from '../lib/notify/plan.ts';
 import { useStore } from '../state/StoreProvider.tsx';
@@ -13,8 +14,10 @@ const CHECK_EVERY = 5 * 60_000;
 
 export function DeadlineNotifier() {
   const { state } = useStore();
+  const live = useLive();
   const navigate = useNavigate();
-  const items = useMemo(() => calendarItems(state), [state]);
+  const pool = useMemo(() => postingPool(live.sample, live.opportunities, live.savedCards), [live.sample, live.opportunities, live.savedCards]);
+  const items = useMemo(() => calendarItems(state, Date.now(), pool), [state, pool]);
 
   const check = useCallback(() => {
     if (!notifyEnabled() || notifyPermission() !== 'granted') return;

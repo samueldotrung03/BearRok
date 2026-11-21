@@ -258,6 +258,7 @@ export class AgentSystem {
   private abort: AbortController | null = null;
   private queued: Trigger | null = null;
   private listeners = new Set<Listener>();
+  private observers = new Set<Listener>();
   private profileTimer: NodeJS.Timeout | null = null;
   private scheduleTimer: NodeJS.Timeout | null = null;
   /** Automode: scheduled times already run (ISO), the check timer, and when the last search ended. */
@@ -281,6 +282,15 @@ export class AgentSystem {
   subscribe(listener: Listener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Watch run updates without counting as an open app: Automode only searches while a window is
+   * connected (appOpen), and an observer such as the activity feed must not change that.
+   */
+  observe(listener: Listener) {
+    this.observers.add(listener);
+    return () => this.observers.delete(listener);
   }
 
   private memory() {
@@ -512,6 +522,7 @@ export class AgentSystem {
     setTimeout(() => {
       this.runDirty = false;
       for (const l of this.listeners) l('run', this.run);
+      for (const l of this.observers) l('run', this.run);
     }, 60);
   }
 
@@ -734,6 +745,7 @@ export class AgentSystem {
     this.autoTimer = null;
     this.agentSettings = { ...this.agentSettings, auto: this.agentSettings.auto ? { ...this.agentSettings.auto, on: false } : undefined };
     this.listeners.clear();
+    this.observers.clear();
   }
 
   /** BearRok is open when its window is connected to this student's agents. */

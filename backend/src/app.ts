@@ -1,6 +1,9 @@
 // HTTP API the dashboard calls. See backend/README.md for the contract.
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { mountActivity } from './activity/api.ts';
+import { FileRunHistory } from './activity/history.ts';
+import { ActivityHub } from './activity/hub.ts';
 import { HttpError, mountAgents, type AgentsOptions } from './agents/api.ts';
 import { mountCareers } from './careers/api.ts';
 import type { CareerGuides } from './careers/guide.ts';
@@ -9,7 +12,8 @@ import { mountDesktopAuth } from './desktopAuth.ts';
 import { Engine, UserError, type Deps, type Mode } from './pipeline.ts';
 import type { Store } from './store/index.ts';
 
-export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: AgentsOptions, careers?: CareerGuides) {
+/** activityFile: where run reports are kept; without one they last as long as the process. */
+export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: AgentsOptions, careers?: CareerGuides, extras: { activityFile?: string } = {}) {
   const engine = new Engine(store, deps);
   const app = new Hono();
   app.use('/api/*', cors());
@@ -48,7 +52,19 @@ export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: Agent
   app.get('/api/searches', async (c) => c.json({ searches: await store.listSearches(20) }));
 
   // Each student's memory is kept in the same store, under their account.
-  if (agents) mountAgents(app, { memory: store, ...agents });
+  if (agents) {
+    // The Agents page's live view watches every student's agents from the moment they are made.
+    const hub = new ActivityHub(extras.activityFile ? { history: new FileRunHistory(extras.activityFile) } : {});
+    const { systemOf } = mountAgents(app, {
+      memory: store,
+      ...agents,
+      onSystem: (key, system) => {
+        hub.attach(key, system);
+        agents.onSystem?.(key, system);
+      },
+    });
+    mountActivity(app, hub, systemOf);
+  }
   if (careers) mountCareers(app, careers);
   mountDesktopAuth(app);
 

@@ -51,6 +51,8 @@ export interface AgentsOptions {
   grok?: { connected: boolean; mode: 'api' | 'cli' | 'simulated'; detail: string };
   /** Reads an uploaded résumé into profile fields. Tests pass a stand-in; the server uses Grok or the simulated reader. */
   extractResume?: (text: string) => Promise<ResumeExtraction>;
+  /** Told of each student's agent system as it is made, with the key its memory is kept under. */
+  onSystem?: (key: string, system: AgentSystem) => void;
 }
 
 const ACTIONS: Action[] = ['save', 'like', 'dislike', 'open', 'apply'];
@@ -165,6 +167,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
    * then save again after every change.
    */
   async function remember(key: string, system: AgentSystem): Promise<AgentSystem> {
+    opts.onSystem?.(key, system);
     const memory = opts.memory;
     if (!memory) return system;
     // If the saved memory cannot be read, the student is not given an empty one in its place:
@@ -856,7 +859,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   app.get('/', (c) => c.html(page('index.html')));
   app.get('/console', (c) => c.html(page('console.html')));
 
-  return { HttpError };
+  return { HttpError, systemOf };
 }
 
 export { HttpError };

@@ -1,0 +1,220 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { FileRunHistory, MemoryRunHistory } from '../src/activity/history.ts';
+import { ActivityHub } from '../src/activity/hub.ts';
+import { outlineReport, RunObserver } from '../src/activity/observer.ts';
+import type { LiveActivity, RunReport } from '../src/activity/types.ts';
+import { SimBrain } from '../src/agents/simBrain.ts';
+import { AgentSystem } from '../src/agents/system.ts';
+import type { Assignment, Lead, RunSnapshot } from '../src/agents/types.ts';
+import { createApp } from '../src/app.ts';
+import { LocalStore } from '../src/store/local.ts';
+
+const NOW = new Date('2026-11-18T20:00:00Z');
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** A simulated brain whose first reader times out, as the Grok CLI does. */
+class SlowReaderBrain extends SimBrain {
+  private bad: string | null = null;
+  override async extract(lead: Lead, a: Assignment) {
+    this.bad ??= lead.url;
+    if (lead.url === this.bad) throw new Error('grok CLI timed out after 120s');
+    return super.extract(lead, a);
+  }
+}
+
+const system = (brain = new SimBrain({ speed: 0, now: () => NOW })) => new AgentSystem(brain, { now: () => NOW, typingPauseMs: 300, feedTarget: 0 });
+
+function snapshot(over: Partial<RunSnapshot> = {}): RunSnapshot {
+  return {
+    id: 'run-1', number: 1, trigger: 'manual', mode: 'simulated', status: 'running', startedAt: NOW.toISOString(), finishedAt: null,
+    brief: null, assignments: [], log: [{ seq: 1, at: NOW.toISOString(), agent: 'System', text: 'Run requested by hand', tone: 'info' }],
+    agents: [
+      { id: 'master', level: 'master', name: 'Master agent', role: 'Reads the profile', status: 'done', detail: 'Brief written' },
+      { id: 'manager-1', level: 'manager', name: 'Internships manager', role: 'Internships, everything', status: 'running', detail: 'Planning' },
+    ],
+    jobs: [
+      { id: 'job-1', kind: 'scout', managerId: 'manager-1', label: 'Search: CS internships', status: 'done', result: '4 leads', attempts: 1 },
+      { id: 'job-2', kind: 'extract', managerId: 'manager-1', label: 'Read: Data Science Society', status: 'running', result: null, attempts: 1 },
+      { id: 'job-3', kind: 'extract', managerId: 'manager-1', label: 'Read: CSUA', status: 'failed', result: 'grok CLI timed out after 120s', attempts: 2 },
+      { id: 'job-4', kind: 'extract', managerId: 'manager-1', label: 'Read: CS Mentors', status: 'skipped', result: 'manager budget reached', attempts: 0 },
+      { id: 'job-5', kind: 'image', managerId: 'Internships manager', label: 'Picture: DSS', status: 'queued', result: null, attempts: 0 },
+    ],
+    validations: [
+      {
+        id: 'opp-1', title: 'Data Science Society', managerId: 'manager-1', status: 'checking', reason: null, fit: null,
+        reviews: [
+          { focus: 'criteria', reviewer: 'Criteria reviewer', status: 'kept', reason: 'Fits CS and data', fit: 0.8 },
+          { focus: 'status', reviewer: 'Status reviewer', status: 'rejected', reason: 'Could not be reviewed: grok CLI timed out after 90s', fit: null },
+        ],
+      },
+    ],
+    stats: { jobs: 4, skipped: 1, candidates: 1, merged: 0, kept: 0, rejected: 0, added: 0 },
+    error: null,
+    ...over,
+  } as RunSnapshot;
+}
+
+test('activity: every agent of a snapshot by level, with timeouts told apart from failures', () => {
+  const { live } = new RunObserver(() => NOW).update(snapshot());
+  const by = (id: string) => live.agents.find((a) => a.id === id)!;
+  assert.deepEqual(live.agents.map((a) => a.level), ['master', 'manager', 'worker', 'worker', 'worker', 'worker', 'worker', 'validation', 'validation']);
+  assert.equal(by('job:job-3').status, 'timed_out');
+  assert.equal(by('job:job-4').status, 'skipped');
+  assert.equal(by('job:job-4').detail, 'manager budget reached');
+  assert.equal(by('job:job-2').kind, 'reader');
+  // A job that names its manager by display name is still grouped under it.
+  assert.equal(by('job:job-5').managerId, 'manager-1');
+  assert.equal(by('review:opp-1:criteria').verdict, 'kept');
+  assert.equal(by('review:opp-1:criteria').status, 'done');
+  // A review that could not run is the reviewer failing, not a verdict.
+  assert.equal(by('review:opp-1:status').status, 'timed_out');
+  assert.equal(by('review:opp-1:status').verdict, null);
+  assert.equal(by('review:opp-1:status').target, 'Data Science Society');
+  assert.equal(live.run?.request, 'Run requested by hand');
+  assert.equal(live.counts.timed_out, 2);
+  assert.deepEqual(live.flows.map((f) => [f.from, f.to, f.count, f.active]), [
+    ['master', 'manager', 1, true],
+    ['manager', 'worker', 4, true],
+    ['worker', 'validation', 1, false],
+    ['validation', 'presentation', 0, false],
+  ]);
+});
+
+test('activity: timing is stamped when an agent is first seen in each status', () => {
+  let now = NOW.getTime();
+  const observer = new RunObserver(() => new Date(now));
+  const first = observer.update(snapshot()).live;
+  const reader = () => first.agents.find((a) => a.id === 'job:job-2')!;
+  assert.equal(reader().startedAt, NOW.toISOString());
+  assert.equal(reader().finishedAt, null);
+  assert.equal(first.agents.find((a) => a.id === 'job:job-5')!.startedAt, null);
+  assert.ok(first.changed.includes('job:job-2'));
+
+  now += 5_000;
+  const run = snapshot();
+  run.jobs[1] = { ...run.jobs[1]!, status: 'done', result: 'Data Science Society' };
+  const next = observer.update(run).live;
+  const done = next.agents.find((a) => a.id === 'job:job-2')!;
+  assert.equal(done.startedAt, NOW.toISOString());
+  assert.equal(done.finishedAt, new Date(now).toISOString());
+  assert.deepEqual(next.changed, ['job:job-2']);
+
+  // A run that ended: work still waiting never ran.
+  const ended = observer.update(snapshot({ status: 'stopped', finishedAt: new Date(now).toISOString() })).live;
+  assert.equal(ended.agents.find((a) => a.id === 'job:job-5')!.status, 'skipped');
+  assert.equal(ended.run?.outcome, 'stopped');
+  assert.ok(ended.flows.every((f) => !f.active));
+});
+
+test('history: newest first, at most 10 runs per student', () => {
+  const history = new MemoryRunHistory();
+  for (let i = 1; i <= 12; i++) history.add('s', outlineReport({ number: i, trigger: 'fill', status: 'complete', startedAt: new Date(NOW.getTime() + i * 60_000).toISOString(), finishedAt: null, stats: { jobs: 1, skipped: 0, candidates: 0, merged: 0, kept: 0, rejected: 0, added: 0 } }));
+  assert.deepEqual(history.list('s').map((r) => r.number), [12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
+  assert.deepEqual(history.list('other'), []);
+});
+
+test('history: reports survive a restart in their file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bearrok-activity-'));
+  try {
+    const file = join(dir, 'agent-activity.json');
+    new FileRunHistory(file).add('guest:demo', outlineReport({ number: 3, trigger: 'manual', status: 'failed', startedAt: NOW.toISOString(), finishedAt: NOW.toISOString(), stats: { jobs: 0, skipped: 0, candidates: 0, merged: 0, kept: 0, rejected: 0, added: 0 } }));
+    const again = new FileRunHistory(file).list('guest:demo');
+    assert.equal(again.length, 1);
+    assert.equal(again[0]!.outcome, 'failed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('hub: watching the agents does not count as the app being open', () => {
+  const s = system();
+  new ActivityHub().attach('k', s);
+  assert.equal((s as unknown as { listeners: Set<unknown> }).listeners.size, 0);
+});
+
+test('hub: runs recorded before reports were kept show as outlines', async () => {
+  const s = system();
+  const memory = s.memorySnapshot();
+  memory.learned.runs = [{ number: 1, trigger: 'first', status: 'complete', startedAt: NOW.toISOString(), finishedAt: new Date(NOW.getTime() + 268_000).toISOString(), stats: { jobs: 24, skipped: 13, candidates: 0, merged: 1, kept: 0, rejected: 0, added: 0 } }];
+  s.restore(memory);
+  const hub = new ActivityHub();
+  hub.attach('k', s);
+  const [r] = hub.reports(s);
+  assert.equal(r!.outlineOnly, true);
+  assert.equal(r!.durationMs, 268_000);
+  assert.equal(r!.skipped.count, 13);
+  assert.equal(r!.results.found, 0);
+  assert.equal(hub.live(s).run, null);
+});
+
+test('api: a simulated run shows live by level, then lands in the history with its report', async () => {
+  const s = system(new SlowReaderBrain({ speed: 0, now: () => NOW }));
+  const { app } = createApp(new LocalStore(null), {}, { demo: s });
+  const empty = (await (await app.request('/api/students/demo/activity')).json()) as { live: LiveActivity; history: RunReport[] };
+  assert.equal(empty.live.run, null);
+  assert.deepEqual(empty.history, []);
+
+  await s.trigger('manual');
+  await s.idle();
+  await sleep(400);
+  const body = (await (await app.request('/api/students/demo/activity')).json()) as { live: LiveActivity; history: RunReport[] };
+  const run = s.currentRun()!;
+  assert.equal(body.live.run?.id, run.id);
+  assert.equal(body.live.run?.outcome, 'partly_failed');
+  for (const level of ['master', 'manager', 'worker', 'validation', 'presentation']) assert.ok(body.live.agents.some((a) => a.level === level), level);
+  assert.ok(body.live.agents.some((a) => a.status === 'timed_out' && a.detail === 'grok CLI timed out after 120s'));
+  assert.ok(body.live.agents.every((a) => a.status !== 'running' && a.status !== 'queued'));
+  assert.ok(body.live.agents.filter((a) => a.status === 'done').every((a) => a.startedAt && a.finishedAt));
+
+  assert.equal(body.history.length, 1);
+  const report = body.history[0]!;
+  assert.equal(report.number, run.number);
+  assert.equal(report.outlineOnly, false);
+  assert.equal(report.request, run.brief?.goal);
+  assert.deepEqual(report.results, { found: run.stats.candidates || run.validations.length, validated: run.stats.kept, rejected: run.stats.rejected, saved: run.stats.added });
+  assert.equal(report.failures?.reasons[0]?.reason, 'grok CLI timed out after 120s');
+  assert.equal(report.outcomes[0]?.status, 'timed_out');
+  assert.equal(report.agents?.byLevel.master, 1);
+  assert.ok((report.durationMs ?? -1) >= 0);
+});
+
+test('api: the stream sends the activity and the history, then every change and the new report', async () => {
+  // Slow enough that agents are seen running between messages.
+  const s = system(new SimBrain({ speed: 40, now: () => NOW }));
+  const { app } = createApp(new LocalStore(null), {}, { demo: s });
+  const controller = new AbortController();
+  const res = await app.request('/api/students/demo/activity/stream', { signal: controller.signal });
+  assert.equal(res.headers.get('content-type'), 'text/event-stream');
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  const until = async (pattern: RegExp, ms = 3000) => {
+    const end = Date.now() + ms;
+    while (!pattern.test(text) && Date.now() < end) {
+      const chunk = await Promise.race([reader.read(), sleep(end - Date.now()).then(() => null)]);
+      if (!chunk || chunk.done) break;
+      text += decoder.decode(chunk.value);
+    }
+    return pattern.test(text);
+  };
+  try {
+  assert.ok(await until(/event: activity[\s\S]*event: history/), 'first activity and history');
+  // Opening the activity stream never starts a run by itself.
+  await sleep(1200);
+  assert.equal(s.currentRun(), null);
+  const before = (text.match(/event: activity/g) ?? []).length;
+  void s.trigger('manual');
+  assert.ok(await until(/"status":"running"/, 8000), 'running agents arrive');
+  assert.ok(await until(/event: history\ndata: \[\{/), 'the report arrives when the run ends');
+  assert.ok((text.match(/event: activity/g) ?? []).length > before);
+  } finally {
+    controller.abort();
+    await reader.cancel().catch(() => {});
+    s.stop();
+    await s.idle();
+  }
+});

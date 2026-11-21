@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { GrokBrain } from './agents/grokBrain.ts';
 import { ImageFinder } from './agents/images.ts';
@@ -63,7 +64,7 @@ const { app } = createApp(store, {}, {
     : config.grokTransport === 'cli'
       ? { connected: true, mode: 'cli', detail: 'Through the Grok app on this computer, on its Grok subscription.' }
       : { connected: true, mode: 'api', detail: `Through the xAI API (${config.xaiModels.normal} and ${config.xaiModels.low}).` },
-}, careers);
+}, careers, { activityFile: process.env.ACTIVITY_FILE ?? join(dirname(config.localDataFile), 'agent-activity.json') });
 
 serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
   console.log(`backend listening on http://localhost:${port}`);

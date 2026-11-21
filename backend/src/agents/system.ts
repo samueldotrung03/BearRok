@@ -49,6 +49,7 @@ import {
   type Unknown,
   type Validation,
   type Verdict,
+  type ReasonCount,
 } from './types.ts';
 
 export interface SystemOptions {
@@ -219,6 +220,16 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function unusableReview(reason: string | null | undefined): boolean {
   const text = (reason ?? '').trim().toLowerCase();
   return text === '' || text === 'placeholder' || text === 'null' || text === 'n/a' || text === 'none';
+}
+
+/** The most common reasons, most frequent first. */
+function reasonCounts(lines: string[], limit = 8): ReasonCount[] {
+  const map = new Map<string, number>();
+  for (const line of lines) {
+    const key = line.replace(/\s+/g, ' ').trim().slice(0, 160) || '(no reason)';
+    map.set(key, (map.get(key) ?? 0) + 1);
+  }
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([reason, count]) => ({ reason, count }));
 }
 
 function reasonTally(lines: string[]): string {
@@ -1520,6 +1531,27 @@ export class AgentSystem {
       const ofKind = (kind: string, status: string) => fleet.jobs.filter((j) => j.kind === kind && j.status === status).length;
       const funnel = `Funnel: scouts ${ofKind('scout', 'done')} done, ${ofKind('scout', 'failed')} failed, ${ofKind('scout', 'skipped')} skipped; leads ${leadsSeen}; readers ${ofKind('extract', 'done')} done, ${extractEmpty} with no posting, ${ofKind('extract', 'failed')} failed, ${ofKind('extract', 'skipped')} skipped; duplicate leads ${duplicateLeads}; no link ${noUrl}; already turned down ${alreadyRejected}; sent to review ${found.size}.`;
       log('Worker fleet', funnel, found.size ? 'good' : 'bad');
+      run.stats.funnel = {
+        jobs: fleet.started,
+        scouts: { done: ofKind('scout', 'done'), failed: ofKind('scout', 'failed'), skipped: ofKind('scout', 'skipped') },
+        leads: leadsSeen,
+        duplicates: duplicateLeads,
+        readers: {
+          done: ofKind('extract', 'done'),
+          empty: extractEmpty,
+          failed: ofKind('extract', 'failed'),
+          skipped: ofKind('extract', 'skipped'),
+          skippedReasons: reasonCounts(fleet.jobs.filter((j) => j.kind === 'extract' && j.status === 'skipped').map((j) => j.result ?? 'skipped')),
+        },
+        noLink: noUrl,
+        alreadyRejected,
+        reviewed: found.size,
+        rejected: run.stats.rejected,
+        rejectedReasons: [],
+        unfinishedReviews: 0,
+        kept: kept.length,
+        saved: this.newIds.size,
+      };
       console.log(`[agents] ${funnel}`);
       const failedJobs = fleet.jobs.filter((j) => j.status === 'failed').map((j) => `${j.kind}: ${j.result ?? 'failed'}`);
       const skippedJobs = fleet.jobs.filter((j) => j.status === 'skipped').map((j) => `${j.kind}: ${j.result ?? 'skipped'}`);
@@ -1543,6 +1575,7 @@ export class AgentSystem {
       log('Validation agents', `Reviewed all ${run.validations.length} postings, ${REVIEWERS.length} reviews each, as they came in: kept ${kept.length}, rejected ${run.stats.rejected}`, 'good');
       const rejectedWhy = run.validations.filter((v) => v.status === 'rejected').map((v) => v.reason ?? '');
       const unfinished = run.validations.flatMap((v) => v.reviews.filter((r) => r.reason?.startsWith('Could not be reviewed')).map((r) => r.reason ?? ''));
+      if (run.stats.funnel) Object.assign(run.stats.funnel, { rejected: run.stats.rejected, rejectedReasons: reasonCounts(rejectedWhy), unfinishedReviews: unfinished.length, kept: kept.length, saved: this.newIds.size });
       if (rejectedWhy.length) {
         const line = `Rejected because: ${reasonTally(rejectedWhy)}`;
         log('Validation agents', line, 'bad');
@@ -1579,6 +1612,7 @@ export class AgentSystem {
       }
       const shown = this.student().feed.length;
       set(presenter, { status: 'done', detail: `Feed updated: ${this.newIds.size} new, ${shown} in the feed.` });
+      if (run.stats.funnel) run.stats.funnel.saved = this.newIds.size;
       log('Presentation manager', `Feed updated: ${this.newIds.size} new opportunities, ${shown} in the feed`, 'good');
 
       run.status = 'complete';

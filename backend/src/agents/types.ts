@@ -282,8 +282,40 @@ export interface RunSnapshot {
   jobs: Job[];
   validations: Validation[];
   log: LogEvent[];
-  stats: { jobs: number; skipped: number; candidates: number; merged: number; kept: number; rejected: number; added: number };
+  stats: { jobs: number; skipped: number; candidates: number; merged: number; kept: number; rejected: number; added: number; funnel?: RunFunnel };
   error: string | null;
+}
+
+export interface ReasonCount {
+  reason: string;
+  count: number;
+}
+
+/**
+ * Where postings dropped between search and feed, stage by stage. Written when the worker fleet
+ * finishes and completed once every review is in. Runs saved before it existed have none.
+ */
+export interface RunFunnel {
+  /** Jobs the fleet started (scouts, readers and the rest). */
+  jobs: number;
+  scouts: { done: number; failed: number; skipped: number };
+  /** Leads the scouts brought back, and how many another worker already had. */
+  leads: number;
+  duplicates: number;
+  readers: { done: number; empty: number; failed: number; skipped: number; skippedReasons: ReasonCount[] };
+  /** Readers' postings with no usable official link. */
+  noLink: number;
+  /** Postings turned down in an earlier run, not checked again. */
+  alreadyRejected: number;
+  /** Postings sent to the validation agents. */
+  reviewed: number;
+  rejected: number;
+  rejectedReasons: ReasonCount[];
+  /** Reviews that could not run (the posting is reviewed again next time). */
+  unfinishedReviews: number;
+  kept: number;
+  /** New in the feed. */
+  saved: number;
 }
 
 export interface ScoreParts {

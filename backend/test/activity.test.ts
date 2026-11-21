@@ -255,12 +255,26 @@ test('activity: a run that fails gives the failed agent the run error, in words'
   assert.equal(report.error, plain);
 });
 
-test('activity: a report carries the fleet funnel line when the run logged one', () => {
-  const funnel = 'Funnel: scouts 4 done, 0 failed, 0 skipped; leads 16; readers 6 done, 2 with no posting, 1 failed, 3 skipped; duplicate leads 2; no link 1; already turned down 0; sent to review 3.';
-  const done = (log: RunSnapshot['log']) => snapshot({ status: 'complete', finishedAt: NOW.toISOString(), log });
-  const base = snapshot().log;
-  const withFunnel = done([...base, { seq: 2, at: NOW.toISOString(), agent: 'Worker fleet', text: funnel, tone: 'good' }]);
-  assert.equal(reportOf(withFunnel, new RunObserver(() => NOW).update(withFunnel).agents).funnel, funnel.slice('Funnel: '.length));
-  const without = done(base);
-  assert.equal(reportOf(without, new RunObserver(() => NOW).update(without).agents).funnel, null);
+test('activity: a finished run counts where postings dropped, stage by stage, and its report carries it', async () => {
+  const s = system();
+  await s.trigger('manual');
+  await s.idle();
+  const run = s.currentRun()!;
+  const f = run.stats.funnel!;
+  assert.ok(f, 'the run has a funnel');
+  assert.equal(f.reviewed, run.validations.length);
+  assert.equal(f.kept, run.stats.kept);
+  assert.equal(f.rejected, run.stats.rejected);
+  assert.equal(f.saved, run.stats.added);
+  assert.equal(f.jobs, run.stats.jobs);
+  assert.equal(f.scouts.done + f.scouts.failed + f.scouts.skipped, run.jobs.filter((j) => j.kind === 'scout').length);
+  assert.equal(f.readers.done + f.readers.failed + f.readers.skipped, run.jobs.filter((j) => j.kind === 'extract').length);
+  assert.equal(f.readers.skippedReasons.reduce((n, r) => n + r.count, 0), f.readers.skipped);
+  assert.equal(f.rejectedReasons.reduce((n, r) => n + r.count, 0), f.rejected);
+  // The log line stays for anyone reading the run log.
+  assert.ok(run.log.some((l) => l.text.startsWith('Funnel: ')));
+  const report = reportOf(run, new RunObserver(() => NOW).update(run).agents);
+  assert.deepEqual(report.funnel, f);
+  // Saved with the run's outline, so it survives a restart.
+  assert.deepEqual(outlineReport(s.searchHistory().runs.at(-1)!).funnel, f);
 });

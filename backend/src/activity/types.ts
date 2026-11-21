@@ -1,7 +1,7 @@
 // The read-only activity feed for the Agents page: every agent in the current run with its
 // status and timing, the hand-offs between levels, and a brief report of each past run.
 // dashboard/src/lib/activity/types.ts mirrors these shapes.
-import type { RunSnapshot, Trigger } from '../agents/types.ts';
+import type { RunFunnel, RunSnapshot, Trigger } from '../agents/types.ts';
 
 export type ActivityLevel = 'master' | 'manager' | 'worker' | 'validation' | 'presentation';
 export const LEVELS: ActivityLevel[] = ['master', 'manager', 'worker', 'validation', 'presentation'];
@@ -122,8 +122,8 @@ export interface RunReport {
   outcomes: AgentOutcome[];
   /** True for runs recorded before per-agent reports were kept: only the outline is known. */
   outlineOnly: boolean;
-  /** Where postings dropped between search and review, as the worker fleet logged it. Null when the run did not log it. */
-  funnel?: string | null;
+  /** Where postings dropped, stage by stage. Null for runs from before it was counted. */
+  funnel?: RunFunnel | null;
 }
 
 /** Reports kept per student; the page shows 5 and up to 10 with Show more. */

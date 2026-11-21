@@ -230,6 +230,58 @@ function reasonTally(lines: string[]): string {
   return [...map.entries()].slice(0, 8).map(([k, n]) => `${n}× ${k}`).join('; ') || 'none';
 }
 
+const INTERRUPTED_RUN = 'The backend stopped while this search was still running, so this run is marked stopped.';
+
+/** An outline is all an older save kept. Enough to show the run again, without its agents or log. */
+function snapshotFromRecord(record: RunRecord, mode: RunSnapshot['mode']): RunSnapshot {
+  return {
+    id: `run-${record.number}`,
+    number: record.number,
+    trigger: record.trigger,
+    mode,
+    status: record.status,
+    startedAt: record.startedAt,
+    finishedAt: record.finishedAt,
+    brief: null,
+    agents: [],
+    assignments: [],
+    jobs: [],
+    validations: [],
+    log: [],
+    stats: { ...record.stats },
+    error: null,
+  };
+}
+
+/**
+ * A run still marked running did not finish: the process died. Mark it stopped and settle every
+ * agent, job and review that was still in progress, so a restart does not look like a live search.
+ */
+function stopInterruptedRun(run: RunSnapshot, at: string) {
+  run.status = 'stopped';
+  run.finishedAt = run.finishedAt ?? at;
+  run.error = INTERRUPTED_RUN;
+  for (const agent of run.agents) {
+    if (agent.status === 'running') Object.assign(agent, { status: 'done', detail: 'Stopped because the backend restarted.' });
+  }
+  for (const job of run.jobs) {
+    if (job.status === 'running' || job.status === 'queued') Object.assign(job, { status: 'skipped', result: 'Stopped because the backend restarted.' });
+  }
+  for (const validation of run.validations) {
+    if (validation.status === 'checking') {
+      validation.status = 'rejected';
+      validation.reason = 'Could not be reviewed: the backend stopped while this search was running.';
+    }
+    for (const review of validation.reviews) {
+      if (review.status === 'checking') {
+        review.status = 'rejected';
+        review.reason = 'Could not be reviewed: the backend stopped while this search was running.';
+      }
+    }
+  }
+  run.log.push({ seq: (run.log.at(-1)?.seq ?? 0) + 1, at, agent: 'System', text: run.error, tone: 'bad' });
+}
+
 export class AgentSystem {
   private brain: Brain;
   private opts: SystemOptions;
@@ -470,6 +522,7 @@ export class AgentSystem {
         searches: this.searches,
         pending: [...this.pending.values()],
         runs: this.runs,
+        lastRun: this.run ? structuredClone(this.run) : null,
         applications: [...this.applications.values()],
         runCount: this.runCount,
         autoDone: this.autoDone,
@@ -497,6 +550,7 @@ export class AgentSystem {
     this.searches = structuredClone(l.searches ?? []);
     this.pending = new Map((l.pending ?? []).map((p) => [p.key, structuredClone(p)]));
     this.runs = structuredClone(l.runs ?? []);
+    this.restoreRun(l.lastRun);
     // Applications saved before the portal existed get an empty one.
     this.applications = new Map((l.applications ?? []).map((a) => [a.opportunityId, { ...structuredClone(a), custom: a.custom ?? false, portal: a.portal ? structuredClone(a.portal) : emptyPortal() }]));
     this.runCount = l.runCount ?? this.runs.length;
@@ -507,6 +561,26 @@ export class AgentSystem {
     this.setSchedule(p?.scheduleSeconds ?? 0);
     this.saver = saver;
     this.syncAutoTimer();
+  }
+
+  /**
+   * Put the latest run back. A finished run stays finished. One that was still running when the
+   * process died is marked stopped. An older save has no full snapshot, so the newest outline is used.
+   */
+  private restoreRun(saved: RunSnapshot | null | undefined) {
+    const mode: RunSnapshot['mode'] = this.brain.mode === 'live' ? 'live' : 'simulated';
+    const run = saved ? structuredClone(saved) : this.runs.at(-1) ? snapshotFromRecord(this.runs.at(-1)!, mode) : null;
+    if (!run) {
+      this.run = null;
+      return;
+    }
+    if (run.status === 'running') stopInterruptedRun(run, this.opts.now().toISOString());
+    this.seq = run.log.reduce((max, entry) => Math.max(max, entry.seq), this.seq);
+    this.run = run;
+    const outline: RunRecord = { number: run.number, trigger: run.trigger, status: run.status, startedAt: run.startedAt, finishedAt: run.finishedAt, stats: { ...run.stats } };
+    const existing = this.runs.find((entry) => entry.number === run.number);
+    if (existing) Object.assign(existing, outline);
+    else this.runs.push(outline);
   }
 
   /** What the app has learned, in numbers and recent entries, for a page that shows it. */

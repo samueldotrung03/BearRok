@@ -938,6 +938,64 @@ const until = async (check: () => boolean, ms = 3000) => {
   }
 };
 
+test('restore: a restart brings back the latest run, and one still running is marked stopped', async () => {
+  const s = new AgentSystem(new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0 });
+  await s.trigger('first');
+  const finished = s.currentRun()!;
+  assert.equal(finished.status, 'complete');
+  const saved = JSON.parse(JSON.stringify(s.memorySnapshot()));
+  assert.equal(saved.learned.lastRun.status, 'complete');
+  assert.equal(saved.learned.lastRun.number, finished.number);
+
+  const restarted = new AgentSystem(new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0 });
+  assert.equal(restarted.currentRun(), null);
+  restarted.restore(saved);
+  const back = restarted.currentRun()!;
+  assert.equal(back.number, finished.number);
+  assert.equal(back.status, 'complete');
+  assert.equal(back.stats.kept, finished.stats.kept);
+  assert.ok(back.log.length > 0);
+  assert.ok(back.agents.length > 0);
+
+  // A save from before the full snapshot was stored still has the outline.
+  delete saved.learned.lastRun;
+  const fromOutline = new AgentSystem(new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0 });
+  fromOutline.restore(saved);
+  assert.equal(fromOutline.currentRun()!.number, finished.number);
+  assert.equal(fromOutline.currentRun()!.status, 'complete');
+  assert.equal(fromOutline.currentRun()!.stats.kept, finished.stats.kept);
+
+  // A run saved while it was still going must not come back as running.
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  class Holds extends SimBrain {
+    override async master(input: Parameters<SimBrain['master']>[0]) {
+      await gate;
+      return super.master(input);
+    }
+  }
+  const live = new AgentSystem(new Holds({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0 });
+  const done = live.trigger('first');
+  try {
+    await until(() => live.currentRun()?.agents.some((agent) => agent.status === 'running') === true);
+    const mid = JSON.parse(JSON.stringify(live.memorySnapshot()));
+    assert.equal(mid.learned.lastRun.status, 'running');
+    const next = new AgentSystem(new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0 });
+    next.restore(mid);
+    const stopped = next.currentRun()!;
+    assert.equal(stopped.status, 'stopped');
+    assert.match(stopped.error ?? '', /backend stopped while this search was still running/);
+    assert.equal(stopped.finishedAt, NOW.toISOString());
+    assert.ok(stopped.agents.every((agent) => agent.status !== 'running'));
+    assert.ok(stopped.jobs.every((job) => job.status !== 'running' && job.status !== 'queued'));
+    assert.ok(stopped.validations.every((validation) => validation.status !== 'checking'));
+    assert.equal(next.searchHistory().runs.find((run) => run.number === stopped.number)?.status, 'stopped');
+  } finally {
+    release();
+    await done;
+  }
+});
+
 test('storing: postings reach the feed and the stored memory while other workers are still searching', async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));

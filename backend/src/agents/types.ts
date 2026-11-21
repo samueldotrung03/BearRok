@@ -487,6 +487,11 @@ export interface LearnedMemory {
   /** Postings read but not yet decided by the validation agents when the memory was saved. */
   pending?: PendingPosting[];
   runs: RunRecord[];
+  /**
+   * The full latest run, so a restart can show it again. Memories saved before this field
+   * have only the outlines in `runs`.
+   */
+  lastRun?: RunSnapshot | null;
   applications: Application[];
   runCount: number;
 }

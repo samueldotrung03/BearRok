@@ -1690,7 +1690,9 @@ button.ag-chip-dark:hover {
   --flow: var(--ag-flow-task);
   display: flex;
   flex: 1;
-  min-width: 56px;
+  /* Never narrower than its label: on a narrow board the column title wraps instead of the label
+     running into the next column. */
+  min-width: max-content;
   flex-direction: column;
   align-items: center;
   gap: 4px;

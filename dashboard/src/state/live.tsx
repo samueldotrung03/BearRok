@@ -9,7 +9,7 @@ import { API_URL } from '../auth/firebase.ts';
 import { applicationInfo, coverFor, opportunities as sampleOpportunities } from '../data/sample.ts';
 import { grokFinds } from '../data/grokFinds.ts';
 import type { AgentEvent, AgentNode, ApplicationStatus, Opportunity, OpportunityType } from '../types.ts';
-import { dataBadgeText } from './dataBadge.ts';
+import { dataBadgeText, isOutOfCredit } from './dataBadge.ts';
 import { type FeedOutcome } from './feedCopy.ts';
 import { reactionSends } from './reactions.ts';
 import { sampleRequest } from './sampleBackend.ts';
@@ -151,6 +151,8 @@ interface LiveValue {
   request: (path: string, init?: RequestInit) => Promise<Response>;
   /** The latest agent run, shaped for the Agents page. Null before the first one. */
   agents: LiveAgents | null;
+  /** Why the latest search failed, or null when it did not. */
+  runError: string | null;
   /** The search managers the next search will have. */
   nextManagers: { name: string; role: string }[];
   /** Automode's state, or null when it is off or the backend is not reachable. */
@@ -520,6 +522,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       nextManagers: status === 'connected' ? (student?.nextManagers ?? []) : [],
       auto: status === 'connected' && student?.auto?.on ? student.auto : null,
       searching: status === 'connected' && run?.status === 'running',
+      runError: run?.status === 'failed' ? run.error : null,
       runNow: async (type) => {
         await request('/runs', { method: 'POST', body: JSON.stringify(type ? { type } : {}) }).catch(() => {});
       },
@@ -552,10 +555,11 @@ export function DataBadge() {
     status: live.status,
     usingLive: live.usingLive,
     provider: live.provider,
+    outOfCredit: isOutOfCredit(live.runError),
   });
   return (
     <span className="flex items-center gap-1.5">
-      <span className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-medium text-white backdrop-blur" title={live.status === 'offline' ? 'The agent backend is not reachable.' : undefined}>
+      <span className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-medium text-white backdrop-blur" title={live.status === 'offline' ? 'The agent backend is not reachable.' : isOutOfCredit(live.runError) ? `${live.runError}. Searches fail until the Grok usage balance is topped up.` : undefined}>
         {live.searching && <span className="live-dot size-1.5 rounded-full bg-white" aria-hidden="true" />}
         <span className="sm:hidden">{short}</span>
         <span className="hidden sm:inline">{long}</span>

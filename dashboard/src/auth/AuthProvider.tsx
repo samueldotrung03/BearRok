@@ -33,6 +33,8 @@ interface AuthValue {
   status: AuthStatus;
   user: User | null;
   backend: BackendStatus;
+  /** False only when this backend has sign-in turned off. Null until that is known. */
+  signInEnabled: boolean | null;
   /**
    * In the browser this opens the provider's window. In the desktop app it opens the system browser
    * and waits; abort `signal` to stop waiting.
@@ -103,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [guest, setGuest] = useState(readGuest);
   const [backend, setBackend] = useState<BackendStatus>('checking');
+  const [signInEnabled, setSignInEnabled] = useState<boolean | null>(null);
   const [google, setGoogle] = useState<Record<GoogleService, string | null>>({ account: null, calendar: null, sheets: null });
   // Whether the backend can keep a lasting Google connection (it has an OAuth client).
   const lasting = useRef(false);
@@ -164,6 +167,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Sign-in is on unless this backend says it is off. A failed check stays on, so a guest is not
+  // treated as the local user when the server cannot be asked.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`${API_URL}/api/auth/config`)
+      .then((res) => (res.ok ? (res.json() as Promise<{ enabled?: boolean }>) : { enabled: true }))
+      .then((body) => {
+        if (!cancelled) setSignInEnabled(body.enabled === false ? false : true);
+      })
+      .catch(() => {
+        if (!cancelled) setSignInEnabled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Ask the backend whether it accepts this sign-in.
   useEffect(() => {
     if (!user) return;
@@ -194,6 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status: !ready ? 'loading' : user ? 'signedIn' : guest ? 'guest' : 'signedOut',
       user,
       backend,
+      signInEnabled,
       signInWithProvider: async (provider, remember, signal) => {
         await remembering(remember);
         if (isDesktop) {
@@ -222,11 +243,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       saveProfile: async (profile) => {
         const token = await auth.currentUser?.getIdToken();
-        if (!token) return false;
+        // With sign-in off, the profile is saved on the local demo student. With sign-in on, a
+        // guest must not write that shared student.
+        const local = !token && signInEnabled === false;
+        if (!token && !local) return false;
         try {
-          const res = await fetch(`${API_URL}/api/students/me/profile`, {
+          const res = await fetch(`${API_URL}/api/students/${local ? 'demo' : 'me'}/profile`, {
             method: 'PUT',
-            headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
+            headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
             body: JSON.stringify(profile),
           });
           return res.ok;
@@ -296,7 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       getToken: async () => (auth.currentUser ? auth.currentUser.getIdToken() : null),
     }),
-    [ready, user, guest, backend, google, setGuestFlag, authed, loadLasting],
+    [ready, user, guest, backend, signInEnabled, google, setGuestFlag, authed, loadLasting],
   );
 
   return <AuthContext value={value}>{children}</AuthContext>;

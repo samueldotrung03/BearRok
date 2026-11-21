@@ -7,6 +7,7 @@ import { API_URL } from '../auth/firebase.ts';
 import { ResumeReview } from '../components/resume/ResumeReview.tsx';
 import { experienceKinds, type Experience as ExperienceData, type ExperienceEntry, type Preferences } from '../data/preferences.ts';
 import { readResumeProfile } from '../lib/resume/read.ts';
+import { resumeStudent } from '../lib/resume/student.ts';
 import { snapshotFrom, type ReviewApply, type Snapshot } from '../lib/resume/review.ts';
 import type { ResumeProfile } from '../lib/resume/types.ts';
 import type { Profile } from '../types.ts';
@@ -131,17 +132,20 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
   const prefsRef = useRef(prefs);
   profileRef.current = profile;
   prefsRef.current = prefs;
-  const signedIn = auth.status === 'signedIn';
+  const student = resumeStudent(auth.status, auth.signInEnabled);
   const busy = phase === 'uploading' || phase === 'reading';
+  const bearer = async (): Promise<Record<string, string>> => {
+    const token = await auth.getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
 
   // What the backend already holds for this student.
   useEffect(() => {
-    if (!signedIn) return;
+    if (!student) return;
     let cancelled = false;
     void (async () => {
       try {
-        const token = await auth.getToken();
-        const res = await fetch(`${API_URL}/api/students/me/state`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`${API_URL}/api/students/${student}/state`, { headers: await bearer() });
         if (res.ok && !cancelled) setInfo(((await res.json()) as { student: { resume: ResumeInfo | null } }).student.resume);
       } catch {
         // Backend not reachable: nothing to show yet.
@@ -151,7 +155,7 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signedIn]);
+  }, [student]);
 
   const fail = (message: string) => {
     setError(message);
@@ -162,9 +166,12 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
     setPhase('reading');
     setError(null);
     try {
-      const token = await auth.getToken();
-      if (!token) throw new Error('Sign in to upload a résumé.');
-      const result = await readResumeProfile(API_URL, token);
+      if (!student) throw new Error('Sign in to upload a résumé.');
+      const started = Date.now();
+      const result = await readResumeProfile(API_URL, student, await auth.getToken());
+      // A simulated read returns at once. Keep the reading state up long enough to see it.
+      const remain = 700 - (Date.now() - started);
+      if (remain > 0) await new Promise((resolve) => setTimeout(resolve, remain));
       if (id !== request.current) return;
       const currentProfile = profileRef.current;
       const currentPrefs = prefsRef.current;
@@ -194,10 +201,10 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
     if (file.size === 0) return fail('That file is empty.');
     setPhase('uploading');
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${API_URL}/api/students/me/resume`, {
+      if (!student) return fail('Sign in to upload a résumé.');
+      const res = await fetch(`${API_URL}/api/students/${student}/resume`, {
         method: 'PUT',
-        headers: { 'content-type': type, 'x-file-name': encodeURIComponent(file.name), Authorization: `Bearer ${token}` },
+        headers: { 'content-type': type, 'x-file-name': encodeURIComponent(file.name), ...(await bearer()) },
         body: file,
       });
       const body = (await res.json()) as { resume?: ResumeInfo; error?: string };
@@ -241,8 +248,8 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
   const remove = async () => {
     setError(null);
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${API_URL}/api/students/me/resume`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (!student) return;
+      const res = await fetch(`${API_URL}/api/students/${student}/resume`, { method: 'DELETE', headers: await bearer() });
       if (res.ok) setInfo(null);
       else setError('The résumé could not be removed. Try again.');
     } catch {
@@ -252,8 +259,8 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
 
   const download = async () => {
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${API_URL}/api/students/me/resume`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!student) return;
+      const res = await fetch(`${API_URL}/api/students/${student}/resume`, { headers: await bearer() });
       if (!res.ok) throw new Error();
       const url = URL.createObjectURL(await res.blob());
       Object.assign(document.createElement('a'), { href: url, download: info?.name ?? 'resume' }).click();
@@ -267,10 +274,11 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
     <section className="pb-7">
       <h3 className="text-[17px] font-semibold tracking-tight">Résumé</h3>
       <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink-2">Your agents read it to judge fit. You confirm each part before it is added to your profile. Optional.</p>
-      <input ref={picker} type="file" accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => void upload(e.target.files?.[0])} />
 
-      {!signedIn ? (
-        <p className="mt-4 rounded-2xl border border-dashed border-slate-300 px-5 py-6 text-sm text-ink-2">Sign in to upload a résumé. It is kept with your account and only your agents read it.</p>
+      {!student ? (
+        auth.signInEnabled === null ? null : (
+          <p className="mt-4 rounded-2xl border border-dashed border-slate-300 px-5 py-6 text-sm text-ink-2">Sign in to upload a résumé. It is kept with your account and only your agents read it.</p>
+        )
       ) : phase === 'reading' ? (
         <div className="rr-status" role="status">
           <span className="rr-spinner" aria-hidden="true" />
@@ -298,6 +306,7 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <input ref={picker} type="file" accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="sr-only" tabIndex={-1} onChange={(e) => void upload(e.target.files?.[0])} />
             <button type="button" onClick={() => void download()} className={quietButton}>
               Download
             </button>
@@ -311,10 +320,7 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => picker.current?.click()}
+        <label
           onDragOver={(e) => {
             e.preventDefault();
             setOver(true);
@@ -325,12 +331,13 @@ function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferen
             setOver(false);
             void upload(e.dataTransfer.files[0]);
           }}
-          className={`mt-4 flex w-full flex-col items-center rounded-2xl border border-dashed px-5 py-8 text-center transition ${over ? 'border-brand bg-brand-soft' : 'border-slate-300 hover:border-brand hover:bg-brand-soft/60'}`}
+          className={`relative mt-4 flex w-full cursor-pointer flex-col items-center rounded-2xl border border-dashed px-5 py-8 text-center transition ${over ? 'border-brand bg-brand-soft' : 'border-slate-300 hover:border-brand hover:bg-brand-soft/60'} ${busy ? 'pointer-events-none opacity-60' : ''}`}
         >
+          <input ref={picker} type="file" accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={busy} aria-label="Upload your résumé" className="absolute inset-0 z-10 cursor-pointer opacity-0" onChange={(e) => void upload(e.target.files?.[0])} />
           <FileArrowUp className="size-8 text-brand" aria-hidden="true" />
           <span className="mt-2 text-[15px] font-semibold text-ink">{phase === 'uploading' ? 'Uploading…' : 'Upload your résumé'}</span>
           <span className="mt-0.5 text-sm text-ink-2">Click to choose a file, or drop it here. PDF, Word, or plain text, up to 5 MB.</span>
-        </button>
+        </label>
       )}
       {phase === 'idle' && error && (
         <div className="mt-3" aria-live="polite">

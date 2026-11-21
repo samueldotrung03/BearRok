@@ -1,5 +1,5 @@
 // HTTP and live-event API for the agent system.
-//   /api/students/demo/...  the shared demo student, open to anyone
+//   /api/students/demo/...  the shared demo student, open to anyone. With sign-in off, this is the local user.
 //   /api/students/me/...    the signed-in student; needs a sign-in token (Google or email and password)
 import { readFileSync } from 'node:fs';
 import type { Context, Hono } from 'hono';
@@ -338,9 +338,13 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
 
   // ---- résumé --------------------------------------------------------------------------
   // The file is sent as the request body, with its type in Content-Type and its name (URL-encoded)
-  // in X-File-Name. Only a signed-in student can upload: the demo student is shared.
+  // in X-File-Name. While sign-in is on, only the signed-in student can upload: the demo student
+  // is shared. While sign-in is off, the demo student is this machine's local user and the résumé
+  // is kept with that student in the same store.
+  const localResume = (id: string) => !enabled && id === 'demo';
   app.put(`${base}/resume`, async (c) => {
-    if (c.req.param('id') !== 'me') return c.json({ error: 'sign in to upload a résumé' }, 403);
+    const id = c.req.param('id');
+    if (id !== 'me' && !localResume(id)) return c.json({ error: 'sign in to upload a résumé' }, 403);
     const system = await systemOf(c);
     const type = (c.req.header('content-type') ?? '').split(';')[0]!.trim();
     if (!RESUME_TYPES.includes(type)) return c.json({ error: 'upload a PDF, a Word document, or a plain text file' }, 415);
@@ -359,14 +363,16 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   });
 
   app.get(`${base}/resume`, async (c) => {
-    if (c.req.param('id') !== 'me') return c.json({ error: 'not found' }, 404);
+    const id = c.req.param('id');
+    if (id !== 'me' && !localResume(id)) return c.json({ error: 'not found' }, 404);
     const resume = (await systemOf(c)).getResume();
     if (!resume) return c.json({ error: 'no résumé uploaded' }, 404);
     return new Response(resume.bytes.slice().buffer, { headers: { 'content-type': resume.type, 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(resume.name)}` } });
   });
 
   app.delete(`${base}/resume`, async (c) => {
-    if (c.req.param('id') !== 'me') return c.json({ error: 'not found' }, 404);
+    const id = c.req.param('id');
+    if (id !== 'me' && !localResume(id)) return c.json({ error: 'not found' }, 404);
     (await systemOf(c)).setResume(null);
     return c.json({ resume: null });
   });
@@ -374,7 +380,8 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   // The file is already stored. This asks Grok (or the simulated reader) for the profile fields in it.
   // Nothing is written onto the profile: the student confirms each part first.
   app.post(`${base}/resume/extract`, async (c) => {
-    if (c.req.param('id') !== 'me') return c.json({ error: 'sign in to upload a résumé' }, 403);
+    const id = c.req.param('id');
+    if (id !== 'me' && !localResume(id)) return c.json({ error: 'sign in to upload a résumé' }, 403);
     const resume = (await systemOf(c)).getResume();
     if (!resume) return c.json({ error: 'No résumé is uploaded yet.' }, 404);
     const text = resume.text?.trim() ?? '';

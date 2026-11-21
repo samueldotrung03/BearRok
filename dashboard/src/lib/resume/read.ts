@@ -8,10 +8,10 @@ export interface ResumeReading {
 }
 
 /** Reads the uploaded résumé. Throws the server's message when the reading fails. */
-export async function readResumeProfile(apiUrl: string, token: string): Promise<ResumeReading> {
-  const res = await fetch(`${apiUrl}/api/students/me/resume/extract`, {
+export async function readResumeProfile(apiUrl: string, student: 'me' | 'demo', token: string | null): Promise<ResumeReading> {
+  const res = await fetch(`${apiUrl}/api/students/${student}/resume/extract`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   const body = (await res.json().catch(() => ({}))) as { extraction?: unknown; provider?: unknown; error?: unknown };
   if (!res.ok || !isResumeProfile(body.extraction)) {

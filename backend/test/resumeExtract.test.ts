@@ -272,3 +272,33 @@ test('extract route: a failed read is an error the page can retry', async () => 
   assert.equal(res.status, 502);
   assert.match((await res.json() as { error: string }).error, /Try again/);
 });
+
+test('sign-in off: the local demo student can upload and extract; sign-in on still refuses that student', async () => {
+  const off = createApp(new LocalStore(null), {}, {
+    demo: new AgentSystem(new SimBrain({ speed: 0 }), {}),
+  }).app;
+  const upload = (app: typeof off, path: string, headers: Record<string, string> = {}) =>
+    app.request(path, { method: 'PUT', headers: { 'content-type': 'text/plain', 'x-file-name': 'resume.txt', ...headers }, body: SAMPLE });
+
+  assert.equal((await upload(off, '/api/students/demo/resume')).status, 200);
+  const extracted = await off.request('/api/students/demo/resume/extract', { method: 'POST' });
+  assert.equal(extracted.status, 200);
+  const body = (await extracted.json()) as { provider: string; extraction: ResumeProfile };
+  assert.equal(body.provider, 'simulated');
+  assert.equal(body.extraction.fullName.value, 'Jordan Hale');
+  const state = (await (await off.request('/api/students/demo/state')).json()) as { student: { profile: { name: string }; resume: { readable: boolean } | null } };
+  assert.equal(state.student.resume?.readable, true);
+  assert.notEqual(state.student.profile.name, 'Jordan');
+  // /me still requires a configured sign-in. The local path is the demo student, not an open /me.
+  assert.equal((await upload(off, '/api/students/me/resume')).status, 503);
+
+  const on = createApp(new LocalStore(null), {}, {
+    demo: new AgentSystem(new SimBrain({ speed: 0 }), {}),
+    webConfig: { apiKey: 'k', projectId: 'p' },
+    verify: async () => ({ uid: 'u1', name: 'Ana', email: null, picture: null, provider: 'google', emailVerified: true }),
+    forUser: () => new AgentSystem(new SimBrain({ speed: 0 }), {}),
+  }).app;
+  assert.equal((await upload(on, '/api/students/demo/resume')).status, 403);
+  assert.equal((await on.request('/api/students/demo/resume/extract', { method: 'POST' })).status, 403);
+  assert.equal((await on.request('/api/students/me/resume/extract', { method: 'POST' })).status, 401);
+});

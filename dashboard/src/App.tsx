@@ -39,16 +39,19 @@ export function App() {
     window.scrollTo(0, 0);
   }, [pathname]);
 
-  const { status, user, continueAsGuest } = useAuth();
+  const { status, user, continueAsGuest, signInEnabled } = useAuth();
   const onAccountPage = accountPages.includes(pathname);
   // On the public web copy (built with VITE_NO_SIGNIN=1) nobody has to sign in to look around: a
-  // visitor with no account goes straight in as a guest. The account pages stay reachable.
-  const enterAsGuest = OPEN_TO_GUESTS && status === 'signedOut' && !onAccountPage;
+  // visitor with no account goes straight in as a guest. The same happens when this backend has
+  // sign-in turned off, so the local user can use the app. The account pages stay reachable.
+  const enterAsGuest = (OPEN_TO_GUESTS || signInEnabled === false) && status === 'signedOut' && !onAccountPage;
   useEffect(() => {
     if (enterAsGuest) continueAsGuest();
   }, [enterAsGuest, continueAsGuest]);
   // Firebase takes a moment to restore a saved sign-in; show nothing rather than flash the wrong page.
   if (status === 'loading') return <div className="window-drag" aria-hidden="true" />;
+  // Wait to learn whether sign-in is on before sending a signed-out visitor to the sign-in page.
+  if (status === 'signedOut' && signInEnabled === null && !onAccountPage) return <div className="window-drag" aria-hidden="true" />;
   // The moment before the guest session starts.
   if (enterAsGuest) return <div className="window-drag" aria-hidden="true" />;
   // The app is for signed-in students, or a guest who chose to look around on sample data.

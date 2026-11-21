@@ -53,6 +53,41 @@ const CandidateSchema = z.object({
 
 const EVIDENCE = `Rules: every fact needs an evidence entry with a short quote copied from the page and that page's URL. If the page does not state something, return null. Never guess a deadline or date. Dates are ISO 8601. sourceUrl is the organizer's own page; actionUrl is where the student applies or registers. field is one lowercase word for the area (software, data, ai, design, security, hardware, bio, finance, product). tags are at most four short labels.`;
 
+/** A reader result that is a real posting, not the empty shape the CLI fills in when a page was not opened. */
+export function readablePosting(record: { title: string; sourceUrl: string }): boolean {
+  const junk = (s: string) => !s.trim() || /^placeholder$/i.test(s.trim());
+  return !junk(record.title) && /^https?:\/\//i.test(record.sourceUrl.trim());
+}
+
+/** The student's request, in the words later agents must see. Notes stay ahead of the rest. */
+export function studentAsk(brief: Brief): string {
+  return [
+    `Student: ${brief.year}, ${brief.location}${brief.remoteOk ? ', remote is fine' : ''}.`,
+    `Goal: ${brief.goal}`,
+    brief.interests.length ? `Interests: ${brief.interests.join(', ')}` : '',
+    brief.preferences.length ? `Preferences: ${brief.preferences.join('; ')}` : '',
+    brief.hardCriteria.length ? `Must meet: ${brief.hardCriteria.join('; ')}` : '',
+    brief.avoid.length ? `Avoid: ${brief.avoid.join('; ')}` : '',
+    brief.notes.length ? `Notes (these override every other line):\n${brief.notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+/**
+ * A page that welcomes undergraduates, all students, or any year includes a freshman.
+ * Reject for year only when the page's own range leaves this student's year out.
+ */
+export const YEAR_FIT = `Class year: the student's year is in the brief. The criterion is met when the page allows that year, or a broader group that includes it (undergraduates, all students, any class year, no year limit). Reject for year only when the page states a range that leaves the student's year out. Do not reject because the page never uses the word for their year. A page that says nothing about who may apply does not fail this criterion.`;
+
+/** Closed or past means reject. Silence, a future deadline, or an ongoing club does not. */
+export const OPEN_FIT = `Still open: keep a posting whose deadline is still ahead, that is still accepting applications, members or registration, or that is an ongoing club or program with no close date (leave an unknown deadline null). Reject only when the organizer's page says it is closed, the deadline has passed, or the page cannot be opened. Do not reject only because the page never uses the word "open".`;
+
+/** The validator's job text. Criteria and status ask for the same JSON shape the parser reads. */
+export function reviewJob(focus: ReviewFocus): string {
+  return focus === 'status'
+    ? `You are the STATUS reviewer. Another agent checks the student's criteria; your only question is whether this is real and open right now. Open the organizer's own page and confirm the posting exists there and that every date and deadline in the record is what the page says. Correct any field the page contradicts. Check the deadline yourself against the page it was read from; if the record has none, look for it as the deadline rules below describe and fill it in. ${OPEN_FIT} Say which in one sentence. Never use the word placeholder as the reason.`
+    : `You are the CRITERIA reviewer. Another agent checks whether the posting is real and open; your only question is whether it is right for this student. Check, in this order: the student's custom notes, then every hard criterion in the brief, then whether it is the kind of thing this student is looking for and not just a keyword match. ${YEAR_FIT} Set keep to false if a note rules it out or if a hard criterion fails on those terms; say which in one sentence. Never use the word placeholder as the reason.`;
+}
+
 /** Said to every agent that reads a posting: how to get the deadline right. */
 const DEADLINE_RULE = `Getting the deadline right matters most, because the student plans around it.
 - deadline is the last moment to apply, register or sign up. It is not the date the event or program starts (that is startTime), not the date the posting was published, and not a decision date.
@@ -134,23 +169,24 @@ Read the notes before the rest of the profile. Put what they ask for at the top 
       model: this.model('workers', TIER.low),
       schema: Out,
       tools: tools(),
-      system: `You are a scout worker. Search the web and return up to 4 leads: real, currently open ${CATEGORY_LABEL[assignment.category].toLowerCase()} that could meet the student's hard criteria. Return only a title and the URL of the posting. Prefer postings the student has not been shown.`,
-      user: `Today is ${today()}.\nSearch: ${spec.query}\nHard criteria: ${brief.hardCriteria.join('; ')}\nAlready shown: ${[...known].slice(0, 30).join(', ') || 'nothing yet'}`,
+      system: `You are a scout worker. Search the web and return up to 4 leads: real, currently open ${CATEGORY_LABEL[assignment.category].toLowerCase()} that match this student's goal, interests and hard criteria. Each lead is a title and the http(s) URL of a real posting or official page. Prefer organizer pages and public listings the student has not been shown. Do not invent URLs.`,
+      user: `Today is ${today()}.\nSearch: ${spec.query}\n${studentAsk(brief)}\nAlready shown: ${[...known].slice(0, 30).join(', ') || 'nothing yet'}`,
     });
     return data.leads.slice(0, 4);
   }
 
-  async extract(lead: { title: string; url: string }, assignment: Assignment): Promise<Candidate | null> {
+  async extract(lead: { title: string; url: string }, assignment: Assignment, brief?: Brief): Promise<Candidate | null> {
     const Out = z.object({ found: z.boolean(), record: CandidateSchema });
     const { data } = await grokJson({
       name: 'extractor',
       model: this.model('workers', TIER.low),
       schema: Out,
       tools: tools(),
-      system: `You are an extractor worker. Open the lead. If it is a repost, follow it to the organizer's own page. Read the details off that page. Set found to false if the page cannot be opened or is not a real posting.\n${EVIDENCE}\n${DEADLINE_RULE}`,
-      user: `Today is ${today()}.\nCategory: ${assignment.category}\nLead: ${lead.title}\nURL: ${lead.url}`,
+      system: `You are an extractor worker. Open the lead. If it is a repost, follow it to the organizer's own page. Read the details off that page. Set found to true only when you opened a real posting and sourceUrl is that page's http(s) URL. Set found to false if the page cannot be opened or is not a real posting; do not fill the record with guesses or the word placeholder.\nThe student context says what they asked for. Still read the posting if it only partly fits; reviewers decide. Do not drop it for a missing field.\n${EVIDENCE}\n${DEADLINE_RULE}`,
+      user: `Today is ${today()}.\nCategory: ${assignment.category}\nLead: ${lead.title}\nURL: ${lead.url}${brief ? `\n${studentAsk(brief)}` : ''}`,
     });
-    return data.found ? data.record : null;
+    if (!data.found || !readablePosting(data.record)) return null;
+    return data.record;
   }
 
   async findDeadline(candidate: Candidate): Promise<FoundDeadline | null> {
@@ -258,10 +294,7 @@ Never invent, paraphrase into new questions, or fill in typical questions for th
   async validate(candidate: Candidate, brief: Brief, memory: MemorySummary, focus: ReviewFocus) {
     const Out = z.object({ keep: z.boolean(), reason: z.string(), fit: z.number(), record: CandidateSchema });
     // Two different agents review every posting. Each has one job, so neither can wave a posting through on the other's ground.
-    const job =
-      focus === 'status'
-        ? `You are the STATUS reviewer. Another agent checks the student's criteria; your only question is whether this is real and open right now. Open the organizer's own page and confirm: the posting exists there, applications or registration are open today, and every date and deadline in the record is what the page says. Correct any field the page contradicts. Check the deadline yourself against the page it was read from; if the record has none, look for it as the deadline rules below describe and fill it in. Set keep to false if it is closed, past, cannot be found on an official page, or if you cannot tell whether it is still open; say which in one sentence.`
-        : `You are the CRITERIA reviewer. Another agent checks whether the posting is real and open; your only question is whether it is right for this student. Check, in this order: the student's custom notes, then every hard criterion in the brief, then whether it is the kind of thing this student is looking for and not just a keyword match. Set keep to false if a note rules it out, if any hard criterion fails, or if the page does not let you confirm a hard criterion such as who may apply; say which in one sentence.`;
+    const job = reviewJob(focus);
     const { data } = await grokJson({
       name: focus === 'status' ? 'status_reviewer' : 'criteria_reviewer',
       model: this.model('validators', TIER.normal),

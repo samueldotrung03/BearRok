@@ -621,6 +621,28 @@ test('validation: a review that cannot be done counts against the posting, and i
   assert.ok(s.student().feed.some((f) => f.opportunity.title === 'Software Engineering Intern'));
 });
 
+test('validation: the word placeholder is not a decision, so the posting is reviewed again', async () => {
+  class Placeholder extends SimBrain {
+    bad = true;
+    override async validate(...args: Parameters<SimBrain['validate']>) {
+      if (this.bad && args[3] === 'status' && args[0].title === 'Software Engineering Intern') {
+        return { keep: false, reason: 'placeholder', fit: 0, record: args[0] };
+      }
+      return super.validate(...args);
+    }
+  }
+  const brain = new Placeholder({ speed: 0, now: () => NOW });
+  const s = new AgentSystem(brain, { now: () => NOW, feedTarget: 0 });
+  await s.trigger('first');
+  const first = s.currentRun()!.validations.find((v) => v.title === 'Software Engineering Intern')!;
+  assert.match(first.reason!, /Status reviewer: Could not be reviewed: empty placeholder review/);
+  assert.ok(!s.memorySnapshot().learned.rejected.some((r) => r.url.includes('software-engineering-intern')));
+  assert.ok(s.currentRun()!.log.some((l) => l.text.startsWith('Funnel:')));
+  brain.bad = false;
+  await s.trigger('manual');
+  assert.ok(s.student().feed.some((f) => f.opportunity.title === 'Software Engineering Intern'));
+});
+
 test('API: a roadmap is written by the model from the request, and refused honestly without one', async () => {
   const { cached, fullEnough, roadmapPrompt, RoadmapRequest } = await import('../src/roadmap.ts');
   const body = {

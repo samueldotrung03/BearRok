@@ -52,7 +52,7 @@ export interface Brain {
   /** Scout worker: search and return leads. */
   scout(spec: ScoutSpec, assignment: Assignment, brief: Brief, known: Set<string>): Promise<Lead[]>;
   /** Extractor worker: open one lead and read the details off the official page. */
-  extract(lead: Lead, assignment: Assignment): Promise<Candidate | null>;
+  extract(lead: Lead, assignment: Assignment, brief?: Brief): Promise<Candidate | null>;
   /** Application reader worker: pull the prompts and required materials. */
   readApplication(candidate: Candidate): Promise<ApplicationInfo>;
   /**

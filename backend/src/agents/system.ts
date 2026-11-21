@@ -141,6 +141,8 @@ export interface StudentState {
 }
 
 type Listener = (event: 'run' | 'student', data: unknown) => void;
+/** An observer also hears when saved memory put a run back, which is not a run update. */
+type Observer = (event: 'run' | 'restored', data: unknown) => void;
 
 const UNKNOWN_DEADLINE: Record<Category, string> = {
   internship: 'Application deadline unknown',
@@ -386,7 +388,7 @@ export class AgentSystem {
   private fatal: BalanceExhaustedError | null = null;
   private queued: Trigger | null = null;
   private listeners = new Set<Listener>();
-  private observers = new Set<Listener>();
+  private observers = new Set<Observer>();
   private profileTimer: NodeJS.Timeout | null = null;
   private scheduleTimer: NodeJS.Timeout | null = null;
   /** Automode: scheduled times already run (ISO), the check timer, and when the last search ended. */
@@ -416,7 +418,7 @@ export class AgentSystem {
    * Watch run updates without counting as an open app: Automode only searches while a window is
    * connected (appOpen), and an observer such as the activity feed must not change that.
    */
-  observe(listener: Listener) {
+  observe(listener: Observer) {
     this.observers.add(listener);
     return () => this.observers.delete(listener);
   }
@@ -635,6 +637,8 @@ export class AgentSystem {
     this.setSchedule(p?.scheduleSeconds ?? 0);
     this.saver = saver;
     this.syncAutoTimer();
+    // Observers attached before the memory was loaded (the activity feed is) start again from the restored run.
+    for (const o of this.observers) o('restored', this.run);
   }
 
   /**

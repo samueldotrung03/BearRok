@@ -54,7 +54,22 @@ export class ActivityHub {
     this.entries.set(system, entry);
     system.observe((event, data) => {
       if (event === 'run') this.onRun(entry, data as RunSnapshot | null);
+      else this.onRestored(entry, data as RunSnapshot | null);
     });
+  }
+
+  /**
+   * Saved memory was loaded after the agents were attached (a restart, or a sign-in): start again
+   * from the restored run as attach does. A run already over is shown as it ended, not reported again.
+   */
+  private onRestored(e: Entry, run: RunSnapshot | null) {
+    e.observer = new RunObserver(this.now);
+    e.current = run;
+    e.last = e.observer.update(run).live;
+    e.changed = [];
+    if (run && run.status !== 'running') e.reported.add(runKey(run));
+    this.send(e, { event: 'history', data: this.historyOf(e) });
+    this.queue(e);
   }
 
   private onRun(e: Entry, run: RunSnapshot | null) {

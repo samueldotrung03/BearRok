@@ -163,6 +163,38 @@ test('hub: runs recorded before reports were kept show as outlines', async () =>
   assert.equal(after.find((x) => x.number === 2)!.outlineOnly, false);
 });
 
+test('hub: after a restart the last run is back on the board as finished, though memory loads after the hub attaches', async () => {
+  // Before the restart: a finished run, reported once into the history file.
+  const history = new MemoryRunHistory();
+  const before = system();
+  new ActivityHub({ history, throttleMs: 0 }).attach('k', before);
+  await before.trigger('manual');
+  await before.idle();
+  await sleep(200);
+  const saved = before.memorySnapshot();
+  assert.equal(history.list('k').length, 1);
+
+  // The server makes the agents, attaches the hub, then loads the student's memory.
+  const after = system();
+  const hub = new ActivityHub({ history, throttleMs: 0 });
+  const seen: string[] = [];
+  hub.attach('k', after);
+  hub.watch(after, (m) => seen.push(m.event));
+  assert.equal(hub.live(after).run, null);
+  after.restore(saved);
+  const live = hub.live(after);
+  assert.equal(live.run?.number, 1);
+  assert.equal(live.run?.outcome, 'finished');
+  assert.ok(live.agents.length > 5, 'every agent of the run is back');
+  assert.ok(live.agents.every((a) => a.status !== 'running' && a.startedAt === null), 'shown as it ended, without invented timings');
+  assert.ok(seen.includes('activity'), 'open viewers are sent the restored run');
+  // Not reported a second time, then or when the next run starts.
+  await after.trigger('manual');
+  await after.idle();
+  await sleep(200);
+  assert.deepEqual(hub.reports(after).map((r) => r.number), [2, 1]);
+});
+
 test('api: a simulated run shows live by level, then lands in the history with its report', async () => {
   const s = system(new SlowReaderBrain({ speed: 0, now: () => NOW }));
   const { app } = createApp(new LocalStore(null), {}, { demo: s });

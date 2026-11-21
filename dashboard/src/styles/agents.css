@@ -1719,7 +1719,7 @@ button.ag-chip-dark:hover {
   opacity: 1;
   animation: ag-flow 900ms linear infinite;
 }
-.ag-flow[data-active='true'][data-reduced='true'] .ag-flow-track::after {
+.ag-flow[data-reduced='true'] .ag-flow-track::after {
   animation: none;
   background: var(--flow);
 }
@@ -1916,6 +1916,7 @@ button.ag-hist-head:hover { background: var(--surface-3); }
   .ag-hist-head { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; }
   .ag-hist-request,
   .ag-hist-metrics { grid-column: 1 / -1; }
+  .ag-hist-head > :last-child { grid-column: 2; grid-row: 1; justify-self: end; }
   .ag-hist-outcome { grid-template-columns: minmax(0, 1fr) auto; }
   .ag-hist-outcome .ag-hist-level { grid-column: 1 / -1; }
 }
@@ -1929,6 +1930,7 @@ button.ag-hist-head:hover { background: var(--surface-3); }
   .ag-hist-outcomes {
     animation: none;
   }
+  .ag-flow .ag-flow-track::after,
   .ag-flow[data-active='true'] .ag-flow-track::after {
     animation: none;
     background: var(--flow);

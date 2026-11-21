@@ -5,6 +5,7 @@ import './index.css';
 import './styles/theme.css';
 import './styles/dark-shell.css';
 import './styles/dark-apps-cal.css';
+import './styles/resume.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, HashRouter } from 'react-router';

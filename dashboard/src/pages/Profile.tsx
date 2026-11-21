@@ -4,8 +4,9 @@ import { useAuth } from '../auth/AuthProvider.tsx';
 import { Card, Page } from '../components/Page.tsx';
 import { careerSections, fieldGroups, opportunityKinds, restrictionSections, withDefaults, type Item, type Note, type Preferences, type Section } from '../data/preferences.ts';
 import { goalForProfile } from '../lib/personalize.ts';
+import type { ReviewApply } from '../lib/resume/review.ts';
 import { useStore } from '../state/StoreProvider.tsx';
-import type { ClassYear } from '../types.ts';
+import type { ClassYear, Profile as StudentProfile } from '../types.ts';
 import { Experience } from './ProfileExperience.tsx';
 
 const tabs = [
@@ -460,6 +461,34 @@ export function Profile() {
   };
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
 
+  // The résumé wizard saves once, after every step is accepted or skipped. A pending autosave
+  // would otherwise write the profile from before the student confirmed.
+  const applyFromResume = (applied: ReviewApply) => {
+    if (timer.current) window.clearTimeout(timer.current);
+    const merged: StudentProfile = { ...state.profile, ...applied.profile };
+    dispatch({ type: 'setProfile', profile: applied.profile });
+    dispatch({ type: 'setPreferences', preferences: applied.preferences });
+    dispatch({ type: 'suggestGoal', id: goalForProfile({ major: merged.major, careerInterests: merged.careerInterests, topField: applied.preferences.topField, fields: applied.preferences.fields }) });
+    if (applied.profile.fullName && applied.profile.fullName !== state.profile.fullName) void auth.setDisplayName(applied.profile.fullName).catch(() => {});
+    setSaved('saving');
+    void auth
+      .saveProfile({
+        name: merged.name,
+        fullName: merged.fullName,
+        school: merged.school,
+        major: merged.major,
+        location: merged.location,
+        year: merged.year,
+        interests: merged.interests,
+        skills: merged.skills,
+        careerInterests: merged.careerInterests ?? [],
+        about: merged.about,
+        preferences: applied.preferences,
+        categories: applied.preferences.kinds.length ? applied.preferences.kinds : ['internship', 'event', 'club', 'program'],
+      })
+      .then((ok) => setSaved(ok ? 'saved' : 'local'));
+  };
+
   // Arrow keys move between tabs, as tab lists do everywhere else.
   const onTabKey = (event: React.KeyboardEvent) => {
     const index = tabs.findIndex((t) => t.id === tab);
@@ -505,7 +534,7 @@ export function Profile() {
             {tab === 'experience' ? ' Everything here is optional.' : tab !== 'notes' ? ' Leave anything blank that does not apply.' : ''}
           </p>
           <div className={`mt-7 ${tab === 'notes' ? '' : 'divide-y divide-line'}`}>
-            {tab === 'experience' && <Experience prefs={prefs} change={change} />}
+            {tab === 'experience' && <Experience prefs={prefs} profile={state.profile} change={change} onApplyResume={applyFromResume} />}
             {tab === 'career' && <Fields prefs={prefs} change={change} />}
             {tab === 'career' && careerSections.map((s) => <SectionBlock key={s.title} section={s} prefs={prefs} change={change} />)}
             {tab === 'restrictions' && restrictionSections.map((s) => <SectionBlock key={s.title} section={s} prefs={prefs} change={change} />)}

@@ -1,16 +1,31 @@
 // The Experience tab of the profile: a résumé, links, and things the student has done.
 // Every field is optional.
-import { ArrowSquareOut, CaretDown, FileArrowUp, FilePdf, FileText, LinkedinLogo, PencilSimple, Plus, Trash, X } from '@phosphor-icons/react';
+import { ArrowSquareOut, CaretDown, FileArrowUp, FileDoc, FilePdf, FileText, LinkedinLogo, PencilSimple, Plus, Trash, X } from '@phosphor-icons/react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider.tsx';
 import { API_URL } from '../auth/firebase.ts';
+import { ResumeReview } from '../components/resume/ResumeReview.tsx';
 import { experienceKinds, type Experience as ExperienceData, type ExperienceEntry, type Preferences } from '../data/preferences.ts';
+import { readResumeProfile } from '../lib/resume/read.ts';
+import { resumeStudent } from '../lib/resume/student.ts';
+import { snapshotFrom, type ReviewApply, type Snapshot } from '../lib/resume/review.ts';
+import type { ResumeProfile } from '../lib/resume/types.ts';
+import type { Profile } from '../types.ts';
 
 const inputClass = 'block w-full rounded-xl border border-line bg-white px-3.5 text-[15px] text-ink outline-none transition placeholder:text-ink-3 focus:border-brand focus:ring-3 focus:ring-brand/15';
 const labelClass = 'block text-sm font-semibold text-ink';
 const quietButton = 'flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-line bg-white px-3.5 text-sm font-semibold text-ink transition hover:bg-slate-50 disabled:opacity-50';
 
 const MAX_BYTES = 5 * 1024 * 1024;
+const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const fileType = (file: File): string => {
+  if (file.type === 'application/pdf' || file.type === 'text/plain' || file.type === DOCX) return file.type;
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.pdf')) return 'application/pdf';
+  if (name.endsWith('.txt')) return 'text/plain';
+  if (name.endsWith('.docx')) return DOCX;
+  return '';
+};
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const blankEntry = (): ExperienceEntry => ({ id: newId(), kind: '', role: '', organization: '', location: '', start: '', end: '', current: false, summary: '', skills: [], link: '' });
 const isBlank = (e: ExperienceEntry) => !(e.kind || e.role || e.organization || e.location || e.start || e.end || e.summary.trim() || e.skills.length || e.link);
@@ -102,23 +117,35 @@ function StringList({ label, values, onChange, placeholder, addLabel, max = 12 }
   );
 }
 
-function Resume() {
+function Resume({ profile, prefs, onApply }: { profile: Profile; prefs: Preferences; onApply: (applied: ReviewApply) => void }) {
   const auth = useAuth();
   const [info, setInfo] = useState<ResumeInfo | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'uploading' | 'reading' | 'error' | 'review'>('idle');
+  const [retry, setRetry] = useState<'upload' | 'read'>('read');
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  const [session, setSession] = useState<{ extraction: ResumeProfile; snapshot: Snapshot; profile: Profile; preferences: Preferences } | null>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const signedIn = auth.status === 'signedIn';
+  const fileRef = useRef<File | null>(null);
+  const request = useRef(0);
+  const profileRef = useRef(profile);
+  const prefsRef = useRef(prefs);
+  profileRef.current = profile;
+  prefsRef.current = prefs;
+  const student = resumeStudent(auth.status, auth.signInEnabled);
+  const busy = phase === 'uploading' || phase === 'reading';
+  const bearer = async (): Promise<Record<string, string>> => {
+    const token = await auth.getToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
 
   // What the backend already holds for this student.
   useEffect(() => {
-    if (!signedIn) return;
+    if (!student) return;
     let cancelled = false;
     void (async () => {
       try {
-        const token = await auth.getToken();
-        const res = await fetch(`${API_URL}/api/students/me/state`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`${API_URL}/api/students/${student}/state`, { headers: await bearer() });
         if (res.ok && !cancelled) setInfo(((await res.json()) as { student: { resume: ResumeInfo | null } }).student.resume);
       } catch {
         // Backend not reachable: nothing to show yet.
@@ -128,39 +155,101 @@ function Resume() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signedIn]);
+  }, [student]);
+
+  const fail = (message: string) => {
+    setError(message);
+    setPhase('idle');
+  };
+
+  const extract = async (id: number) => {
+    setPhase('reading');
+    setError(null);
+    try {
+      if (!student) throw new Error('Sign in to upload a résumé.');
+      const started = Date.now();
+      const result = await readResumeProfile(API_URL, student, await auth.getToken());
+      // A simulated read returns at once. Keep the reading state up long enough to see it.
+      const remain = 700 - (Date.now() - started);
+      if (remain > 0) await new Promise((resolve) => setTimeout(resolve, remain));
+      if (id !== request.current) return;
+      const currentProfile = profileRef.current;
+      const currentPrefs = prefsRef.current;
+      setSession({
+        extraction: result.extraction,
+        snapshot: snapshotFrom(currentProfile, currentPrefs, auth.user?.email ?? ''),
+        profile: currentProfile,
+        preferences: currentPrefs,
+      });
+      setPhase('review');
+    } catch (err) {
+      if (id !== request.current) return;
+      setRetry('read');
+      setError(err instanceof Error && err.message ? err.message : 'The résumé could not be read. Try again.');
+      setPhase('error');
+    }
+  };
 
   const upload = async (file: File | undefined) => {
     if (!file) return;
+    const id = ++request.current;
+    fileRef.current = file;
     setError(null);
-    const type = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : file.name.toLowerCase().endsWith('.txt') ? 'text/plain' : '');
-    if (type !== 'application/pdf' && type !== 'text/plain') return setError('Choose a PDF or a plain text file.');
-    if (file.size > MAX_BYTES) return setError('That file is larger than 5 MB.');
-    if (file.size === 0) return setError('That file is empty.');
-    setBusy(true);
+    const type = fileType(file);
+    if (!type) return fail('Choose a PDF, a Word document, or a plain text file.');
+    if (file.size > MAX_BYTES) return fail('That file is larger than 5 MB.');
+    if (file.size === 0) return fail('That file is empty.');
+    setPhase('uploading');
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${API_URL}/api/students/me/resume`, {
+      if (!student) return fail('Sign in to upload a résumé.');
+      const res = await fetch(`${API_URL}/api/students/${student}/resume`, {
         method: 'PUT',
-        headers: { 'content-type': type, 'x-file-name': encodeURIComponent(file.name), Authorization: `Bearer ${token}` },
+        headers: { 'content-type': type, 'x-file-name': encodeURIComponent(file.name), ...(await bearer()) },
         body: file,
       });
       const body = (await res.json()) as { resume?: ResumeInfo; error?: string };
-      if (res.ok && body.resume) setInfo(body.resume);
-      else setError(res.status === 413 ? 'That file is larger than 5 MB.' : res.status === 415 ? 'Choose a PDF or a plain text file.' : 'The upload did not go through. Try again.');
+      if (id !== request.current) return;
+      if (res.ok && body.resume) {
+        setInfo(body.resume);
+        if (!body.resume.readable) {
+          setPhase('idle');
+          setError('No text could be read from this file. If it is a scan, upload a PDF or Word document with selectable text.');
+          return;
+        }
+        await extract(id);
+      } else {
+        setRetry('upload');
+        setError(res.status === 413 ? 'That file is larger than 5 MB.' : res.status === 415 ? 'Choose a PDF, a Word document, or a plain text file.' : 'The upload did not go through. Try again.');
+        setPhase('error');
+      }
     } catch {
+      if (id !== request.current) return;
+      setRetry('upload');
       setError('The agent backend is not reachable, so the file was not uploaded.');
+      setPhase('error');
     } finally {
-      setBusy(false);
       if (picker.current) picker.current.value = '';
     }
+  };
+
+  const tryAgain = () => {
+    if (retry === 'read') {
+      const id = ++request.current;
+      void extract(id);
+    } else if (fileRef.current) void upload(fileRef.current);
+  };
+
+  const closeReview = () => {
+    request.current += 1;
+    setSession(null);
+    setPhase('idle');
   };
 
   const remove = async () => {
     setError(null);
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${API_URL}/api/students/me/resume`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (!student) return;
+      const res = await fetch(`${API_URL}/api/students/${student}/resume`, { method: 'DELETE', headers: await bearer() });
       if (res.ok) setInfo(null);
       else setError('The résumé could not be removed. Try again.');
     } catch {
@@ -170,8 +259,8 @@ function Resume() {
 
   const download = async () => {
     try {
-      const token = await auth.getToken();
-      const res = await fetch(`${API_URL}/api/students/me/resume`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!student) return;
+      const res = await fetch(`${API_URL}/api/students/${student}/resume`, { headers: await bearer() });
       if (!res.ok) throw new Error();
       const url = URL.createObjectURL(await res.blob());
       Object.assign(document.createElement('a'), { href: url, download: info?.name ?? 'resume' }).click();
@@ -184,15 +273,28 @@ function Resume() {
   return (
     <section className="pb-7">
       <h3 className="text-[17px] font-semibold tracking-tight">Résumé</h3>
-      <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink-2">Your agents read it to judge fit and to see which skills a posting asks for that you already have. Optional.</p>
-      <input ref={picker} type="file" accept=".pdf,.txt,application/pdf,text/plain" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => void upload(e.target.files?.[0])} />
+      <p className="mt-1 max-w-2xl text-sm leading-relaxed text-ink-2">Your agents read it to judge fit. You confirm each part before it is added to your profile. Optional.</p>
 
-      {!signedIn ? (
-        <p className="mt-4 rounded-2xl border border-dashed border-slate-300 px-5 py-6 text-sm text-ink-2">Sign in to upload a résumé. It is kept with your account and only your agents read it.</p>
+      {!student ? (
+        auth.signInEnabled === null ? null : (
+          <p className="mt-4 rounded-2xl border border-dashed border-slate-300 px-5 py-6 text-sm text-ink-2">Sign in to upload a résumé. It is kept with your account and only your agents read it.</p>
+        )
+      ) : phase === 'reading' ? (
+        <div className="rr-status" role="status">
+          <span className="rr-spinner" aria-hidden="true" />
+          <p>Reading your résumé…</p>
+        </div>
+      ) : phase === 'error' ? (
+        <div className="rr-status rr-status-error" role="alert">
+          <p>{error}</p>
+          <button type="button" className="rr-primary" onClick={tryAgain}>
+            Try again
+          </button>
+        </div>
       ) : info ? (
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-line bg-white/70 p-4">
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-brand-soft text-brand" aria-hidden="true">
-            {info.type === 'application/pdf' ? <FilePdf className="size-[22px]" /> : <FileText className="size-[22px]" />}
+            {info.type === 'application/pdf' ? <FilePdf className="size-[22px]" /> : info.type === DOCX ? <FileDoc className="size-[22px]" /> : <FileText className="size-[22px]" />}
           </span>
           <div className="min-w-0 flex-1 basis-52">
             <p className="truncate font-semibold text-ink">{info.name}</p>
@@ -200,15 +302,16 @@ function Resume() {
               {fileSize(info.size)}, added {new Date(info.uploadedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
             <p className={`mt-0.5 text-sm ${info.readable ? 'text-emerald-700' : 'text-amber-700'}`}>
-              {info.readable ? 'Your agents can read it.' : 'No text could be read from this file. If it is a scan, upload a PDF with selectable text.'}
+              {info.readable ? 'Your agents can read it.' : 'No text could be read from this file. If it is a scan, upload a PDF or Word document with selectable text.'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <input ref={picker} type="file" accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="sr-only" tabIndex={-1} onChange={(e) => void upload(e.target.files?.[0])} />
             <button type="button" onClick={() => void download()} className={quietButton}>
               Download
             </button>
             <button type="button" disabled={busy} onClick={() => picker.current?.click()} className={quietButton}>
-              {busy ? 'Uploading…' : 'Replace'}
+              {phase === 'uploading' ? 'Uploading…' : 'Replace'}
             </button>
             <button type="button" onClick={() => void remove()} className={quietButton}>
               <Trash className="size-4" aria-hidden="true" />
@@ -217,10 +320,7 @@ function Resume() {
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => picker.current?.click()}
+        <label
           onDragOver={(e) => {
             e.preventDefault();
             setOver(true);
@@ -231,16 +331,31 @@ function Resume() {
             setOver(false);
             void upload(e.dataTransfer.files[0]);
           }}
-          className={`mt-4 flex w-full flex-col items-center rounded-2xl border border-dashed px-5 py-8 text-center transition ${over ? 'border-brand bg-brand-soft' : 'border-slate-300 hover:border-brand hover:bg-brand-soft/60'}`}
+          className={`relative mt-4 flex w-full cursor-pointer flex-col items-center rounded-2xl border border-dashed px-5 py-8 text-center transition ${over ? 'border-brand bg-brand-soft' : 'border-slate-300 hover:border-brand hover:bg-brand-soft/60'} ${busy ? 'pointer-events-none opacity-60' : ''}`}
         >
+          <input ref={picker} type="file" accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={busy} aria-label="Upload your résumé" className="absolute inset-0 z-10 cursor-pointer opacity-0" onChange={(e) => void upload(e.target.files?.[0])} />
           <FileArrowUp className="size-8 text-brand" aria-hidden="true" />
-          <span className="mt-2 text-[15px] font-semibold text-ink">{busy ? 'Uploading…' : 'Upload your résumé'}</span>
-          <span className="mt-0.5 text-sm text-ink-2">Click to choose a file, or drop it here. PDF or plain text, up to 5 MB.</span>
-        </button>
+          <span className="mt-2 text-[15px] font-semibold text-ink">{phase === 'uploading' ? 'Uploading…' : 'Upload your résumé'}</span>
+          <span className="mt-0.5 text-sm text-ink-2">Click to choose a file, or drop it here. PDF, Word, or plain text, up to 5 MB.</span>
+        </label>
       )}
-      <div className="mt-3" aria-live="polite">
-        {error && <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm font-medium text-red-700">{error}</p>}
-      </div>
+      {phase === 'idle' && error && (
+        <div className="mt-3" aria-live="polite">
+          <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm font-medium text-red-700">{error}</p>
+        </div>
+      )}
+      {phase === 'review' && session && (
+        <ResumeReview
+          ctx={{ extraction: session.extraction, snapshot: session.snapshot }}
+          profile={session.profile}
+          preferences={session.preferences}
+          onSave={(applied) => {
+            onApply(applied);
+            closeReview();
+          }}
+          onClose={closeReview}
+        />
+      )}
     </section>
   );
 }
@@ -368,7 +483,7 @@ function EntryCard({ entry, onEdit }: { entry: ExperienceEntry; onEdit: () => vo
   );
 }
 
-export function Experience({ prefs, change }: { prefs: Preferences; change: (next: Preferences) => void }) {
+export function Experience({ prefs, profile, change, onApplyResume }: { prefs: Preferences; profile: Profile; change: (next: Preferences) => void; onApplyResume: (applied: ReviewApply) => void }) {
   const exp = prefs.experience;
   const [editing, setEditing] = useState<string | null>(null);
   const linkedinId = useId();
@@ -397,7 +512,7 @@ export function Experience({ prefs, change }: { prefs: Preferences; change: (nex
 
   return (
     <>
-      <Resume />
+      <Resume profile={profile} prefs={prefs} onApply={onApplyResume} />
 
       <section className="py-7">
         <h3 className="text-[17px] font-semibold tracking-tight">Links</h3>

@@ -1,5 +1,6 @@
 // Turns the agent system's run snapshots into the activity feed. It only reads the snapshot:
 // timing is stamped here, the first time each agent is seen in each status.
+import { plainError } from '../plainError.ts';
 import { REVIEWERS, type Job, type RunRecord, type RunSnapshot, type Trigger } from '../agents/types.ts';
 import { LEVELS, type ActivityAgent, type ActivityFlow, type ActivityLevel, type ActivityRun, type ActivityStatus, type AgentKind, type AgentOutcome, type LiveActivity, type RunOutcome, type RunReport } from './types.ts';
 
@@ -19,14 +20,7 @@ export const TRIGGER_TEXT: Record<Trigger, string> = {
 
 const failedOrTimedOut = (message: string | null): ActivityStatus => (message && TIMEOUT.test(message) ? 'timed_out' : 'failed');
 
-/** A run error in words: the CLI's JSON error body is cut down to its message. */
-export function plainError(error: string | null): string | null {
-  if (!error) return error;
-  const message = /"message"\s*:\s*"([^"]+)"/.exec(error)?.[1];
-  if (!message) return error.trim();
-  const lead = error.slice(0, error.indexOf(':')).trim();
-  return lead && !error.trimStart().startsWith('{') ? `${lead}: ${message}` : message;
-}
+export { plainError };
 
 const JOB_KIND: Record<Job['kind'], { kind: AgentKind; name: string }> = {
   scout: { kind: 'scout', name: 'Scout' },

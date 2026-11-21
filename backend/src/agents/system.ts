@@ -10,6 +10,7 @@ import { Fleet, limiter } from './fleet.ts';
 import { KIND_TITLE, lineupNames, planLineup } from './lineup.ts';
 import { AUTO_GAP_MS, dueSlots, nextSlot } from './autoMode.ts';
 import { groundlessReject } from './reviewGuard.ts';
+import { plainError } from '../plainError.ts';
 import { BalanceExhaustedError } from '../quota.ts';
 import { isStopped, StoppedError, throwIfStopped, withSignal } from './stop.ts';
 import type { FoundImage, ImageFinder } from './images.ts';
@@ -1697,27 +1698,24 @@ export class AgentSystem {
       }
     } catch (e) {
       const fatal = this.fatal ?? (e instanceof BalanceExhaustedError ? e : null);
-      if (fatal) {
-        // One reason for the whole run; everything still waiting is settled with it.
+      /** One reason for the whole run: every agent, job and review still waiting is settled with it. */
+      const failRun = (message: string) => {
         run.status = 'failed';
-        run.error = fatal.message;
-        for (const a of run.agents) if (a.status === 'running' || a.status === 'idle' || a.detail === 'Stopped.') Object.assign(a, { status: 'failed', detail: fatal.message });
+        run.error = message;
+        for (const a of run.agents) if (a.status === 'running' || a.status === 'idle' || a.detail === 'Stopped.') Object.assign(a, { status: 'failed', detail: message });
         for (const j of run.jobs)
-          if (j.status === 'queued' || j.status === 'running' || (j.status === 'skipped' && j.result === 'Stopped')) Object.assign(j, { status: 'skipped', result: `Not run: ${fatal.message}` });
-        for (const v of run.validations) if (v.status === 'checking') v.reason = `Not reviewed: ${fatal.message}. Reviewed first next time.`;
-        log('System', `Run failed: ${fatal.message}`, 'bad');
-      } else if (e instanceof StoppedError || isStopped()) {
+          if (j.status === 'queued' || j.status === 'running' || (j.status === 'skipped' && j.result === 'Stopped')) Object.assign(j, { status: 'skipped', result: `Not run: ${message}` });
+        for (const v of run.validations) if (v.status === 'checking') v.reason = `Not reviewed: ${message}. Reviewed first next time.`;
+        log('System', `Run failed: ${message}`, 'bad');
+      };
+      if (fatal) failRun(fatal.message);
+      else if (e instanceof StoppedError || isStopped()) {
         run.status = 'stopped';
         for (const a of run.agents) if (a.status === 'running') Object.assign(a, { status: 'done', detail: 'Stopped.' });
         for (const v of run.validations) if (v.status === 'checking') v.reason = 'Stopped before the review finished. Reviewed first next time.';
         const pending = run.validations.filter((v) => v.status === 'checking').length;
         log('System', `Stopped by you. ${run.stats.kept} postings already checked stay in your feed${pending ? `; ${pending} still being reviewed are reviewed first next time` : ''}.`);
-      } else {
-        run.status = 'failed';
-        run.error = errorText(e);
-        for (const a of run.agents) if (a.status === 'running') a.status = 'failed';
-        log('System', `Run failed: ${run.error}`, 'bad');
-      }
+      } else failRun(plainError(errorText(e)) || 'Unknown error');
     }
     run.finishedAt = now().toISOString();
     this.runs.push({ number: run.number, trigger: run.trigger, status: run.status, startedAt: run.startedAt, finishedAt: run.finishedAt, stats: { ...run.stats } });

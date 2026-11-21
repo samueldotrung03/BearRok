@@ -2,6 +2,22 @@ import { fileURLToPath } from 'node:url';
 
 const env = process.env;
 
+/**
+ * "cli" is the Grok Build CLI. "api" (and an unset value) is the xAI API.
+ * Anything else, including the old "claude" setting, is not a transport: warn and use "api".
+ * With no API key that leaves the agents simulated, so the warning tells the operator to set "cli".
+ */
+export function resolveGrokTransport(value: string | undefined): 'api' | 'cli' {
+  const raw = (value ?? '').trim();
+  const key = raw.toLowerCase();
+  if (!key || key === 'api') return 'api';
+  if (key === 'cli') return 'cli';
+  console.warn(
+    `Unknown GROK_TRANSPORT="${raw}". Use "cli" for the Grok Build CLI, or "api" with XAI_API_KEY. Falling back to "api". A value such as "claude" is no longer supported, so the agents stay simulated until GROK_TRANSPORT=cli or an API key is set.`,
+  );
+  return 'api';
+}
+
 export const config = {
   port: Number(env.PORT ?? 8787),
   xaiApiKey: env.XAI_API_KEY?.trim() || null,
@@ -21,7 +37,7 @@ export const config = {
    * How the agents reach Grok. "api": the xAI API with XAI_API_KEY, billed per call.
    * "cli": the Grok Build CLI on this machine, signed in with a Grok subscription.
    */
-  grokTransport: (env.GROK_TRANSPORT === 'cli' ? 'cli' : 'api') as 'api' | 'cli',
+  grokTransport: resolveGrokTransport(env.GROK_TRANSPORT),
   /** With a CLI each call is a whole program, so a live run is kept small enough to finish in a few minutes. */
   liveCli: { maxJobs: Number(env.LIVE_MAX_JOBS ?? 12) },
   /** The feed should hold at least `target` cards; the agents search again, up to `maxFillRuns` times in a row, until it does. */

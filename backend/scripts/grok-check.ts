@@ -1,5 +1,6 @@
-// One small live call to confirm the key, the model name and web search all work on this account.
+// Opt-in live call. `npm test` does not run this and stays on simulated agents.
 // Run: npm run grok:check
+// One small live call to confirm the key, the model name and web search all work on this account.
 import { z } from 'zod';
 import { config } from '../src/config.ts';
 import { grokJson } from '../src/grok.ts';

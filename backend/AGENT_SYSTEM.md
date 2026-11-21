@@ -82,7 +82,7 @@ The default names come from xAI's model list and are not yet tested: each one ha
 
 ### Two ways to reach Grok
 
-Set `GROK_TRANSPORT` in `backend/.env`. The agents are the same either way; only the piece that sends a prompt and reads the answer changes.
+Set `GROK_TRANSPORT` in `backend/.env`. The agents are the same either way; only the piece that sends a prompt and reads the answer changes. Any other value, including the old `claude` setting, is not a transport: the backend warns once and uses `api`. With no `XAI_API_KEY` that means simulated agents. Set `GROK_TRANSPORT=cli` to use the Grok Build CLI. `npm test` stays on the simulated agents and does not call Grok. `npm run grok:check` is the opt-in live call.
 
 | | `api` (default) | `cli` |
 |---|---|---|
@@ -98,7 +98,7 @@ Cautions for `cli`:
 - Grok Build is a coding agent that can read files and run commands. Each call runs in an empty temporary folder and the prompt tells it to use web search only. `GROK_CLI_ALWAYS_APPROVE=1` lets it use tools without asking, which web search may need; that also removes the approval step for anything a web page might talk it into, so turn it on only on a machine and account you are comfortable with.
 - Every student's agents run on one person's subscription and its limits.
 - Whether xAI's terms allow running an app this way has not been checked.
-- Not yet run against the real CLI: its JSON output format and whether web search works in headless mode still need testing.
+- The CLI has been run headless for career-guide research and for scout searches. It returned JSON, and web search returned leads. A feed of kept cards was not finished in that check: a job budget of 6 was spent on scouts, so the readers never ran, and a later budget of 24 still kept no cards.
 
 ### Search managers scale to what the student wants
 

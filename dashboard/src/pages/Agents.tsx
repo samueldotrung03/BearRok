@@ -52,8 +52,8 @@ function BackendChip({ status, showing }: { status: BackendState; showing: boole
       className="ag-chip-dark"
       title={
         showing
-          ? "The teammates' agent server on port 8787. This page shows its latest run."
-          : "The teammates' agent server on port 8787. Without a run from it, this page plays its own simulation."
+          ? 'The agent server. This page shows its latest run.'
+          : 'The agent server. Without a run from it, this page plays its own simulation.'
       }
       aria-live="polite"
     >

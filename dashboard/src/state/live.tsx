@@ -9,6 +9,7 @@ import { API_URL } from '../auth/firebase.ts';
 import { applicationInfo, coverFor, opportunities as sampleOpportunities } from '../data/sample.ts';
 import { grokFinds } from '../data/grokFinds.ts';
 import type { AgentEvent, AgentNode, ApplicationStatus, Opportunity, OpportunityType } from '../types.ts';
+import { dataBadgeText } from './dataBadge.ts';
 import { sampleRequest } from './sampleBackend.ts';
 import { useStore } from './StoreProvider.tsx';
 
@@ -528,19 +529,13 @@ export const useOpportunities = () => useLive().opportunities;
 /** The small label in the page header saying where the cards come from. */
 export function DataBadge() {
   const live = useLive();
-  const [long, short] = live.searching
-    ? ['Agents searching…', 'Searching']
-    : SAMPLE_FEED && live.status !== 'connected'
-      ? ['Sample postings', 'Samples']
-    : live.status === 'offline'
-      ? ['Agents offline', 'Offline']
-      : live.status === 'connecting'
-        ? ['Connecting…', 'Connecting']
-        : !live.usingLive
-          ? ['No results yet', 'Empty']
-      : live.provider === 'grok'
-        ? ['Live · Grok', 'Live']
-        : ['Simulated agents', 'Simulated'];
+  const { long, short } = dataBadgeText({
+    searching: live.searching,
+    sampleFeed: SAMPLE_FEED,
+    status: live.status,
+    usingLive: live.usingLive,
+    provider: live.provider,
+  });
   return (
     <span className="flex items-center gap-1.5">
       <span className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-medium text-white backdrop-blur" title={live.status === 'offline' ? 'The agent backend is not reachable.' : undefined}>

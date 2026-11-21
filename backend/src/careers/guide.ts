@@ -219,7 +219,8 @@ export class CareerGuides {
   /** A fleet for one run of this guide. Its jobs are written to the guide's activity as they start and finish. */
   private fleet(guide: Guide, ask: string | null): Fleet {
     return new Fleet({
-      concurrency: 4,
+      // A CLI call is a whole program. Share the same cap as the opportunity search.
+      concurrency: config.grokTransport === 'cli' ? Math.max(1, config.grokCli.concurrency) : 4,
       maxJobs: 24,
       onUpdate: (job: Job) => {
         if (job.status === 'running' && job.attempts === 1) this.log(guide, job.label, 'Started', 'info', ask);

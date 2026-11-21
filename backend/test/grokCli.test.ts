@@ -6,15 +6,26 @@ import { test } from 'node:test';
 import { z } from 'zod';
 
 // A stand-in for the real `grok` program: records its arguments and prints a canned reply.
+// A `.mjs` file so Windows can run it; grokCli starts `.mjs` with Node instead of spawning a shell script.
 const dir = mkdtempSync(join(tmpdir(), 'fake-grok-'));
-const bin = join(dir, 'grok');
+const bin = join(dir, 'grok.mjs');
 writeFileSync(
   bin,
-  `#!/bin/sh
-printf '%s\\n' "$@" > "${dir}/args"
-n=$(cat "${dir}/count" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "${dir}/count"
-cat "${dir}/reply-$n" 2>/dev/null || cat "${dir}/reply"
-exit $(cat "${dir}/exit" 2>/dev/null || echo 0)
+  `import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const dir = ${JSON.stringify(dir)};
+const args = process.argv.slice(2);
+writeFileSync(join(dir, 'args'), args.join('\\n') + '\\n');
+let n = 0;
+try { n = Number(readFileSync(join(dir, 'count'), 'utf8')) || 0; } catch { /* first call */ }
+n += 1;
+writeFileSync(join(dir, 'count'), String(n));
+const numbered = join(dir, 'reply-' + n);
+const body = existsSync(numbered) ? readFileSync(numbered) : existsSync(join(dir, 'reply')) ? readFileSync(join(dir, 'reply')) : '';
+process.stdout.write(body);
+let code = 0;
+try { code = Number(readFileSync(join(dir, 'exit'), 'utf8')) || 0; } catch { /* success */ }
+process.exit(code);
 `,
 );
 chmodSync(bin, 0o755);
@@ -46,6 +57,8 @@ test('grokJson goes through the CLI when GROK_TRANSPORT=cli', async () => {
   assert.match(args, /You are a scout\./);
   assert.match(args, /"required":\["title","url"\]/);
   assert.match(args, /--output-format\njson/);
+  // This CLI build rejects --no-auto-update. Leaving it in fails every live call.
+  assert.doesNotMatch(args, /--no-auto-update/);
   assert.match(args, /-m\nsome-model/);
   // Tools are not auto-approved unless the setting is turned on.
   assert.doesNotMatch(args, /--always-approve/);

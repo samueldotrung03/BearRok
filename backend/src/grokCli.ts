@@ -17,11 +17,19 @@ function sandboxDir(): string {
   return dir;
 }
 
+/** The real CLI is an executable. Tests point GROK_CLI_BIN at a `.mjs` stand-in, which Node runs. */
+function startCli(args: string[]) {
+  const bin = config.grokCli.bin;
+  const opts = { cwd: sandboxDir(), stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'] };
+  if (/\.mjs$/i.test(bin)) return spawn(process.execPath, [bin, ...args], opts);
+  return spawn(bin, args, opts);
+}
+
 function run(args: string[], timeoutMs: number): Promise<string> {
   const stop = currentSignal();
   if (stop?.aborted) return Promise.reject(new StoppedError());
   return new Promise((resolve, reject) => {
-    const child = spawn(config.grokCli.bin, args, { cwd: sandboxDir(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = startCli(args);
     let out = '';
     let err = '';
     const timer = setTimeout(() => {
@@ -179,7 +187,7 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
     `---\n${opts.user}`,
   ].join('\n\n');
 
-  const args = ['-p', prompt, '--output-format', 'json', '--no-auto-update', '--cwd', sandboxDir()];
+  const args = ['-p', prompt, '--output-format', 'json', '--cwd', sandboxDir()];
   if (opts.model) args.push('-m', opts.model);
   // The CLI is a full agent: at its default effort one search takes minutes of thinking between steps.
   if (config.grokCli.effort) args.push('--reasoning-effort', config.grokCli.effort);

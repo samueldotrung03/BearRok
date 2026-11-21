@@ -18,13 +18,29 @@ import { fromFields, toFields, UserFirestore } from '../src/store/userFirestore.
 const NOW = new Date('2026-11-19T12:00:00Z');
 const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
 
+/** openssl is not always on PATH (Git for Windows ships it beside git). */
+function openssl(args: string[]): string {
+  const bins = ['openssl', 'C:\\Program Files\\Git\\usr\\bin\\openssl.exe', 'C:\\Program Files\\OpenSSL-Win64\\bin\\openssl.exe'];
+  let last: unknown;
+  for (const bin of bins) {
+    try {
+      return execFileSync(bin, args, { encoding: 'utf8' });
+    } catch (e) {
+      last = e;
+      if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'ENOENT') continue;
+      throw e;
+    }
+  }
+  throw last;
+}
+
 /** A signing key with a certificate, standing in for one of Google's. */
 function signer() {
   const dir = mkdtempSync(join(tmpdir(), 'bearok-cert-'));
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const keyFile = join(dir, 'key.pem');
   writeFileSync(keyFile, privateKey.export({ type: 'pkcs8', format: 'pem' }));
-  const cert = execFileSync('openssl', ['req', '-new', '-x509', '-key', keyFile, '-subj', '/CN=test', '-days', '2'], { encoding: 'utf8' });
+  const cert = openssl(['req', '-new', '-x509', '-key', keyFile, '-subj', '/CN=test', '-days', '2']);
   assert.ok(new X509Certificate(cert));
   const sign = (claims: object, kid = 'key-1', alg = 'RS256') => {
     const body = `${b64({ alg, kid, typ: 'JWT' })}.${b64(claims)}`;

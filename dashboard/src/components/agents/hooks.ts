@@ -1,5 +1,6 @@
 // Small browser hooks for the Agents page. The run logic itself is pure and lives in src/lib/agents.
 import { useEffect, useLayoutEffect, useState, type RefObject } from 'react';
+import { API_URL } from '../../auth/firebase.ts';
 
 export function useReducedMotion(): boolean {
   const query = '(prefers-reduced-motion: reduce)';
@@ -33,7 +34,7 @@ export type BackendState = { kind: 'checking' } | { kind: 'connected'; live: boo
  * Asks the teammates' agent server (backend/src/app.ts, GET /api/health) whether it is running.
  * A short timeout and a silent fallback: the page never depends on the answer.
  */
-export function useBackendStatus(url = 'http://localhost:8787/api/health', timeoutMs = 1500): BackendState {
+export function useBackendStatus(url = `${API_URL}/api/health`, timeoutMs = 1500): BackendState {
   const [state, setState] = useState<BackendState>({ kind: 'checking' });
   useEffect(() => {
     let cancelled = false;

@@ -10,6 +10,7 @@ import { useStore } from '../state/StoreProvider.tsx';
 import type { Opportunity } from '../types.ts';
 import { AskBar } from './AskBar.tsx';
 import { formatLabel, typeMeta } from './meta.ts';
+import { PhotoLikeBurst, usePhotoLike } from './PhotoLike.tsx';
 import { StatusSelect } from './StatusSelect.tsx';
 
 function LikeButton({ id }: { id: string }) {
@@ -58,7 +59,14 @@ export function Cover({ opportunity: o, className = '', box = 'absolute inset-0'
       {o.imageCredit && (
         <span className="absolute right-2 bottom-2 z-10 max-w-[80%] truncate rounded-full bg-black/45 px-2 py-0.5 text-[10px] text-white/90 backdrop-blur">
           {o.imageCreditUrl ? (
-            <a href={o.imageCreditUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+            <a
+              href={o.imageCreditUrl}
+              target="_blank"
+              rel="noreferrer"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
               {o.imageCredit}
             </a>
           ) : (
@@ -440,8 +448,9 @@ export function OpportunityCard({ opportunity: o, onDismiss }: { opportunity: Op
 
 /**
  * One opportunity as a wide row in the feed list: its picture on the left, shown whole, and on
- * the right what it is, the title, the organizer and why it fits. The whole row opens the
- * details; Save, Like and Dislike sit along the bottom.
+ * the right what it is, the title, the organizer and why it fits. A click on the picture or the
+ * title opens the details. A double-click on the picture likes it, the same as Like, and does
+ * not unlike. Save, Like and Dislike sit along the bottom.
  */
 export function OpportunityRow({
   opportunity: o,
@@ -456,6 +465,9 @@ export function OpportunityRow({
   actions?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // A click still opens the details. A double-click likes, and closes the details if the
+  // click had already opened them.
+  const { burst, photoHandlers } = usePhotoLike(o.id, () => setOpen(true), () => setOpen(false));
   const meta = typeMeta[o.type];
   const urgent = o.deadline !== null && daysUntil(o.deadline) <= 7;
   const when = o.deadline ? dueLabel(o.deadline) : o.startTime ? `Starts ${shortDate(o.startTime)}` : null;
@@ -463,10 +475,13 @@ export function OpportunityRow({
 
   return (
     <article className="feed-row" aria-labelledby={`${o.id}-row`}>
-      <div className="feed-row-media">
+      <div className="feed-row-layout">
+      <div className="feed-row-media feed-row-photo photo-like-target" {...photoHandlers}>
         <Cover opportunity={o} className="absolute inset-0 size-full" />
+        <PhotoLikeBurst tick={burst} />
       </div>
-      <div className="feed-row-body">
+      {/* Positioned so the title's stretched hit target covers the text, not the photo. */}
+      <div className="feed-row-body relative">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold">
           <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 ${meta.tint}`}>
             <meta.icon className="size-3.5" aria-hidden="true" />
@@ -503,6 +518,7 @@ export function OpportunityRow({
           </button>
           {actions}
         </div>
+      </div>
       </div>
       {open && <Details opportunity={o} onClose={() => setOpen(false)} />}
     </article>

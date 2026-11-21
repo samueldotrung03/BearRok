@@ -69,6 +69,12 @@ function ReportRow({ report, open, onToggle, fresh }: { report: RunReport; open:
               {report.failures.reasons.map((r) => `${r.reason}${r.count > 1 ? ` (×${r.count})` : ''}`).join(' · ')}
             </p>
           )}
+          {report.funnel && (
+            <p className="ag-hist-reasons">
+              <span className="ag-hist-caption">Where postings dropped</span>
+              {report.funnel}
+            </p>
+          )}
           <p className="ag-hist-caption">Agents, failures first</p>
           <ul>
             {report.outcomes.map((o) => (

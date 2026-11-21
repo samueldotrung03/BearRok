@@ -155,6 +155,12 @@ function reasons(list: (string | null)[], limit = 5) {
 const durationOf = (start: string | null, end: string | null) => (start && end ? Math.max(0, Date.parse(end) - Date.parse(start)) : null);
 const RANK: Record<ActivityStatus, number> = { failed: 0, timed_out: 1, skipped: 3, done: 2, running: 4, queued: 5 };
 
+/** The worker fleet's "Funnel: …" line, the stage-by-stage drop counts, when the run logged one. */
+function funnelOf(run: RunSnapshot): string | null {
+  const line = [...run.log].reverse().find((l) => l.text.startsWith('Funnel: '));
+  return line ? line.text.slice('Funnel: '.length).trim() : null;
+}
+
 /** The brief report of a finished run. Pure. */
 export function reportOf(run: RunSnapshot, agents: ActivityAgent[]): RunReport {
   const byLevel = Object.fromEntries(LEVELS.map((l) => [l, agents.filter((a) => a.level === l).length])) as Record<ActivityLevel, number>;
@@ -174,6 +180,7 @@ export function reportOf(run: RunSnapshot, agents: ActivityAgent[]): RunReport {
     skipped: { count: skipped.length, reasons: reasons(skipped.map((a) => a.detail)) },
     outcomes,
     outlineOnly: false,
+    funnel: funnelOf(run),
   };
 }
 
@@ -198,6 +205,7 @@ export function outlineReport(r: RunRecord): RunReport {
     error: null,
     outcomes: [],
     outlineOnly: true,
+    funnel: null,
   };
 }
 

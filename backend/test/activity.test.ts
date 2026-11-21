@@ -242,3 +242,13 @@ test('activity: a run that fails gives the failed agent the run error, in words'
   assert.deepEqual(report.failures?.reasons, [{ reason: plain, count: 1 }]);
   assert.equal(report.error, plain);
 });
+
+test('activity: a report carries the fleet funnel line when the run logged one', () => {
+  const funnel = 'Funnel: scouts 4 done, 0 failed, 0 skipped; leads 16; readers 6 done, 2 with no posting, 1 failed, 3 skipped; duplicate leads 2; no link 1; already turned down 0; sent to review 3.';
+  const done = (log: RunSnapshot['log']) => snapshot({ status: 'complete', finishedAt: NOW.toISOString(), log });
+  const base = snapshot().log;
+  const withFunnel = done([...base, { seq: 2, at: NOW.toISOString(), agent: 'Worker fleet', text: funnel, tone: 'good' }]);
+  assert.equal(reportOf(withFunnel, new RunObserver(() => NOW).update(withFunnel).agents).funnel, funnel.slice('Funnel: '.length));
+  const without = done(base);
+  assert.equal(reportOf(without, new RunObserver(() => NOW).update(without).agents).funnel, null);
+});

@@ -122,6 +122,8 @@ export interface RunReport {
   outcomes: AgentOutcome[];
   /** True for runs recorded before per-agent reports were kept: only the outline is known. */
   outlineOnly: boolean;
+  /** Where postings dropped between search and review, as the worker fleet logged it. Null when the run did not log it. */
+  funnel?: string | null;
 }
 
 /** Reports kept per student; the page shows 5 and up to 10 with Show more. */

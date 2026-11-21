@@ -2,7 +2,7 @@
 // application manager, and the one sentence that sums it up. Plain functions over the student's own
 // data, so a model (Grok, once the agents are connected) can take their place without touching the page.
 // Nothing here makes up a date: an item with no stated deadline says so.
-import { applicationInfo, opportunities as sampleOpportunities } from '../../data/sample.ts';
+import { applicationInfo } from '../../data/sample.ts';
 import { rankFeedDetailed, signalLabel } from '../../state/ranking.ts';
 import type { AppState } from '../../state/store.ts';
 import type { ApplicationStatus, Opportunity } from '../../types.ts';
@@ -143,9 +143,9 @@ export function rankTodayActions(candidates: TodayAction[], limit = 3): TodayAct
   return result;
 }
 
-/** Live cards override the sample ones with the same id; tracked sample items stay findable. */
+/** The cards the page passed in. A page includes the sample set only in the public showcase. */
 function lookup(list: Opportunity[]): Map<string, Opportunity> {
-  return new Map([...sampleOpportunities, ...list].map((o) => [o.id, o]));
+  return new Map(list.map((o) => [o.id, o]));
 }
 
 /** Every action that could be today's: application next steps, dated calendar items and the next roadmap step. */
@@ -174,7 +174,7 @@ export function candidateActions(state: AppState, list: Opportunity[], now = Dat
     });
   }
 
-  for (const item of calendarItems(state, now)) {
+  for (const item of calendarItems(state, now, list)) {
     if (item.done || item.kind === 'reminder') continue;
     // Tracked applications already have their own, more specific next step above.
     if (item.opportunityId && item.kind !== 'step' && state.applications[item.opportunityId]) continue;

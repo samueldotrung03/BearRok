@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { currentSignal, StoppedError } from './agents/stop.ts';
 import { config } from './config.ts';
+import { BALANCE_MESSAGE, BalanceExhaustedError, isBalanceError } from './quota.ts';
 import type { GrokResult, GrokTool } from './grok.ts';
 
 /** An empty folder for the CLI to run in, so a coding agent has no project files in reach. */
@@ -272,6 +273,12 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
     const args = cliArguments({ ...base, schema: attempt === 0 ? schemaJson : undefined });
     try {
       const result = await run(args, timeoutMs);
+      // Out of credit: every later call fails the same way, so no retry.
+      if (result.code !== 0 && isBalanceError(`${result.stderr}
+${result.stdout}`)) {
+        debugLog({ name: opts.name, event: 'fail', detail: BALANCE_MESSAGE, stdout: result.stdout, stderr: result.stderr });
+        throw new BalanceExhaustedError();
+      }
       debugLog({
         name: opts.name,
         event: 'call',
@@ -301,6 +308,7 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
         if (result.timedOut || /not found/.test(why)) break;
       }
     } catch (e) {
+      if (e instanceof BalanceExhaustedError) throw e;
       lastError = e;
       const message = e instanceof Error ? e.message : String(e);
       if (!(e instanceof StoppedError)) console.warn(`grok ${opts.name}: ${message}`);

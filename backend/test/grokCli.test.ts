@@ -23,6 +23,7 @@ writeFileSync(join(dir, 'count'), String(n));
 const numbered = join(dir, 'reply-' + n);
 const body = existsSync(numbered) ? readFileSync(numbered) : existsSync(join(dir, 'reply')) ? readFileSync(join(dir, 'reply')) : '';
 process.stdout.write(body);
+if (existsSync(join(dir, 'stderr'))) process.stderr.write(readFileSync(join(dir, 'stderr')));
 let code = 0;
 try { code = Number(readFileSync(join(dir, 'exit'), 'utf8')) || 0; } catch { /* success */ }
 process.exit(code);
@@ -36,7 +37,7 @@ const { grokJson } = await import('../src/grok.ts');
 const { answerText, extractJson, structuredAnswer, fullestAnswer } = await import('../src/grokCli.ts');
 const { readFileSync, rmSync } = await import('node:fs');
 const Schema = z.object({ title: z.string(), url: z.string() });
-const reset = () => { for (const f of ['count', 'reply-1', 'reply-2', 'exit']) rmSync(join(dir, f), { force: true }); };
+const reset = () => { for (const f of ['count', 'reply-1', 'reply-2', 'exit', 'stderr']) rmSync(join(dir, f), { force: true }); };
 
 test('CLI replies are unwrapped from the json envelope, prose and code fences', () => {
   assert.equal(answerText('{"result":"hello","session_id":"s1"}'), 'hello');
@@ -124,4 +125,15 @@ test('a cancelled page read is the empty record the readers used to drop', async
   assert.equal(data.found, false);
   assert.equal(data.record.title, '');
   assert.equal(data.record.sourceUrl, '');
+});
+
+test('an exhausted Grok balance (HTTP 402) fails at once with a clear reason, and is not retried', async () => {
+  reset();
+  writeFileSync(join(dir, 'reply'), '');
+  writeFileSync(join(dir, 'stderr'), readFileSync(new URL('./fixtures/grok-402-stderr.txt', import.meta.url)));
+  writeFileSync(join(dir, 'exit'), '1');
+  const { BalanceExhaustedError, BALANCE_MESSAGE } = await import('../src/quota.ts');
+  await assert.rejects(grokJson({ name: 't', system: 's', user: 'u', schema: Schema }), (e) => e instanceof BalanceExhaustedError && e.message === BALANCE_MESSAGE);
+  assert.equal(readFileSync(join(dir, 'count'), 'utf8'), '1');
+  reset();
 });

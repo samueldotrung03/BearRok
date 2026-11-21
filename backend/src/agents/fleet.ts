@@ -1,5 +1,6 @@
 // The worker fleet: a shared job queue with a concurrency cap, per-run and per-manager budgets,
 // one retry per job, and link dedupe across every manager.
+import { BalanceExhaustedError } from '../quota.ts';
 import { isStopped } from './stop.ts';
 import type { Job, JobKind } from './types.ts';
 
@@ -94,6 +95,13 @@ export class Fleet {
           this.opts.onUpdate(job);
           return value;
         } catch (e) {
+          // Out of credit: no retry, the search is ending.
+          if (e instanceof BalanceExhaustedError) {
+            job.status = 'failed';
+            job.result = e.message;
+            this.opts.onUpdate(job);
+            return null;
+          }
           if (isStopped()) continue;
           if (job.attempts >= 2) {
             job.status = 'failed';

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { throwIfStopped, timeoutOrStop } from './agents/stop.ts';
 import { config } from './config.ts';
+import { BalanceExhaustedError, isBalanceError } from './quota.ts';
 
 export type GrokTool = { type: 'web_search' } | { type: 'x_search' };
 
@@ -44,7 +45,11 @@ export async function grokJson<S extends z.ZodType>(opts: {
   });
 
   const raw = await res.text();
-  if (!res.ok) throw new Error(`Grok ${res.status}: ${raw.slice(0, 500)}`);
+  if (!res.ok) {
+    // Out of credit: every later call fails the same way, so the search ends here.
+    if (res.status === 402 || isBalanceError(raw)) throw new BalanceExhaustedError();
+    throw new Error(`Grok ${res.status}: ${raw.slice(0, 500)}`);
+  }
 
   const body = JSON.parse(raw);
   const text = extractText(body);

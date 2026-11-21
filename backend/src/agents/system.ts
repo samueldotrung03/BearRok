@@ -9,6 +9,7 @@ import { cleanDraft, cleanTabs, emptyPortal, mergeTabs, PORTAL_LIMITS, portalByt
 import { Fleet, limiter } from './fleet.ts';
 import { KIND_TITLE, lineupNames, planLineup } from './lineup.ts';
 import { AUTO_GAP_MS, dueSlots, nextSlot } from './autoMode.ts';
+import { BalanceExhaustedError } from '../quota.ts';
 import { isStopped, StoppedError, throwIfStopped, withSignal } from './stop.ts';
 import type { FoundImage, ImageFinder } from './images.ts';
 import type { CalendarEventInput } from './eventSorter.ts';
@@ -222,6 +223,31 @@ export function unusableReview(reason: string | null | undefined): boolean {
   return text === '' || text === 'placeholder' || text === 'null' || text === 'n/a' || text === 'none';
 }
 
+/**
+ * The brain with every call watched for an exhausted Grok balance: the first one reports it so the
+ * run can end at once, and the error still reaches the caller.
+ */
+function guardBrain(brain: Brain, onBalance: (e: BalanceExhaustedError) => void): Brain {
+  const watch = (e: unknown) => {
+    if (e instanceof BalanceExhaustedError) onBalance(e);
+    throw e;
+  };
+  return new Proxy(brain, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        try {
+          const out = value.apply(target, args);
+          return out instanceof Promise ? out.catch(watch) : out;
+        } catch (e) {
+          return watch(e);
+        }
+      };
+    },
+  });
+}
+
 /** The most common reasons, most frequent first. */
 function reasonCounts(lines: string[], limit = 8): ReasonCount[] {
   const map = new Map<string, number>();
@@ -334,6 +360,8 @@ export class AgentSystem {
   private running: Promise<void> | null = null;
   /** Stops the run in flight. */
   private abort: AbortController | null = null;
+  /** Set when a call found the Grok balance exhausted: the run in flight ends once, with this reason. */
+  private fatal: BalanceExhaustedError | null = null;
   private queued: Trigger | null = null;
   private listeners = new Set<Listener>();
   private observers = new Set<Listener>();
@@ -349,7 +377,7 @@ export class AgentSystem {
 
   /** `profile` overrides the demo profile, for a student who signed in. */
   constructor(brain: Brain, opts: Partial<SystemOptions> = {}, profile: Partial<Profile> = {}) {
-    this.brain = brain;
+    this.brain = guardBrain(brain, (e) => this.endForBalance(e));
     this.opts = { ...DEFAULT_OPTIONS, ...opts };
     this.initialProfile = { ...structuredClone(DEMO_PROFILE), ...profile };
     this.profile = structuredClone(this.initialProfile);
@@ -1105,6 +1133,7 @@ export class AgentSystem {
     }
     const controller = new AbortController();
     this.abort = controller;
+    this.fatal = null;
     this.running = withSignal(controller.signal, () => this.runOnce(trigger))
       .catch((e) => console.error('run crashed:', e))
       .then(() => {
@@ -1136,6 +1165,15 @@ export class AgentSystem {
     this.focus = null;
     this.abort.abort();
     return true;
+  }
+
+  /** The first call to find the balance exhausted ends the search: nothing else is started or retried. */
+  private endForBalance(e: BalanceExhaustedError) {
+    if (!this.running || this.fatal) return;
+    this.fatal = e;
+    this.queued = null;
+    this.focus = null;
+    this.abort?.abort();
   }
 
   // ---- one run -------------------------------------------------------------
@@ -1624,7 +1662,17 @@ export class AgentSystem {
         log('System', this.shouldFill() ? `${shown} of ${this.opts.feedTarget} opportunities found so far. Searching again for more.` : `${shown} of ${this.opts.feedTarget} opportunities found after ${this.fillRuns + 1} searches in a row. The agents will look again on the next run.`);
       }
     } catch (e) {
-      if (e instanceof StoppedError || isStopped()) {
+      const fatal = this.fatal ?? (e instanceof BalanceExhaustedError ? e : null);
+      if (fatal) {
+        // One reason for the whole run; everything still waiting is settled with it.
+        run.status = 'failed';
+        run.error = fatal.message;
+        for (const a of run.agents) if (a.status === 'running' || a.status === 'idle' || a.detail === 'Stopped.') Object.assign(a, { status: 'failed', detail: fatal.message });
+        for (const j of run.jobs)
+          if (j.status === 'queued' || j.status === 'running' || (j.status === 'skipped' && j.result === 'Stopped')) Object.assign(j, { status: 'skipped', result: `Not run: ${fatal.message}` });
+        for (const v of run.validations) if (v.status === 'checking') v.reason = `Not reviewed: ${fatal.message}. Reviewed first next time.`;
+        log('System', `Run failed: ${fatal.message}`, 'bad');
+      } else if (e instanceof StoppedError || isStopped()) {
         run.status = 'stopped';
         for (const a of run.agents) if (a.status === 'running') Object.assign(a, { status: 'done', detail: 'Stopped.' });
         for (const v of run.validations) if (v.status === 'checking') v.reason = 'Stopped before the review finished. Reviewed first next time.';

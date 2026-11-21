@@ -1576,3 +1576,368 @@ button.ag-chip-dark:hover {
     animation: none;
   }
 }
+
+/* ---------- Live view ----------
+   Figma "BearRok - Agents live view": S1 Agents / running (5:7) and its states.
+   Status colours on the dark run panel are named once here; dots, words and flows use them. */
+
+.ag-live {
+  --ag-raised: rgb(255 255 255 / 0.06);
+  --ag-edge: rgb(255 255 255 / 0.12);
+  --ag-text-2: rgb(255 255 255 / 0.62);
+  --ag-text-3: rgb(255 255 255 / 0.45);
+  --ag-st-queued: #6b7f96;
+  --ag-st-running: #34c759;
+  --ag-st-done: #5aa0ff;
+  --ag-st-failed: #fca5a5;
+  --ag-st-timed-out: #fcd34d;
+  --ag-flow-task: #93b6ff;
+  --ag-flow-result: #6ee7b7;
+  --ag-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ag-live-request {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--ag-text-2);
+}
+
+.ag-live-label,
+.ag-live-col-title,
+.ag-live-group,
+.ag-flow-count,
+.ag-live-row-word {
+  font-family: var(--ag-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ag-live-label { flex-shrink: 0; color: var(--ag-text-3); }
+
+/* One status dot for rows and chips. Only a running agent pulses, and only while it runs. */
+.ag-live-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ag-st-queued);
+  transition: background-color 150ms ease;
+}
+.ag-live-dot[data-status='queued'],
+.ag-live-dot[data-status='skipped'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ag-st-queued);
+}
+.ag-live-dot[data-status='running'] {
+  background: var(--ag-st-running);
+  animation: ag-ping 1.4s ease-out infinite;
+}
+.ag-live-dot[data-status='done'] { background: var(--ag-st-done); }
+.ag-live-dot[data-status='failed'] { background: var(--ag-st-failed); }
+.ag-live-dot[data-status='timed_out'] { background: var(--ag-st-timed-out); }
+.ag-live-chip { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Banners: the raised panel surface with a status edge, never a loud fill. */
+.ag-live-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: white;
+  background: var(--ag-raised);
+  border: 1px solid var(--ag-edge);
+  border-left: 3px solid var(--ag-st-queued);
+  animation: ag-slide 250ms var(--ag-ease) both;
+}
+.ag-live-banner[data-tone='warn'] { border-color: rgb(252 211 77 / 0.45); border-left-color: var(--ag-st-timed-out); }
+.ag-live-banner[data-tone='danger'] { border-color: rgb(252 165 165 / 0.45); border-left-color: var(--ag-st-failed); }
+.ag-live-banner-icon { display: inline-flex; color: var(--ag-text-2); }
+.ag-live-banner[data-tone='warn'] .ag-live-banner-icon { color: var(--ag-st-timed-out); }
+.ag-live-banner[data-tone='danger'] .ag-live-banner-icon { color: var(--ag-st-failed); }
+
+/* The board: five level columns, left to right in the order work flows. */
+.ag-live-board {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr) minmax(0, 1.35fr) minmax(0, 1.2fr) minmax(0, 0.75fr);
+  gap: 12px;
+  margin-top: 16px;
+  transition: opacity 250ms ease;
+}
+.ag-live[data-stale='true'] .ag-live-board { opacity: 0.5; }
+
+.ag-live-col { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
+.ag-live-col-head { display: flex; align-items: flex-end; gap: 8px; min-height: 40px; padding-bottom: 4px; }
+.ag-live-col-title { color: white; }
+.ag-live-col-counts {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--ag-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The connector to the next level. Its dashes travel toward that level only while it has work
+   queued or running: a transform on one pseudo-element, nothing else moves. */
+.ag-flow {
+  --flow: var(--ag-flow-task);
+  display: flex;
+  flex: 1;
+  min-width: 56px;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-right: -12px;
+}
+.ag-flow[data-kind='result'] { --flow: var(--ag-flow-result); }
+.ag-flow-count { color: var(--ag-text-3); white-space: nowrap; transition: color 150ms ease; }
+.ag-flow[data-active='true'] .ag-flow-count { color: white; }
+.ag-flow-track {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ag-edge);
+}
+.ag-flow-track::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 -14px;
+  background: repeating-linear-gradient(90deg, var(--flow) 0 8px, transparent 8px 14px);
+  opacity: 0;
+  transition: opacity 250ms ease;
+}
+.ag-flow[data-active='true'] .ag-flow-track::after {
+  opacity: 1;
+  animation: ag-flow 900ms linear infinite;
+}
+.ag-flow[data-active='true'][data-reduced='true'] .ag-flow-track::after {
+  animation: none;
+  background: var(--flow);
+}
+@keyframes ag-flow {
+  from { transform: translateX(0); }
+  to { transform: translateX(14px); }
+}
+
+/* Each column scrolls on its own; its bottom edge dissolves only while rows continue below. */
+.ag-live-list {
+  max-height: 460px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ag-edge) transparent;
+  border-radius: 12px;
+}
+.ag-live-list[data-more='true'] {
+  mask-image: linear-gradient(to bottom, black calc(100% - 48px), rgb(0 0 0 / 0));
+}
+
+.ag-live-rows { display: grid; gap: 8px; }
+.ag-live-group { margin: 12px 0 6px; color: var(--ag-text-3); }
+.ag-live-list > div:first-child .ag-live-group { margin-top: 0; }
+.ag-live-empty { font-size: 13px; color: var(--ag-text-3); }
+
+.ag-live-row {
+  display: grid;
+  gap: 2px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--ag-raised);
+  border: 1px solid var(--ag-edge);
+  animation: ag-rise 250ms var(--ag-ease) both;
+  transition: border-color 150ms ease, opacity 150ms ease;
+}
+.ag-live-row[data-status='running'] { border-color: rgb(52 199 89 / 0.55); }
+.ag-live-row[data-status='skipped'] { opacity: 0.55; }
+.ag-live-row:focus-visible { outline: 2px solid var(--ag-flow-task); outline-offset: 2px; }
+.ag-live-row-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ag-live-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ag-live-row-time { font-size: 13px; color: var(--ag-text-2); }
+.ag-live-row-detail { display: flex; align-items: baseline; gap: 6px; min-width: 0; padding-left: 16px; font-size: 13px; color: var(--ag-text-2); }
+.ag-live-row-word { flex-shrink: 0; color: var(--ag-text-3); }
+.ag-live-row-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-live-row[data-status='running'] .ag-live-row-word { color: var(--ag-st-running); }
+.ag-live-row[data-status='done'] .ag-live-row-word { color: var(--ag-st-done); }
+.ag-live-row[data-status='failed'] :is(.ag-live-row-word, .ag-live-row-text) { color: var(--ag-st-failed); }
+.ag-live-row[data-status='timed_out'] :is(.ag-live-row-word, .ag-live-row-text) { color: var(--ag-st-timed-out); }
+.ag-live-skeleton { animation: none; opacity: 0.5; }
+
+@keyframes ag-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 1023px) {
+  .ag-live-board { grid-template-columns: minmax(0, 1fr); }
+  .ag-flow { max-width: 160px; margin-right: 0; }
+  .ag-live-list { max-height: 320px; }
+}
+
+/* ---------- History ----------
+   Figma RunReportRow (4:166) and S2 History states. One row per run; its header opens every agent's outcome. */
+
+.ag-hist-filter select {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--color-ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--color-line);
+}
+.ag-hist-filter select:disabled { opacity: 0.5; }
+.ag-hist-error { color: var(--danger); }
+
+.ag-hist-row {
+  border-radius: 16px;
+  border: 1px solid var(--color-line);
+  transition: background-color 150ms ease;
+}
+.ag-hist-row[data-open='true'] { background: var(--surface-2); }
+.ag-hist-row[data-fresh='true'] { animation: ag-rise 300ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.ag-hist-head {
+  display: grid;
+  grid-template-columns: 176px minmax(0, 1fr) auto 48px 104px 16px;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 16px;
+  text-align: left;
+}
+button.ag-hist-head:hover { background: var(--surface-3); }
+.ag-hist-chevron { color: var(--color-ink-3); transition: transform 200ms ease; }
+.ag-hist-row[data-open='true'] .ag-hist-chevron { transform: rotate(180deg); }
+
+.ag-hist-when { display: grid; font-size: 13px; color: var(--color-ink-3); }
+.ag-hist-when .text-ink { font-size: 14px; }
+.ag-hist-request { display: grid; min-width: 0; gap: 2px; }
+.ag-hist-request-text,
+.ag-hist-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-hist-request-text { font-size: 14px; color: var(--color-ink); }
+.ag-hist-note { font-size: 13px; color: var(--color-ink-3); }
+.ag-hist-note[data-tone='warn'] { color: var(--warn); }
+
+.ag-hist-metrics { display: flex; gap: 16px; }
+.ag-hist-metric { display: grid; justify-items: end; font-size: 13px; color: var(--color-ink-3); }
+.ag-hist-metric .tabular-nums,
+.ag-hist-duration { font-family: var(--ag-mono, ui-monospace, monospace); font-size: 13px; }
+.ag-hist-duration { color: var(--color-ink-2); text-align: right; }
+
+.ag-hist-pill {
+  justify-self: start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--color-ink-2);
+  background: var(--surface-2);
+}
+.ag-hist-pill[data-outcome='finished'] { color: var(--ok); background: var(--ok-soft); }
+.ag-hist-pill[data-outcome='partly_failed'] { color: var(--warn); background: var(--warn-soft); }
+.ag-hist-pill[data-outcome='failed'] { color: var(--danger); background: var(--danger-soft); }
+
+.ag-hist-outcomes {
+  margin: 0 16px 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+  animation: ag-fade 200ms ease both;
+}
+.ag-hist-caption,
+.ag-hist-level,
+.ag-hist-status {
+  font-family: var(--ag-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ag-hist-caption { display: block; margin-bottom: 6px; color: var(--color-ink-3); }
+.ag-hist-reasons { margin-bottom: 12px; font-size: 13px; color: var(--color-ink-2); }
+.ag-hist-outcome {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 2fr) 84px minmax(0, 3fr) 48px;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+.ag-hist-outcome + .ag-hist-outcome { border-top: 1px solid var(--color-line); }
+.ag-hist-outcome .tabular-nums { font-family: var(--ag-mono, ui-monospace, monospace); text-align: right; }
+.ag-hist-level { color: var(--color-ink-3); }
+.ag-hist-name { overflow: hidden; font-weight: 500; color: var(--color-ink); text-overflow: ellipsis; white-space: nowrap; }
+.ag-hist-status { color: var(--color-ink-3); }
+.ag-hist-status[data-status='done'] { color: var(--ok); }
+.ag-hist-status[data-status='failed'] { color: var(--danger); }
+.ag-hist-status[data-status='timed_out'] { color: var(--warn); }
+.ag-hist-text { min-width: 0; overflow-wrap: anywhere; }
+
+.ag-hist-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--color-line);
+  transition: background-color 150ms ease;
+}
+.ag-hist-btn:hover { background: var(--surface-3); }
+.ag-hist-skeleton { height: 64px; border-radius: 16px; background: var(--surface-2); }
+
+@keyframes ag-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 1023px) {
+  .ag-hist-head { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; }
+  .ag-hist-request,
+  .ag-hist-metrics { grid-column: 1 / -1; }
+  .ag-hist-outcome { grid-template-columns: minmax(0, 1fr) auto; }
+  .ag-hist-outcome .ag-hist-level { grid-column: 1 / -1; }
+}
+
+/* Reduced motion: nothing travels or pulses; a connector holds a steady line while work moves. */
+@media (prefers-reduced-motion: reduce) {
+  .ag-live-dot[data-status='running'],
+  .ag-live-row,
+  .ag-live-banner,
+  .ag-hist-row[data-fresh='true'],
+  .ag-hist-outcomes {
+    animation: none;
+  }
+  .ag-flow[data-active='true'] .ag-flow-track::after {
+    animation: none;
+    background: var(--flow);
+  }
+  .ag-live-board,
+  .ag-hist-chevron {
+    transition: none;
+  }
+}
+
+/* ---------- Dark theme: History ---------- */
+:root[data-theme='dark'] .ag-hist-filter select { color-scheme: dark; }

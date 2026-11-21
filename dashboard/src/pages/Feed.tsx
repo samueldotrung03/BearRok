@@ -22,6 +22,7 @@ import { BrandMark } from '../components/Brand.tsx';
 import { toggleDock } from '../components/Dock.tsx';
 import { formatLabel, typeMeta } from '../components/meta.ts';
 import { Cover, Details, OpportunityRow } from '../components/OpportunityCard.tsx';
+import { PhotoLikeBurst, usePhotoLike } from '../components/PhotoLike.tsx';
 import { DataBadge, useLive, useOpportunities } from '../state/live.tsx';
 import { WhyThis } from '../components/WhyThis.tsx';
 import { ProfileMenu } from '../components/ProfileMenu.tsx';
@@ -92,6 +93,11 @@ function ReelVideo({ opportunity: o, active, near }: { opportunity: Opportunity;
   const bar = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   const [paused, setPaused] = useState(false);
+  const showingVideo = Boolean(o.video) && !failed && near;
+  // A click still plays or pauses the clip. The same toggle undoes that if the gesture was a
+  // double-click, which likes instead. A still photo has no click action.
+  const togglePaused = () => setPaused((value) => !value);
+  const { burst, photoHandlers } = usePhotoLike(o.id, showingVideo ? togglePaused : () => {}, showingVideo ? togglePaused : undefined);
 
   useEffect(() => {
     const video = ref.current;
@@ -106,11 +112,19 @@ function ReelVideo({ opportunity: o, active, near }: { opportunity: Opportunity;
     }
   }, [active, paused]);
 
+  const burstEl = <PhotoLikeBurst tick={burst} />;
   // Only the card on screen and its neighbours load a video; the rest show their still.
   // In the reel the whole picture sits in the upper part of the card, clear of the text below it.
-  if (!o.video || failed || !near) return <Cover opportunity={o} className="absolute inset-0 size-full" box="absolute inset-x-0 top-[6%] h-[44%] px-3" />;
+  if (!o.video || !showingVideo) {
+    return (
+      <div className="reel-photo photo-like-target" {...photoHandlers}>
+        <Cover opportunity={o} className="absolute inset-0 size-full" box="absolute inset-x-0 top-[6%] h-[44%] px-3" />
+        {burstEl}
+      </div>
+    );
+  }
   return (
-    <>
+    <div className="reel-photo photo-like-target">
       <video
         ref={ref}
         src={o.video}
@@ -130,7 +144,7 @@ function ReelVideo({ opportunity: o, active, near }: { opportunity: Opportunity;
         type="button"
         className="reel-video-toggle"
         aria-label={paused ? 'Play video' : 'Pause video'}
-        onClick={() => setPaused((value) => !value)}
+        {...photoHandlers}
       >
         {paused && (
           <span className="reel-video-play">
@@ -141,7 +155,8 @@ function ReelVideo({ opportunity: o, active, near }: { opportunity: Opportunity;
       <div className="reel-video-progress" aria-hidden="true">
         <div ref={bar} />
       </div>
-    </>
+      {burstEl}
+    </div>
   );
 }
 

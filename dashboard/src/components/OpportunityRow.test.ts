@@ -22,7 +22,9 @@ async function row(over: Record<string, unknown> = {}) {
 describe('feed row', () => {
   it('shows the whole picture beside the title, organizer and reason', async () => {
     const html = await row();
+    expect(html).toContain('feed-row-layout');
     expect(html).toContain('feed-row-media');
+    expect(html).toContain('photo-like-target');
     expect(html).toContain('TreeHacks 2027');
     expect(html).toContain('cover-whole size-full object-contain');
     expect(html).toContain('cover-fill');

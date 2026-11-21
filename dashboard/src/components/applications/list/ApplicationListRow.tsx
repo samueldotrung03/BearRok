@@ -44,6 +44,7 @@ export function ApplicationListRow({
   return (
     <li className="saved-item">
       <article className="feed-row apl-card" aria-labelledby={`apl-${a.opportunityId}`} data-status={a.status}>
+        <div className="feed-row-layout">
         <div className="feed-row-media">
           {posting ? (
             <Cover opportunity={posting} className="absolute inset-0 size-full" />
@@ -109,6 +110,7 @@ export function ApplicationListRow({
               </Link>
             </span>
           </div>
+        </div>
         </div>
       </article>
     </li>

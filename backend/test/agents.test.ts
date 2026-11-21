@@ -636,7 +636,7 @@ test('validation: the word placeholder is not a decision, so the posting is revi
   const s = new AgentSystem(brain, { now: () => NOW, feedTarget: 0 });
   await s.trigger('first');
   const first = s.currentRun()!.validations.find((v) => v.title === 'Software Engineering Intern')!;
-  assert.match(first.reason!, /Status reviewer: Could not be reviewed: empty placeholder review/);
+  assert.match(first.reason!, /Status reviewer: Could not be reviewed: the reviewer gave no answer/);
   assert.ok(!s.memorySnapshot().learned.rejected.some((r) => r.url.includes('software-engineering-intern')));
   assert.ok(s.currentRun()!.log.some((l) => l.text.startsWith('Funnel:')));
   brain.bad = false;

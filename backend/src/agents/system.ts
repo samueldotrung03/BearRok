@@ -220,8 +220,28 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** A review that came back blank is not a decision. The word "placeholder" is the CLI filling an empty schema. */
 export function unusableReview(reason: string | null | undefined): boolean {
-  const text = (reason ?? '').trim().toLowerCase();
-  return text === '' || text === 'placeholder' || text === 'null' || text === 'n/a' || text === 'none';
+  const text = (reason ?? '').replace(/^[\s"'.:-]+|[\s"'.:-]+$/g, '').toLowerCase();
+  return text === '' || text === 'placeholder' || text === 'null' || text === 'n/a' || text === 'none' || text === 'tbd';
+}
+
+/**
+ * A stored rejection that rests on a blank or placeholder review (saved before those were set
+ * aside) is no decision about the posting: it is dropped on load, so the posting is reviewed again.
+ */
+export function placeholderRejection(reason: string): boolean {
+  return reason
+    .split(/(?=\b(?:Criteria|Status) reviewer: )/)
+    .some((part) => /^(Criteria|Status) reviewer: /.test(part) && unusableReview(part.replace(/^(Criteria|Status) reviewer: /, '')));
+}
+
+/** The reviewer's copy of the record, with any field the CLI left as "placeholder" or blank taken from the reader's. */
+export function cleanRecord(record: Candidate, read: Candidate): Candidate {
+  const out: Record<string, unknown> = { ...record };
+  for (const [k, v] of Object.entries(read)) {
+    const mine = out[k];
+    if (mine === undefined || (typeof mine === 'string' && unusableReview(mine) && !(typeof v === 'string' && unusableReview(v)))) out[k] = v;
+  }
+  return out as unknown as Candidate;
 }
 
 /**
@@ -595,8 +615,11 @@ export class AgentSystem {
     this.interactions = structuredClone(l.interactions ?? []);
     this.opportunities = new Map((l.opportunities ?? []).map((o) => [o.id, structuredClone(o)]));
     this.reasons = new Map(Object.entries(l.reasons ?? {}));
-    this.rejected = new Map((l.rejected ?? []).map((r) => [r.url, r.reason]));
-    this.rejectedUrls = new Set(l.rejectedUrls ?? []);
+    // A rejection that rests on a placeholder review was never a decision: the posting is reviewed again.
+    const canon = (u: string) => canonicalUrl(u) ?? u;
+    const stale = new Set((l.rejected ?? []).filter((r) => placeholderRejection(r.reason)).map((r) => canon(r.url)));
+    this.rejected = new Map((l.rejected ?? []).filter((r) => !stale.has(canon(r.url))).map((r) => [r.url, r.reason]));
+    this.rejectedUrls = new Set((l.rejectedUrls ?? []).filter((u) => !stale.has(canon(u))));
     this.searches = structuredClone(l.searches ?? []);
     this.pending = new Map((l.pending ?? []).map((p) => [p.key, structuredClone(p)]));
     this.runs = structuredClone(l.runs ?? []);
@@ -1429,10 +1452,10 @@ export class AgentSystem {
             const r = v.reviews.find((x) => x.focus === reviewer.focus)!;
             try {
               const given = await this.brain.validate(f.candidate, brief, summary, reviewer.focus);
-              if (unusableReview(given.reason)) throw new Error('empty placeholder review');
+              if (unusableReview(given.reason)) throw new Error('the reviewer gave no answer');
               // A rejection off the reviewer's own ground, or only for something not confirmed, does not stand.
               const overruled = given.keep ? null : groundlessReject(reviewer.focus, given.reason);
-              const verdict = overruled ? { ...given, keep: true, reason: overruled, fit: Math.max(given.fit, 0.5) } : given;
+              const verdict = { ...given, record: cleanRecord(given.record, f.candidate), ...(overruled ? { keep: true, reason: overruled, fit: Math.max(given.fit, 0.5) } : {}) };
               if (overruled) log(reviewer.name, `Overruled its rejection of "${f.candidate.title}" (${given.reason.replace(/\.$/, '')}): ${overruled}.`);
               verdicts.set(key, { ...verdicts.get(key), [reviewer.focus]: verdict });
               r.status = verdict.keep ? 'kept' : 'rejected';

@@ -95,7 +95,7 @@ Set `GROK_TRANSPORT` in `backend/.env`. The agents are the same either way; only
 
 Cautions for `cli`:
 
-- Grok Build is a coding agent that can read files and run commands. Each call runs in an empty temporary folder and the prompt tells it to use web search only. `GROK_CLI_ALWAYS_APPROVE=1` lets it use tools without asking, which web search may need; that also removes the approval step for anything a web page might talk it into, so turn it on only on a machine and account you are comfortable with.
+- Grok Build is a coding agent that can read files and run commands. Each call runs in an empty temporary folder. A headless call cannot ask for permission, so a page open (`web_fetch`) is cancelled unless it is allowed by name. The client passes `--allow WebSearch` and `--allow WebFetch` and does not pass `--always-approve` unless `GROK_CLI_ALWAYS_APPROVE=1`. That flag approves every tool, including shell and files, so leave it off. Set `AGENT_DEBUG=1` to append each prompt and the raw CLI stdout to a `bearok-agent-debug.jsonl` file in the system temp directory.
 - Every student's agents run on one person's subscription and its limits.
 - Whether xAI's terms allow running an app this way has not been checked.
 - The CLI has been run headless for career-guide research and for scout searches. It returned JSON, and web search returned leads. A feed of kept cards was not finished in that check: a job budget of 6 was spent on scouts, so the readers never ran, and a later budget of 24 still kept no cards.

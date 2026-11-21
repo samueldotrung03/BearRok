@@ -9,7 +9,8 @@ import { createDeadlineEvent, deleteEvent } from '../calendar.ts';
 import { readResume, RESUME_MAX_BYTES, RESUME_TYPES } from '../resume.ts';
 import { exportApplications, trackerRows, writeTracker } from '../sheets.ts';
 import type { Store } from '../store/index.ts';
-import { config } from '../config.ts';
+import { config, provider } from '../config.ts';
+import { extractResumeProfile, type ResumeExtraction } from '../resumeExtract.ts';
 import { cleanTimes, defaultTimes, validTimeZone } from './autoMode.ts';
 import { randomBytes } from 'node:crypto';
 import { allCalendarsIn, consentUrl, exchangeCode, pkce, refreshAccess, revoke, servicesIn, type GoogleService, type OAuthClient } from '../googleOAuth.ts';
@@ -48,6 +49,8 @@ export interface AgentsOptions {
   saveDelayMs?: number;
   /** How the agents reach Grok, for the settings page. */
   grok?: { connected: boolean; mode: 'api' | 'cli' | 'simulated'; detail: string };
+  /** Reads an uploaded résumé into profile fields. Tests pass a stand-in; the server uses Grok or the simulated reader. */
+  extractResume?: (text: string) => Promise<ResumeExtraction>;
 }
 
 const ACTIONS: Action[] = ['save', 'like', 'dislike', 'open', 'apply'];
@@ -340,7 +343,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     if (c.req.param('id') !== 'me') return c.json({ error: 'sign in to upload a résumé' }, 403);
     const system = await systemOf(c);
     const type = (c.req.header('content-type') ?? '').split(';')[0]!.trim();
-    if (!RESUME_TYPES.includes(type)) return c.json({ error: 'upload a PDF or a plain text file' }, 415);
+    if (!RESUME_TYPES.includes(type)) return c.json({ error: 'upload a PDF, a Word document, or a plain text file' }, 415);
     if (Number(c.req.header('content-length') ?? 0) > RESUME_MAX_BYTES) return c.json({ error: 'the file is larger than 5 MB' }, 413);
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     if (bytes.length === 0) return c.json({ error: 'the file is empty' }, 400);
@@ -366,6 +369,23 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     if (c.req.param('id') !== 'me') return c.json({ error: 'not found' }, 404);
     (await systemOf(c)).setResume(null);
     return c.json({ resume: null });
+  });
+
+  // The file is already stored. This asks Grok (or the simulated reader) for the profile fields in it.
+  // Nothing is written onto the profile: the student confirms each part first.
+  app.post(`${base}/resume/extract`, async (c) => {
+    if (c.req.param('id') !== 'me') return c.json({ error: 'sign in to upload a résumé' }, 403);
+    const resume = (await systemOf(c)).getResume();
+    if (!resume) return c.json({ error: 'No résumé is uploaded yet.' }, 404);
+    const text = resume.text?.trim() ?? '';
+    if (!text) return c.json({ error: 'No text could be read from this file. If it is a scan, upload a PDF or Word document with selectable text.' }, 422);
+    try {
+      const read = opts.extractResume ?? ((body: string) => extractResumeProfile(body, { live: provider() === 'grok' }));
+      return c.json(await read(text));
+    } catch (e) {
+      console.error('résumé extract failed:', e instanceof Error ? e.message : e);
+      return c.json({ error: 'The résumé could not be read. Try again.' }, 502);
+    }
   });
 
   // Settings that change how the agents behave for this student.

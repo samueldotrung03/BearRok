@@ -33,10 +33,15 @@ export function Directives({ parsed }: { parsed: ParsedInstruction }) {
   );
 }
 
-export function TellBar({ onSend, standing }: { onSend: (text: string) => void; standing: number }) {
+/**
+ * The demo previews how its own rules read the text. With an agent server (`live`), the text is
+ * saved as a profile note that Grok reads as written, so there is no preview: `status` says
+ * whether it was saved instead.
+ */
+export function TellBar({ onSend, standing = 0, live = false, status = null }: { onSend: (text: string) => void; standing?: number; live?: boolean; status?: { tone: 'quiet' | 'warn'; text: string } | null }) {
   const [text, setText] = useState('');
   const inputId = useId();
-  const parsed = text.trim() ? parseInstruction(text) : null;
+  const parsed = !live && text.trim() ? parseInstruction(text) : null;
   const send = (value: string) => {
     if (!value.trim()) return;
     onSend(value.trim());
@@ -68,7 +73,9 @@ export function TellBar({ onSend, standing }: { onSend: (text: string) => void; 
         </button>
       </form>
       <div className="mt-2.5 flex min-h-7 flex-wrap items-center gap-2 text-[12.5px]" aria-live="polite">
-        {parsed ? (
+        {status ? (
+          <span className="ag-tell-status" data-tone={status.tone}>{status.text}</span>
+        ) : parsed ? (
           <>
             <span className="text-white/60">The master agent reads this as</span>
             <ArrowRight className="size-3.5 text-white/50" aria-hidden="true" />

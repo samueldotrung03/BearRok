@@ -5,6 +5,7 @@
 // agent is selected.
 import { Pause, Play, RotateCcw, Server, SkipForward, Square } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useAuth } from '../auth/AuthProvider.tsx';
 import { AgentSettingsButton, autoLine } from '../components/agents/AgentSettings.tsx';
 import { AnimatedNumber, clockText, compact } from '../components/agents/AnimatedNumber.tsx';
 import { Funnel } from '../components/agents/Funnel.tsx';
@@ -16,11 +17,13 @@ import type { TeamId } from '../lib/agents/team.ts';
 import { BriefCard, TellBar, type StandingInstruction } from '../components/agents/TellAgents.tsx';
 import { MemoryCard, UsageCard } from '../components/agents/UsageMemory.tsx';
 import { Page, StatusPill } from '../components/Page.tsx';
+import { withDefaults } from '../data/preferences.ts';
 import { opportunities } from '../data/sample.ts';
 import { useActivity, useNow, type ActivityState } from '../lib/activity/useActivity.ts';
 import { assignSlots, buildBrief, memoryFrom } from '../lib/agents/brief.ts';
 import { funnel, idleRun, runReducer, totals, type RunInput } from '../lib/agents/engine.ts';
 import { sourceLabel } from '../lib/agents/fromLive.ts';
+import { withToldNote } from '../lib/agents/tell.ts';
 import { fromRun } from '../lib/agents/view.ts';
 import { useLocal } from '../lib/useLocal.ts';
 import { SAMPLE_FEED, useLive } from '../state/live.tsx';
@@ -46,9 +49,35 @@ export function Agents() {
   );
 }
 
+type TellStatus = { tone: 'quiet' | 'warn'; text: string } | null;
+
 function LiveAgents({ activity }: { activity: ActivityState & { retry: () => void } }) {
   const reduced = useReducedMotion();
   const live = useLive();
+  const auth = useAuth();
+  const { state, dispatch } = useStore();
+  const [told, setTold] = useState<TellStatus>(null);
+
+  // What the student tells the agents becomes a profile note: the master reads notes first at
+  // the start of every search, and saving one starts a new search shortly after.
+  const tell = (text: string) => {
+    const next = withToldNote(withDefaults(state.preferences), text);
+    if (!next) {
+      setTold({ tone: 'warn', text: 'Not sent: your profile already has 20 notes. Remove one on the Profile page, then try again.' });
+      return;
+    }
+    dispatch({ type: 'setPreferences', preferences: next });
+    setTold({ tone: 'quiet', text: 'Saving to your profile notes…' });
+    void auth
+      .saveProfile({ preferences: next })
+      .then((ok) =>
+        setTold(
+          ok
+            ? { tone: 'quiet', text: `Saved to your profile notes: “${text}”. The master reads it first; a new search starts in a moment.` }
+            : { tone: 'warn', text: 'Kept on this computer only: the agent server did not save it, so the agents will not see it yet.' },
+        ),
+      );
+  };
   const run = activity.live?.run ?? null;
   const running = run?.outcome === 'running';
   const now = useNow(running, activity.skew);
@@ -77,7 +106,15 @@ function LiveAgents({ activity }: { activity: ActivityState & { retry: () => voi
 
   return (
     <Page title="Your agents" subtitle="Every agent of the current run, what it is doing and for how long, and a report of each past run.">
-      <LiveBoard state={activity} now={now} reduced={reduced} actions={actions} hasHistory={activity.history.length > 0} onRetry={activity.retry} />
+      <LiveBoard
+        state={activity}
+        now={now}
+        reduced={reduced}
+        actions={actions}
+        hasHistory={activity.history.length > 0}
+        tell={<TellBar live onSend={tell} status={told} />}
+        onRetry={activity.retry}
+      />
       <RunHistory history={activity.history} status={activity.status} onRetry={activity.retry} />
     </Page>
   );

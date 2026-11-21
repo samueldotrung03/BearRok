@@ -19,6 +19,8 @@ export interface LiveBoardProps {
   actions: ReactNode;
   /** True when History has at least one run, so the empty state can point at it. */
   hasHistory: boolean;
+  /** Tell your agents, owned by the page; shown under the request line. */
+  tell?: ReactNode;
   onRetry: () => void;
 }
 
@@ -157,7 +159,7 @@ function useAnnouncer(live: LiveActivity | null) {
   return message;
 }
 
-export function LiveBoard({ state, now, reduced, actions, hasHistory, onRetry }: LiveBoardProps) {
+export function LiveBoard({ state, now, reduced, actions, hasHistory, tell, onRetry }: LiveBoardProps) {
   const { live } = state;
   const run = live?.run ?? null;
   const loading = state.status === 'connecting' && !live;
@@ -209,6 +211,7 @@ export function LiveBoard({ state, now, reduced, actions, hasHistory, onRetry }:
         <span className="ag-live-label">Request</span>
         <span className="min-w-0">{request}</span>
       </p>
+      {tell && !failedToLoad && <div className="ag-tell">{tell}</div>}
 
       {state.status === 'reconnecting' && (
         <Banner tone="warn" icon={<RefreshCw className="size-4" />}>

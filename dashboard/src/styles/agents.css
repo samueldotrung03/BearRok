@@ -1792,6 +1792,11 @@ button.ag-chip-dark:hover {
   .ag-live-list { max-height: 320px; }
 }
 
+/* Tell your agents, in the live view: whether the note was saved, in place of the demo's preview. */
+.ag-live .ag-tell { margin-top: 14px; }
+.ag-tell-status { color: var(--ag-text-2, rgb(255 255 255 / 0.7)); }
+.ag-tell-status[data-tone='warn'] { color: var(--ag-st-timed-out, var(--warn)); }
+
 /* ---------- History ----------
    Figma RunReportRow (4:166) and S2 History states. One row per run; its header opens every agent's outcome. */
 

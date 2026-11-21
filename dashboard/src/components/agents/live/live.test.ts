@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { agent, at, liveOf, report, runOf, T0 } from '../../../lib/activity/fixtures.ts';
 import type { ActivityState } from '../../../lib/activity/useActivity.ts';
+import { TellBar } from '../TellAgents.tsx';
 import { LiveBoard } from './LiveBoard.tsx';
 import { RunHistory } from './RunHistory.tsx';
 
@@ -152,5 +153,34 @@ describe('RunHistory', () => {
     expect(html).toContain('Request not recorded');
     expect(html).toContain('outline only');
     expect(count(html, '<button type="button" class="ag-hist-head"')).toBe(1);
+  });
+});
+
+describe('Tell your agents in the live view', () => {
+  const tellBoard = (status: 'live' | 'error', tellStatus: { tone: 'quiet' | 'warn'; text: string } | null) =>
+    renderToStaticMarkup(
+      createElement(LiveBoard, {
+        state: { status, live: status === 'live' ? liveOf() : null, attempt: 0, error: status === 'error' ? 'the agent server answered 503' : null },
+        now: T0,
+        reduced: false,
+        actions: null,
+        hasHistory: false,
+        tell: createElement(TellBar, { live: true, onSend: () => {}, status: tellStatus }),
+        onRetry: () => {},
+      }),
+    );
+
+  it('sits under the request line and says whether the note was saved, with no rule preview', () => {
+    const html = tellBoard('live', { tone: 'quiet', text: 'Saved to your profile notes: “Only remote”.' });
+    expect(html).toContain('class="ag-tell"');
+    expect(html.indexOf('ag-live-request')).toBeLessThan(html.indexOf('ag-tell'));
+    expect(html).toContain('Saved to your profile notes');
+    expect(html).not.toContain('reads this as');
+    expect(html).not.toContain('standing instruction');
+  });
+
+  it('warns when the note could not be sent, and is hidden when the board could not load', () => {
+    expect(tellBoard('live', { tone: 'warn', text: 'Kept on this computer only' })).toContain('data-tone="warn"');
+    expect(tellBoard('error', null)).not.toContain('ag-tell');
   });
 });

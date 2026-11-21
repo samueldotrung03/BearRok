@@ -192,8 +192,10 @@ const YEARS: ClassYear[] = ['Freshman', 'Sophomore', 'Junior', 'Senior'];
 /**
  * The student's own profile from the backend's `/state`, or null when the backend only has its
  * built-in demo student (it starts every account as Maya until the student's profile is sent).
+ * The local user, with sign-in off, IS that demo student, so pass `{ includeDemo: true }` and
+ * the page shows the same profile the agents search with.
  */
-export function fromBackendProfile(raw: unknown): { profile: Partial<Profile>; preferences?: Preferences } | null {
+export function fromBackendProfile(raw: unknown, opts?: { includeDemo?: boolean }): { profile: Partial<Profile>; preferences?: Preferences } | null {
   if (!raw || typeof raw !== 'object') return null;
   const p = raw as Record<string, unknown>;
   const name = text(p.name);
@@ -201,7 +203,7 @@ export function fromBackendProfile(raw: unknown): { profile: Partial<Profile>; p
   const careerInterests = strings(p.careerInterests) ?? [];
   const preferences = p.preferences && typeof p.preferences === 'object' ? withDefaults(p.preferences as Partial<Preferences>) : undefined;
   const demoSeed = name === 'Maya' && p.school === 'UC Berkeley' && p.major === 'Computer Science' && !preferences && careerInterests.length === 0;
-  if (demoSeed) return null;
+  if (demoSeed && !opts?.includeDemo) return null;
   const profile: Partial<Profile> = { name, fullName: name, careerInterests };
   for (const key of ['school', 'major', 'location'] as const) {
     const value = text(p[key]);
@@ -215,6 +217,18 @@ export function fromBackendProfile(raw: unknown): { profile: Partial<Profile>; p
   const eventTypes = strings(p.eventTypes);
   if (eventTypes) profile.eventTypes = eventTypes;
   return { profile, ...(preferences ? { preferences } : {}) };
+}
+
+/** Application ids that exist only in the invented sample student. */
+const SAMPLE_APPLICATION_IDS = ['opp-northwind-swe', 'opp-cinder-backend', 'opp-transfer-scholarship', 'opp-harbor-data', 'opp-ml-research', 'opp-quill-product', 'opp-systems-research'];
+
+/**
+ * True for the invented guest the dashboard used to start with (Maya, sophomore, the sample
+ * applications). That student is not the one the agents keep. A real local profile is left alone.
+ */
+export function isSampleStudent(state: AppState): boolean {
+  const sampleApps = Object.keys(state.applications).filter((id) => SAMPLE_APPLICATION_IDS.includes(id)).length;
+  return state.profile.name === 'Maya' && state.profile.school === 'UC Berkeley' && state.profile.year === 'Sophomore' && state.goalId === 'path-swe' && sampleApps >= 3;
 }
 
 /** localStorage keys "Start a clean demo" leaves alone: whether each account has finished sign-up. */

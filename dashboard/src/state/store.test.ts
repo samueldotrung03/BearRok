@@ -10,7 +10,7 @@ import { evidenceFor, orderByEvidence } from '../lib/pathways.ts';
 import { buildOpportunityRoadmap, planFor } from '../lib/roadmap.ts';
 import { applicationInfo } from '../data/sample.ts';
 import type { PathProfile, Roadmap } from '../types.ts';
-import { clearDemoStorage, fromBackendProfile, loadState, reducer, saveState, startingState, storageKey, type AppState } from './store.ts';
+import { clearDemoStorage, fromBackendProfile, isSampleStudent, loadState, reducer, saveState, startingState, storageKey, type AppState } from './store.ts';
 
 // One clock for every call: the score includes recency, so two calls a millisecond apart would
 // otherwise differ in the last digits and break exact comparisons.
@@ -380,6 +380,15 @@ describe('a student starts from their own profile', () => {
     expect(own?.profile).toMatchObject({ name: 'Ana', school: 'SRJC', major: 'Nursing', year: 'Junior', careerInterests: ['Healthcare'] });
     expect(own?.preferences?.fields).toEqual(['Public health']);
     expect(own?.preferences?.notes).toEqual([]);
+  });
+
+  it('adopts the demo seed for the local student, and tells that seed apart from a real profile', () => {
+    const seed = { name: 'Maya', school: 'UC Berkeley', major: 'Computer Science', year: 'Freshman', careerInterests: [], preferences: null };
+    expect(fromBackendProfile(seed, { includeDemo: true })?.profile).toMatchObject({ name: 'Maya', year: 'Freshman', school: 'UC Berkeley', major: 'Computer Science' });
+    expect(isSampleStudent(initialState)).toBe(true);
+    expect(isSampleStudent(fresh)).toBe(false);
+    const named = reducer(fresh, { type: 'adoptProfile', profile: { name: 'Ana', school: 'SRJC', year: 'Junior' } });
+    expect(isSampleStudent(named)).toBe(false);
   });
 });
 

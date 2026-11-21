@@ -23,6 +23,7 @@ import { toggleDock } from '../components/Dock.tsx';
 import { formatLabel, typeMeta } from '../components/meta.ts';
 import { Cover, Details, OpportunityRow } from '../components/OpportunityCard.tsx';
 import { PhotoLikeBurst, usePhotoLike } from '../components/PhotoLike.tsx';
+import { emptyFeedCopy } from '../state/feedCopy.ts';
 import { DataBadge, useLive, useOpportunities } from '../state/live.tsx';
 import { WhyThis } from '../components/WhyThis.tsx';
 import { ProfileMenu } from '../components/ProfileMenu.tsx';
@@ -563,13 +564,14 @@ export function Feed() {
                   {slides.length > 0 ? 'You are all caught up' : agentsLive.searching ? 'Your agents are searching' : 'Nothing here yet'}
                 </h2>
                 <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-ink-2">
-                  {agentsLive.sample
-                    ? 'These are sample postings. This public copy has no agents behind it, so nothing new arrives.'
-                    : agentsLive.status === 'offline'
-                    ? 'The agents cannot be reached right now, so there is nothing new to show. This page fills in on its own once they are back.'
-                    : slides.length < agentsLive.feedTarget
-                      ? `Your agents have found ${slides.length} of the ${agentsLive.feedTarget} opportunities they aim for${agentsLive.searching ? ' and are searching for more' : '. They search again on their own'}.`
-                      : 'Refresh to re-rank the feed with what you saved and skipped.'}
+                  {emptyFeedCopy({
+                    sample: agentsLive.sample,
+                    offline: agentsLive.status === 'offline',
+                    searching: agentsLive.searching,
+                    shown: slides.length,
+                    target: agentsLive.feedTarget,
+                    outcome: agentsLive.memoryCounts,
+                  })}
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-2">
                   <button type="button" onClick={refresh} className="btn-primary h-11 px-5 text-sm text-white">

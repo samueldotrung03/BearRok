@@ -350,7 +350,13 @@ export function AgentsCard({ inFeed }: { inFeed: number }) {
         <i className={live.searching ? 'is-live' : connected ? 'is-on' : ''} aria-hidden="true" />
         {state}
       </p>
-      <p className="db-agent-note">{connected ? (run?.summary ?? providerWords[live.provider]) : 'The cards you see are sample data until the agent backend is running.'}</p>
+      <p className="db-agent-note">
+        {connected
+          ? (run?.summary ?? providerWords[live.provider])
+          : live.sample
+            ? 'This public copy shows sample postings. There are no agents behind it.'
+            : 'The agent backend is not running, so there are no new results to show.'}
+      </p>
       <dl className="db-agent-stats">
         <div>
           <dt>In your feed</dt>

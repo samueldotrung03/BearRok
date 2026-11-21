@@ -42,4 +42,11 @@ describe('assistant', () => {
     expect(respond('asdf qwer', initialState, NOW).points!.length).toBeGreaterThan(2);
     expect(suggestionsFor('/roadmap')).not.toEqual(suggestionsFor('/'));
   });
+
+  it('does not invent sample postings when the feed it was given is empty', () => {
+    const reply = respond('find internships', initialState, NOW, []);
+    expect(reply.text).toMatch(/Nothing in your feed/);
+    expect(reply.text).not.toMatch(/Northwind/);
+    expect(reply.actions?.some((action) => action.open)).toBeFalsy();
+  });
 });

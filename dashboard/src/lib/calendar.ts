@@ -44,6 +44,17 @@ export function dayKey(date: Date | string | number): string {
 }
 
 /**
+ * The postings a page should read. The public showcase uses the sample set. Everywhere else the
+ * feed and the saved list are the only cards, so an empty feed stays empty.
+ */
+export function postingPool(sample: boolean, live: Opportunity[], saved: Opportunity[]): Opportunity[] {
+  if (sample) return opportunities;
+  const byId = new Map<string, Opportunity>();
+  for (const card of [...live, ...saved]) byId.set(card.id, card);
+  return [...byId.values()];
+}
+
+/**
  * `found` is what the agents found (the feed and the saved list). Without it the sample set is
  * used, as the pages built on sample data still do.
  */

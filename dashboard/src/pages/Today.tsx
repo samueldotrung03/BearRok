@@ -9,13 +9,13 @@ import { NewForYou } from '../components/today/Sections.tsx';
 import { Details } from '../components/OpportunityCard.tsx';
 import { Page } from '../components/Page.tsx';
 import { opportunities as sampleOpportunities } from '../data/sample.ts';
-import { calendarItems, dayKey } from '../lib/calendar.ts';
+import { calendarItems, dayKey, postingPool } from '../lib/calendar.ts';
 import { mergeItems, type PersonalItem } from '../lib/cal/items.ts';
 import { goalNeeds, headline, pipeline, profileStrength, quickReminder, roadmapGlance, upcoming, weekStrip } from '../lib/today/dashboard.ts';
 import { useLocal } from '../lib/useLocal.ts';
 import { greeting } from '../lib/time.ts';
 import { buildToday } from '../lib/today/today.ts';
-import { useOpportunities } from '../state/live.tsx';
+import { useLive, useOpportunities } from '../state/live.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import type { Opportunity } from '../types.ts';
 import '../styles/today.css';
@@ -23,20 +23,22 @@ import '../styles/dashboard.css';
 
 export function Today() {
   const { state, dispatch } = useStore();
+  const live = useLive();
   const list = useOpportunities();
   const [details, setDetails] = useState<Opportunity | null>(null);
   const [status, setStatus] = useState<Undoable | null>(null);
+  // Sample cards only in the public showcase. A connected app reads the feed and the saved list.
+  const postings = useMemo(() => (live.sample ? sampleOpportunities : postingPool(false, list, live.savedCards)), [live.sample, live.savedCards, list]);
 
   // The student's own reminders are the calendar's: one list, shown and added in both places.
   const [personal, setPersonal] = useLocal<PersonalItem[]>('bearrok.calendar.personal', []);
-  const today = useMemo(() => buildToday(state, list, Date.now()), [state, list]);
-  // Tracked items can be sample cards even when the feed shows live ones, so both are searched.
-  const byId = useMemo(() => new Map([...sampleOpportunities, ...list].map((o) => [o.id, o])), [list]);
+  const today = useMemo(() => buildToday(state, postings, Date.now()), [state, postings]);
+  const byId = useMemo(() => new Map(postings.map((o) => [o.id, o])), [postings]);
 
   const board = useMemo(() => {
     const now = Date.now();
     const day = dayKey(new Date(now));
-    const items = mergeItems(calendarItems(state, now), personal);
+    const items = mergeItems(calendarItems(state, now, postings), personal);
     return {
       week: weekStrip(items, day),
       upcoming: upcoming(items, day),
@@ -46,7 +48,7 @@ export function Today() {
       needs: goalNeeds(state),
       profile: profileStrength(state),
     };
-  }, [state, byId, personal]);
+  }, [state, byId, personal, postings]);
 
   useEffect(() => {
     if (!status) return;

@@ -60,12 +60,12 @@ export function findOpportunity(text: string, pool: Opportunity[]): Opportunity 
 
 const line = (item: CalendarItem) => `${shortDate(item.date)} · ${kindLabel[item.kind]}: ${item.title}`;
 
-export function respond(input: string, state: AppState, now = Date.now()): AssistantReply {
+export function respond(input: string, state: AppState, now = Date.now(), pool: Opportunity[] = opportunities): AssistantReply {
   const text = input.toLowerCase().trim();
-  const visible = opportunities.filter((o) => !state.dismissed.includes(o.id));
+  const visible = pool.filter((o) => !state.dismissed.includes(o.id));
   const ranked = rankFeed(visible, state, now);
   const plan = planFor(state);
-  const items = calendarItems(state, now).filter((item) => !item.done);
+  const items = calendarItems(state, now, pool).filter((item) => !item.done);
   const today = dayKey(now);
   const named = findOpportunity(text, visible);
 
@@ -158,7 +158,7 @@ export function respond(input: string, state: AppState, now = Date.now()): Assis
     return {
       text: `You are tracking ${entries.length} application${entries.length === 1 ? '' : 's'}.`,
       points: entries.map(([id, application]) => {
-        const o = opportunities.find((candidate) => candidate.id === id);
+        const o = pool.find((candidate) => candidate.id === id);
         return `${statusLabel[application.status]} · ${o?.title ?? id}${o?.deadline ? ` · ${dueLabel(o.deadline, now).toLowerCase()}` : ''}`;
       }),
       actions: [{ label: 'Open applications', to: '/applications' }],

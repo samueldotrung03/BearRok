@@ -1,10 +1,10 @@
-import { createContext, useContext, useEffect, useMemo, useReducer, useState, type Dispatch, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type ReactNode } from 'react';
 import { useAuth } from '../auth/AuthProvider.tsx';
 import { API_URL } from '../auth/firebase.ts';
 import { initialState } from '../data/sample.ts';
 import { SAMPLE_FEED } from './live.tsx';
 import { goalForProfile } from '../lib/personalize.ts';
-import { fromBackendProfile, loadState, reducer, saveState, startingState, type Action, type AppState } from './store.ts';
+import { fromBackendProfile, isSampleStudent, loadState, reducer, saveState, startingState, type Action, type AppState } from './store.ts';
 
 const StoreContext = createContext<{ state: AppState; dispatch: Dispatch<Action> } | null>(null);
 
@@ -69,6 +69,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blank, uid, auth.backend, accountName]);
+
+  // With sign-in off, this machine's user is the backend's guest student. The invented sample
+  // student (a different Maya, with sample applications) is not loaded over that record, and a
+  // blank profile takes the one the agents already search with, demo seed included.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  useEffect(() => {
+    if (SAMPLE_FEED || auth.signInEnabled !== false || auth.status !== 'guest') return;
+    const current = stateRef.current;
+    const sample = isSampleStudent(current);
+    const blank = !current.profile.name.trim();
+    if (!sample && !blank) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/students/demo/state`);
+        if (!res.ok || cancelled) return;
+        const own = fromBackendProfile(((await res.json()) as { student?: { profile?: unknown } }).student?.profile, { includeDemo: true });
+        if (cancelled) return;
+        const base = sample ? startingState(initialState, true) : stateRef.current;
+        const next = own ? reducer(base, { type: 'adoptProfile', ...own }) : base;
+        if (next !== stateRef.current) dispatch({ type: 'load', state: next });
+      } catch {
+        // The feed still comes from the live connection. The profile stays as it is on this device.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.signInEnabled, auth.status]);
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <StoreContext value={value}>{children}</StoreContext>;

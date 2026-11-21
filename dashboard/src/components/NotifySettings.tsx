@@ -3,7 +3,8 @@
 import { Bell } from '@phosphor-icons/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { calendarItems } from '../lib/calendar.ts';
+import { calendarItems, postingPool } from '../lib/calendar.ts';
+import { useLive } from '../state/live.tsx';
 import { ENABLED_KEY, NOTIFY_CHANGED, notifyPermission, requestNotifyPermission, showNotification, type NotifyPermission } from '../lib/notify/browser.ts';
 import { nextUpcoming, TEST_ONLY } from '../lib/notify/plan.ts';
 import { useLocal } from '../lib/useLocal.ts';
@@ -27,11 +28,13 @@ const permissionWords: Record<NotifyPermission, string> = {
 
 export function NotifySettings() {
   const { state } = useStore();
+  const live = useLive();
   const navigate = useNavigate();
   const [enabled, setEnabled] = useLocal(ENABLED_KEY, false);
   const [permission, setPermission] = useState<NotifyPermission>(notifyPermission);
   const [result, setResult] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const items = useMemo(() => calendarItems(state), [state]);
+  const pool = useMemo(() => postingPool(live.sample, live.opportunities, live.savedCards), [live.sample, live.opportunities, live.savedCards]);
+  const items = useMemo(() => calendarItems(state, Date.now(), pool), [state, pool]);
   const onDesktop = Boolean((window as unknown as { bearrokDesktop?: unknown }).bearrokDesktop);
 
   // The permission can change in system settings, so look again when the student comes back.

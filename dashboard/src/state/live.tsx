@@ -10,6 +10,8 @@ import { applicationInfo, coverFor, opportunities as sampleOpportunities } from 
 import { grokFinds } from '../data/grokFinds.ts';
 import type { AgentEvent, AgentNode, ApplicationStatus, Opportunity, OpportunityType } from '../types.ts';
 import { dataBadgeText } from './dataBadge.ts';
+import { type FeedOutcome } from './feedCopy.ts';
+import { reactionSends } from './reactions.ts';
 import { sampleRequest } from './sampleBackend.ts';
 import { useStore } from './StoreProvider.tsx';
 
@@ -158,6 +160,8 @@ interface LiveValue {
   runNow: (type?: OpportunityType) => Promise<void>;
   /** Stop the search in flight. What it already checked stays in the feed. */
   stopRun: () => Promise<void>;
+  /** What the stored memory says the agents have done, for an empty feed to say so honestly. */
+  memoryCounts: FeedOutcome | null;
 }
 
 /** The feed's target when the backend has not said: at least this many cards by default. */
@@ -289,6 +293,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<LiveValue['status']>('connecting');
   const [student, setStudent] = useState<BackendStudent | null>(null);
   const [run, setRun] = useState<BackendRun | null>(null);
+  const [memoryCounts, setMemoryCounts] = useState<FeedOutcome | null>(null);
   const who = auth.status === 'signedIn' ? 'me' : 'demo';
   const uid = auth.user?.uid ?? null;
 
@@ -439,7 +444,25 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }
   }, [student]);
 
+  // What the agents stored (runs, searches, kept, rejected), so an empty feed can say what happened.
+  useEffect(() => {
+    if (status !== 'connected') return;
+    let cancelled = false;
+    void (async () => {
+      const token = await auth.getToken().catch(() => null);
+      const res = await fetch(`${API_URL}/api/students/${who}/memory`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }).catch(() => null);
+      if (!res?.ok || cancelled) return;
+      const counts = ((await res.json()) as { learned?: { counts?: Partial<FeedOutcome> } }).learned?.counts;
+      if (!cancelled && counts) setMemoryCounts({ found: counts.found ?? 0, rejected: counts.rejected ?? 0, searches: counts.searches ?? 0, runs: counts.runs ?? 0 });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, who, student?.runCount]);
+
   // Reactions made in the app are sent to the backend, so the next run searches differently.
+  // A saved card still counts when the feed itself is empty: the action has to reach memory.
   const previous = useRef<{ saved: string[]; liked: string[]; dismissed: string[]; opened: string[] } | null>(null);
   useEffect(() => {
     const now = { saved: state.saved, liked: state.liked, dismissed: state.dismissed, opened: state.opened };
@@ -450,16 +473,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       skipSend.current = false;
       return;
     }
-    if (!before || !usingLive) return;
+    if (!before || status !== 'connected') return;
     const known = new Set([...liveCards, ...savedCards].map((o) => o.id));
-    const changed = (a: string[], b: string[]) => [...a.filter((id) => !b.includes(id)), ...b.filter((id) => !a.includes(id))].filter((id) => known.has(id));
-    const send: { id: string; action: string }[] = [
-      // Saving, liking and disliking each undo themselves when sent a second time, as they do in the app.
-      ...changed(before.saved, now.saved).map((id) => ({ id, action: 'save' })),
-      ...changed(before.liked, now.liked).map((id) => ({ id, action: 'like' })),
-      ...changed(before.dismissed, now.dismissed).map((id) => ({ id, action: 'dislike' })),
-      ...now.opened.filter((id) => !before.opened.includes(id) && known.has(id)).map((id) => ({ id, action: 'open' })),
-    ];
+    const send = reactionSends(before, now, known);
     if (send.length === 0) return;
     void (async () => {
       const token = await auth.getToken().catch(() => null);
@@ -510,9 +526,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       stopRun: async () => {
         await request('/runs/stop', { method: 'POST' }).catch(() => {});
       },
+      memoryCounts,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [status, sample, sampleApplications, state.saved, usingLive, student, liveCards, savedCards, run, who, auth.google.calendar, calendarSync],
+    [status, sample, sampleApplications, state.saved, usingLive, student, liveCards, savedCards, run, who, auth.google.calendar, calendarSync, memoryCounts],
   );
   return <LiveContext value={value}>{children}</LiveContext>;
 }

@@ -6,6 +6,7 @@ import { config } from '../config.ts';
 import { grokJson, type GrokTool } from '../grok.ts';
 import { cleanDraft, sortByRules, type CalendarEventInput, type EventAsk, type EventVerdict } from './eventSorter.ts';
 import type { Brain, DraftedApplication, DraftInput, MasterInput } from './brain.ts';
+import { aboutOpenness } from './reviewGuard.ts';
 import { CATEGORY_LABEL, type AgentGroup, type ReviewFocus, type Assignment, type Brief, type Candidate, type FoundDeadline, type MemorySummary, type Opportunity, type ScoutSpec } from './types.ts';
 
 /**
@@ -81,11 +82,19 @@ export const YEAR_FIT = `Class year: the student's year is in the brief. The cri
 /** Closed or past means reject. Silence, a future deadline, or an ongoing club does not. */
 export const OPEN_FIT = `Still open: keep a posting whose deadline is still ahead, that is still accepting applications, members or registration, or that is an ongoing club or program with no close date (leave an unknown deadline null). Reject only when the organizer's page says it is closed, the deadline has passed, or the page cannot be opened. Do not reject only because the page never uses the word "open".`;
 
+/** Not finding something on the page is not the page saying no. */
+export const SILENCE_FIT = `A criterion fails only when the page says something that rules the student out. If the page does not mention it, or you cannot confirm it, it does not fail: keep the posting and say what the page leaves unstated.`;
+
+/** The brief the criteria reviewer sees: whether it is open and its deadline are the status reviewer's to check. */
+export function criteriaBrief(brief: Brief): Brief {
+  return { ...brief, hardCriteria: brief.hardCriteria.filter((c) => !aboutOpenness(c)) };
+}
+
 /** The validator's job text. Criteria and status ask for the same JSON shape the parser reads. */
 export function reviewJob(focus: ReviewFocus): string {
   return focus === 'status'
-    ? `You are the STATUS reviewer. Another agent checks the student's criteria; your only question is whether this is real and open right now. Open the organizer's own page and confirm the posting exists there and that every date and deadline in the record is what the page says. Correct any field the page contradicts. Check the deadline yourself against the page it was read from; if the record has none, look for it as the deadline rules below describe and fill it in. ${OPEN_FIT} Say which in one sentence. Never use the word placeholder as the reason.`
-    : `You are the CRITERIA reviewer. Another agent checks whether the posting is real and open; your only question is whether it is right for this student. Check, in this order: the student's custom notes, then every hard criterion in the brief, then whether it is the kind of thing this student is looking for and not just a keyword match. ${YEAR_FIT} Set keep to false if a note rules it out or if a hard criterion fails on those terms; say which in one sentence. Never use the word placeholder as the reason.`;
+    ? `You are the STATUS reviewer. Another agent checks the student's criteria; your only question is whether this is real and open right now. Open the organizer's own page and confirm the posting exists there and that every date and deadline in the record is what the page says. Correct any field the page contradicts. Check the deadline yourself against the page it was read from; if the record has none, look for it as the deadline rules below describe and fill it in. ${OPEN_FIT} If you opened the page and it neither says it is closed nor gives a deadline that has passed, keep it, even if you cannot confirm today's status. Say which in one sentence. Never use the word placeholder as the reason.`
+    : `You are the CRITERIA reviewer. Another agent checks whether the posting is real and open; your only question is whether it is right for this student. Check, in this order: the student's custom notes, then every hard criterion in the brief, then whether it is the kind of thing this student is looking for and not just a keyword match. Do not judge whether it is still open, its deadline or its dates: the status reviewer decides those, so never reject on them. ${YEAR_FIT} ${SILENCE_FIT} Set keep to false if a note rules it out or if a hard criterion fails on those terms; say which in one sentence. Never use the word placeholder as the reason.`;
 }
 
 /** Said to every agent that reads a posting: how to get the deadline right. */
@@ -301,7 +310,7 @@ Never invent, paraphrase into new questions, or fill in typical questions for th
       schema: Out,
       tools: tools(),
       system: `${job}\nfit is 0 to 1: how well it matches the student's interests and preferences.\n\n${NOTES_RULE}\n${EVIDENCE}${focus === 'status' ? `\n${DEADLINE_RULE}` : '\nLeave deadline and deadlineSource as they are in the record; the other reviewer checks them.'}`,
-      user: `Today is ${today()}.\n${notesBlock(brief.notes)}\nStudent brief: ${JSON.stringify(brief)}\nThe student keeps disliking: ${memory.avoidFields.join(', ') || 'nothing yet'}\nPosting: ${JSON.stringify(candidate)}`,
+      user: `Today is ${today()}.\n${notesBlock(brief.notes)}\nStudent brief: ${JSON.stringify(focus === 'criteria' ? criteriaBrief(brief) : brief)}\nThe student keeps disliking: ${memory.avoidFields.join(', ') || 'nothing yet'}\nPosting: ${JSON.stringify(candidate)}`,
     });
     return { ...data, fit: Math.max(0, Math.min(1, data.fit)) };
   }

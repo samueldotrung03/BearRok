@@ -9,6 +9,7 @@ import { cleanDraft, cleanTabs, emptyPortal, mergeTabs, PORTAL_LIMITS, portalByt
 import { Fleet, limiter } from './fleet.ts';
 import { KIND_TITLE, lineupNames, planLineup } from './lineup.ts';
 import { AUTO_GAP_MS, dueSlots, nextSlot } from './autoMode.ts';
+import { groundlessReject } from './reviewGuard.ts';
 import { BalanceExhaustedError } from '../quota.ts';
 import { isStopped, StoppedError, throwIfStopped, withSignal } from './stop.ts';
 import type { FoundImage, ImageFinder } from './images.ts';
@@ -1427,8 +1428,12 @@ export class AgentSystem {
             if (isStopped()) return;
             const r = v.reviews.find((x) => x.focus === reviewer.focus)!;
             try {
-              const verdict = await this.brain.validate(f.candidate, brief, summary, reviewer.focus);
-              if (unusableReview(verdict.reason)) throw new Error('empty placeholder review');
+              const given = await this.brain.validate(f.candidate, brief, summary, reviewer.focus);
+              if (unusableReview(given.reason)) throw new Error('empty placeholder review');
+              // A rejection off the reviewer's own ground, or only for something not confirmed, does not stand.
+              const overruled = given.keep ? null : groundlessReject(reviewer.focus, given.reason);
+              const verdict = overruled ? { ...given, keep: true, reason: overruled, fit: Math.max(given.fit, 0.5) } : given;
+              if (overruled) log(reviewer.name, `Overruled its rejection of "${f.candidate.title}" (${given.reason.replace(/\.$/, '')}): ${overruled}.`);
               verdicts.set(key, { ...verdicts.get(key), [reviewer.focus]: verdict });
               r.status = verdict.keep ? 'kept' : 'rejected';
               r.reason = verdict.reason;

@@ -18,6 +18,8 @@ export class Fleet {
   private claimed = new Set<string>();
   private budget = new Map<string, number>();
   private used = new Map<string, number>();
+  /** Jobs that count toward the run's budget. Follow-ups on kept postings (exempt) do not. */
+  private counted = 0;
 
   constructor(opts: FleetOptions) {
     this.opts = opts;
@@ -65,7 +67,7 @@ export class Fleet {
     this.jobs.push(job);
 
     const usedByManager = this.used.get(spec.managerId) ?? 0;
-    const overRun = this.started > this.opts.maxJobs;
+    const overRun = !spec.exempt && this.counted >= this.opts.maxJobs;
     const overManager = usedByManager >= (this.budget.get(spec.managerId) ?? Infinity);
     if (!spec.exempt && (overRun || overManager)) {
       job.status = 'skipped';
@@ -74,6 +76,7 @@ export class Fleet {
       return null;
     }
     this.used.set(spec.managerId, usedByManager + 1);
+    if (!spec.exempt) this.counted++;
     this.opts.onUpdate(job);
 
     await this.slot();

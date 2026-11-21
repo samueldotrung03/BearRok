@@ -438,6 +438,8 @@ export interface ScoutSpec {
   label: string;
   query: string;
   lensValue: string;
+  /** How many leads this scout may bring back: as many as its manager's readers can read. Default 4. */
+  maxLeads?: number;
 }
 
 export interface Lead {

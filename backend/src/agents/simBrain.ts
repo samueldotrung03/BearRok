@@ -218,7 +218,7 @@ export class SimBrain implements Brain {
       .filter((i) => !avoid.has(i.field))
       // New postings first, so every run brings something the student has not seen.
       .sort((a, b) => Number(known.has(officialUrl(a))) - Number(known.has(officialUrl(b))) || hash(a.slug + assignment.managerId) - hash(b.slug + assignment.managerId))
-      .slice(0, 4);
+      .slice(0, spec.maxLeads ?? 4);
     // A scout searching community posts lands on the repost, not the official page.
     return matches.map((i) => ({
       title: i.title,

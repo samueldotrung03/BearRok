@@ -169,10 +169,10 @@ Read the notes before the rest of the profile. Put what they ask for at the top 
       model: this.model('workers', TIER.low),
       schema: Out,
       tools: tools(),
-      system: `You are a scout worker. Search the web and return up to 4 leads: real, currently open ${CATEGORY_LABEL[assignment.category].toLowerCase()} that match this student's goal, interests and hard criteria. Each lead is a title and the http(s) URL of a real posting or official page. Prefer organizer pages and public listings the student has not been shown. Do not invent URLs.`,
+      system: `You are a scout worker. Search the web and return up to ${spec.maxLeads ?? 4} leads: real, currently open ${CATEGORY_LABEL[assignment.category].toLowerCase()} that match this student's goal, interests and hard criteria. Each lead is a title and the http(s) URL of a real posting or official page. Prefer organizer pages and public listings the student has not been shown. Do not invent URLs.`,
       user: `Today is ${today()}.\nSearch: ${spec.query}\n${studentAsk(brief)}\nAlready shown: ${[...known].slice(0, 30).join(', ') || 'nothing yet'}`,
     });
-    return data.leads.slice(0, 4);
+    return data.leads.slice(0, spec.maxLeads ?? 4);
   }
 
   async extract(lead: { title: string; url: string }, assignment: Assignment, brief?: Brief): Promise<Candidate | null> {

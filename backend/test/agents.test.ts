@@ -577,7 +577,8 @@ test('a small run budget still reads postings: searching cannot use the whole bu
 });
 
 test('validation: every posting found is reviewed by both validation agents, and kept only if both keep it', async () => {
-  const s = system();
+  // Room to read every lead, so the closed and the upper-years postings below are both found.
+  const s = system({ maxJobs: 40 });
   await s.trigger('first');
   const run = s.currentRun()!;
   // Nothing the workers brought back skips review.
@@ -756,7 +757,7 @@ test('deadlines: a deadline read from the organizer is marked official and is no
 // ---- the student's memory --------------------------------------------------------------------
 
 /** A backend over one data file, with two accounts that can sign in. Opening it again is a restart. */
-function backendOn(file: string | null, brains: SimBrain[] = []) {
+function backendOn(file: string | null, brains: SimBrain[] = [], opts: { maxJobs?: number } = {}) {
   const users: Record<string, AuthUser> = {
     'token-ana': { uid: 'u1', name: 'Ana Lima', email: null, picture: null, provider: 'google', emailVerified: true },
     'token-ben': { uid: 'u2', name: 'Ben Ode', email: null, picture: null, provider: 'google', emailVerified: true },
@@ -769,7 +770,7 @@ function backendOn(file: string | null, brains: SimBrain[] = []) {
     verify: async (token) => users[token] ?? Promise.reject(new Error('bad token')),
     saveDelayMs: 5,
     forUser: (user) => {
-      const s = new AgentSystem(brains.shift() ?? new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0, typingPauseMs: 30 }, { name: user.name!.split(' ')[0]! });
+      const s = new AgentSystem(brains.shift() ?? new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0, typingPauseMs: 30, ...opts }, { name: user.name!.split(' ')[0]! });
       made.set(user.uid, s);
       return s;
     },
@@ -845,7 +846,8 @@ test('memory: later searches are told what was already searched, and do not chec
     }
   }
   const file = await tmpFile();
-  const first = backendOn(file, [new Listening({ speed: 0, now: () => NOW })]);
+  // Room to read every lead, so the second run meets the postings the first one turned down.
+  const first = backendOn(file, [new Listening({ speed: 0, now: () => NOW })], { maxJobs: 40 });
   await first.call('POST', '/api/students/me/runs', 'token-ana');
   await new Promise((r) => setTimeout(r, 50));
   await first.settle('u1');
@@ -856,7 +858,7 @@ test('memory: later searches are told what was already searched, and do not chec
 
   // After a restart the next run starts from the remembered searches.
   told.length = 0;
-  const second = backendOn(file, [new Listening({ speed: 0, now: () => NOW })]);
+  const second = backendOn(file, [new Listening({ speed: 0, now: () => NOW })], { maxJobs: 40 });
   await second.call('POST', '/api/students/me/runs', 'token-ana');
   await new Promise((r) => setTimeout(r, 50));
   await second.settle('u1');

@@ -1310,7 +1310,6 @@ export class AgentSystem {
       ]);
       let alreadyRejected = 0;
       let leadsSeen = 0;
-      let extractEmpty = 0;
       let noUrl = 0;
       let duplicateLeads = 0;
       type Found = { candidate: Candidate; managerId: string; alsoSeenAt: string[] };
@@ -1492,7 +1491,15 @@ export class AgentSystem {
             // A scout only finds leads; reading them is what produces results. Keep most of the
             // manager's budget for readers, or a small run spends everything on searching.
             const planned = await this.brain.planJobs(a, brief, this.searches.filter((s) => s.category === a.category).map((s) => s.query));
-            const specs = planned.slice(0, Math.max(1, Math.floor(a.budget / 3)));
+            const scouts = planned.slice(0, Math.max(1, Math.floor(a.budget / 3)));
+            // Each scout brings back only as many leads as the manager's readers can read, so a lead
+            // is never found and then skipped for budget.
+            // The reader slots left after the scouts are shared out, the first scouts taking any remainder.
+            const readers = Math.max(scouts.length, a.budget - scouts.length);
+            const specs = scouts.map((s, i) => ({
+              ...s,
+              maxLeads: Math.min(4, Math.floor(readers / scouts.length) + (i < readers % scouts.length ? 1 : 0)),
+            }));
             set(manager, { detail: `Covering: ${a.focus.join(', ')}` });
             log(a.name, `Sent ${specs.length} scouts: ${specs.map((s) => s.label).join(' / ')}`);
             let mine = 0;
@@ -1500,7 +1507,7 @@ export class AgentSystem {
             await Promise.all(
               specs.map(async (spec) => {
                 const leads = await fleet.run({ kind: 'scout', managerId: a.managerId, label: `Search: ${spec.label}` }, async () => {
-                  const value = await this.brain.scout(spec, a, brief, known);
+                  const value = (await this.brain.scout(spec, a, brief, known)).slice(0, spec.maxLeads);
                   return { value, summary: `${value.length} leads` };
                 });
                 // Remembered, so later runs search somewhere else. The newest 400 are kept.
@@ -1522,10 +1529,7 @@ export class AgentSystem {
                       const value = await this.brain.extract(lead, a, brief);
                       return { value, summary: value ? `${value.organizer}` : 'page could not be read' };
                     });
-                    if (!candidate) {
-                      extractEmpty++;
-                      return;
-                    }
+                    if (!candidate) return;
                     const official = canonicalUrl(candidate.sourceUrl);
                     if (!official) {
                       noUrl++;
@@ -1567,6 +1571,8 @@ export class AgentSystem {
       run.stats.jobs = fleet.started;
       run.stats.skipped = fleet.jobs.filter((j) => j.status === 'skipped').length;
       const ofKind = (kind: string, status: string) => fleet.jobs.filter((j) => j.kind === kind && j.status === status).length;
+      // A reader that ran and found no posting; skipped and failed readers are counted apart.
+      const extractEmpty = fleet.jobs.filter((j) => j.kind === 'extract' && j.status === 'done' && j.result === 'page could not be read').length;
       const funnel = `Funnel: scouts ${ofKind('scout', 'done')} done, ${ofKind('scout', 'failed')} failed, ${ofKind('scout', 'skipped')} skipped; leads ${leadsSeen}; readers ${ofKind('extract', 'done')} done, ${extractEmpty} with no posting, ${ofKind('extract', 'failed')} failed, ${ofKind('extract', 'skipped')} skipped; duplicate leads ${duplicateLeads}; no link ${noUrl}; already turned down ${alreadyRejected}; sent to review ${found.size}.`;
       log('Worker fleet', funnel, found.size ? 'good' : 'bad');
       run.stats.funnel = {

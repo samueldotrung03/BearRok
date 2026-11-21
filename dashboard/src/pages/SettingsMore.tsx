@@ -186,7 +186,12 @@ export function MoreSettings() {
           <Row
             icon={<UserCircle />}
             title={auth.user ? (auth.user.displayName ?? 'Signed in') : 'No account'}
-            text={email ?? 'You are looking around without an account. Nothing here is tied to you.'}
+            text={
+              email ??
+              (auth.signInEnabled === false
+                ? 'Sign-in is off. This browser is the local student, and the profile and memory stay on this computer.'
+                : 'You are looking around without an account. Nothing here is tied to you.')
+            }
             status={!auth.user ? <Status tone="off">Guest</Status> : usesPassword && !auth.user.emailVerified ? <Status tone="warn">Email not confirmed</Status> : <Status tone="on">Signed in</Status>}
             action={
               <>

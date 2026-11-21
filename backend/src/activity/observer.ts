@@ -19,6 +19,15 @@ export const TRIGGER_TEXT: Record<Trigger, string> = {
 
 const failedOrTimedOut = (message: string | null): ActivityStatus => (message && TIMEOUT.test(message) ? 'timed_out' : 'failed');
 
+/** A run error in words: the CLI's JSON error body is cut down to its message. */
+export function plainError(error: string | null): string | null {
+  if (!error) return error;
+  const message = /"message"\s*:\s*"([^"]+)"/.exec(error)?.[1];
+  if (!message) return error.trim();
+  const lead = error.slice(0, error.indexOf(':')).trim();
+  return lead && !error.trimStart().startsWith('{') ? `${lead}: ${message}` : message;
+}
+
 const JOB_KIND: Record<Job['kind'], { kind: AgentKind; name: string }> = {
   scout: { kind: 'scout', name: 'Scout' },
   extract: { kind: 'reader', name: 'Reader' },
@@ -41,9 +50,11 @@ export function shapesOf(run: RunSnapshot): Shape[] {
   const out: Shape[] = [];
 
   for (const a of run.agents) {
-    const status: ActivityStatus = a.status === 'idle' ? 'queued' : a.status === 'failed' ? failedOrTimedOut(a.detail) : a.status;
+    // An agent that failed with the run still shows what it was doing ("Reading the student…"); its reason is the run's error.
+    const detail = a.status === 'failed' && run.error && (!a.detail || a.detail.endsWith('…')) ? plainError(run.error) : a.detail || null;
+    const status: ActivityStatus = a.status === 'idle' ? 'queued' : a.status === 'failed' ? failedOrTimedOut(detail) : a.status;
     const task = a.level === 'master' ? 'Read the student and brief the managers' : a.level === 'presentation' ? 'Order the feed and write why each card fits' : `Cover ${a.role.charAt(0).toLowerCase()}${a.role.slice(1)}`;
-    out.push({ id: a.id, level: a.level, kind: a.level, name: a.name, task, target: null, managerId: a.level === 'manager' ? a.id : null, status, detail: a.detail || null, verdict: null });
+    out.push({ id: a.id, level: a.level, kind: a.level, name: a.name, task, target: null, managerId: a.level === 'manager' ? a.id : null, status, detail, verdict: null });
   }
 
   for (const j of run.jobs) {
@@ -121,13 +132,13 @@ function runOf(run: RunSnapshot, agents: { status: ActivityStatus }[]): Activity
     number: run.number,
     trigger: run.trigger,
     triggerText,
-    request: run.brief?.goal || run.log[0]?.text || triggerText,
+    request: run.brief?.goal || triggerText,
     mode: run.mode,
     status: run.status,
     outcome: outcomeOf(run.status, agents),
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
-    error: run.error,
+    error: plainError(run.error),
   };
 }
 

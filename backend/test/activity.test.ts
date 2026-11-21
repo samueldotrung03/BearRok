@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { FileRunHistory, MemoryRunHistory } from '../src/activity/history.ts';
 import { ActivityHub } from '../src/activity/hub.ts';
-import { outlineReport, RunObserver } from '../src/activity/observer.ts';
+import { outlineReport, plainError, reportOf, RunObserver } from '../src/activity/observer.ts';
 import type { LiveActivity, RunReport } from '../src/activity/types.ts';
 import { SimBrain } from '../src/agents/simBrain.ts';
 import { AgentSystem } from '../src/agents/system.ts';
@@ -74,7 +74,7 @@ test('activity: every agent of a snapshot by level, with timeouts told apart fro
   assert.equal(by('review:opp-1:status').status, 'timed_out');
   assert.equal(by('review:opp-1:status').verdict, null);
   assert.equal(by('review:opp-1:status').target, 'Data Science Society');
-  assert.equal(live.run?.request, 'Run requested by hand');
+  assert.equal(live.run?.request, 'Requested by hand');
   assert.equal(live.counts.timed_out, 2);
   assert.deepEqual(live.flows.map((f) => [f.from, f.to, f.count, f.active]), [
     ['master', 'manager', 1, true],
@@ -217,4 +217,28 @@ test('api: the stream sends the activity and the history, then every change and 
     s.stop();
     await s.idle();
   }
+});
+
+test('activity: a run that fails gives the failed agent the run error, in words', () => {
+  const error = 'grok CLI exited 1: Error: Internal error: {\n  "message": "API error (status 402 Payment Required): Grok Build usage balance exhausted",\n  "http_status": 402\n}';
+  const plain = 'grok CLI exited 1: API error (status 402 Payment Required): Grok Build usage balance exhausted';
+  assert.equal(plainError(error), plain);
+  assert.equal(plainError('grok CLI timed out after 120s'), 'grok CLI timed out after 120s');
+  assert.equal(plainError(null), null);
+
+  const failed = snapshot({
+    status: 'failed',
+    finishedAt: NOW.toISOString(),
+    error,
+    agents: [{ id: 'master', level: 'master', name: 'Master agent', role: 'Reads the profile', status: 'failed', detail: 'Reading the student…' }],
+    jobs: [],
+    validations: [],
+  });
+  const { live, agents } = new RunObserver(() => NOW).update(failed);
+  assert.equal(live.run?.outcome, 'failed');
+  assert.equal(live.run?.error, plain);
+  assert.equal(live.agents[0]?.detail, plain);
+  const report = reportOf(failed, agents);
+  assert.deepEqual(report.failures?.reasons, [{ reason: plain, count: 1 }]);
+  assert.equal(report.error, plain);
 });

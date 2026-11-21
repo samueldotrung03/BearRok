@@ -186,7 +186,9 @@ export function LiveBoard({ state, now, reduced, actions, hasHistory, onRetry }:
     : failedToLoad
       ? 'The agent server did not answer, so there is nothing to show yet.'
       : run
-        ? `${run.request} · ${run.triggerText}`
+        ? run.request === run.triggerText
+          ? run.request
+          : `${run.request} · ${run.triggerText}`
         : `No search is running. Press Run now, or wait for Automode; every agent appears here as it starts.${hasHistory ? ' The last run is in History below.' : ''}`;
 
   return (

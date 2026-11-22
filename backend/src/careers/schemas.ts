@@ -109,7 +109,26 @@ export type SectionState<T> = {
   error: string | null;
   /** How many items the last "Add more" added, and when; null before the first. */
   added: { count: number; at: string } | null;
+  /** What the last try ran into, so the page can say it plainly; null when it went well. */
+  failure: Failure | null;
+  /** While the part is working: which agent has it. */
+  stage: 'researching' | 'validating' | null;
+  /** While the part is working: a search of the whole part ('research'), or an "Add more" ('more'). */
+  mode: 'research' | 'more' | null;
+  /**
+   * The researcher's answer, kept on disk until its validator has checked it, so a restart or an
+   * empty balance during the check does not lose it. The next try starts from the check.
+   */
+  draft: T | null;
+  /** Set when what is shown could not be checked by the validator, and why. */
+  unchecked: string | null;
+  /** When this part last finished. */
+  finishedAt: string | null;
 };
+
+/** Why a part or a plan did not finish. */
+export const FAILURES = ['timeout', 'parse', 'balance', 'interrupted', 'stopped', 'error'] as const;
+export type Failure = (typeof FAILURES)[number];
 
 /** One "Add more" a student asked for, kept so they can see their history. */
 export type GuideAsk = {
@@ -142,6 +161,10 @@ export type Guide = {
   startedAt: string;
   updatedAt: string;
   error: string | null;
+  /** What stopped the guide as a whole: the plan failing, or Grok's balance running out mid-run. */
+  failure: Failure | null;
+  /** Other names students asked for this career by; "AI Engineer" and "AI Engineering" are one guide. */
+  aliases: string[];
   sections: { [K in SectionId]: SectionState<SectionData[K]> };
   asks: GuideAsk[];
   activity: GuideEvent[];

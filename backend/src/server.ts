@@ -45,6 +45,9 @@ const memory = account
 // GOOGLE_OAUTH_CLIENT_ID and _SECRET). Without one, pages connect Google for one session at a time.
 const oauthClient = oauthClientFrom(process.env);
 const careers = new CareerGuides();
+// Career guide parts a restart stopped are picked up again (or stay marked, for the student to retry).
+const resumed = careers.resume();
+if (resumed.length) console.log(`career guides: picked up ${resumed.join(', ')} after the restart`);
 const { app } = createApp(store, {}, {
   memory,
   google: oauthClient ? { client: oauthClient, redirectBase: `http://127.0.0.1:${config.port}` } : null,

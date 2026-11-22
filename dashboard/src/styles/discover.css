@@ -1229,6 +1229,8 @@
 .dc-guide-actions {
   display: flex;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1330,6 +1332,59 @@
 
 .dc-step.is-on .dc-step-mark {
   color: var(--brand-text);
+}
+
+/* A part that did not finish: what stopped it, then the way to search it again. */
+.dc-step-mark.is-failed {
+  color: var(--danger);
+  opacity: 1;
+}
+
+/* Where a part is, under its tab name, while it is not simply ready. */
+.dc-step-state {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink-3);
+}
+
+.dc-step-state.is-bad {
+  color: var(--danger);
+}
+
+/* One plain line about the whole guide: partial, out of Grok balance, offline, or a saved interest. */
+.dc-notice {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--color-ink-2);
+  background: var(--surface-2);
+}
+
+.dc-notice.is-warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.dc-failed {
+  padding: 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  background: var(--danger-soft);
+}
+
+.dc-sec-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.dc-soft.dc-icon {
+  width: 40px;
+  padding: 0;
+  justify-content: center;
 }
 
 .dc-sec {
@@ -2095,4 +2150,9 @@
   flex-shrink: 0;
   width: 18px;
   height: 18px;
+}
+
+/* The careers the student keeps in their career interests, under the quick picks. */
+.dc-interests .dc-eyebrow {
+  margin: 0 4px 0 0;
 }

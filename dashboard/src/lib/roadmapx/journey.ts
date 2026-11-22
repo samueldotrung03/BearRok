@@ -8,6 +8,7 @@ import { applicationInfo, careerPaths, opportunities, pathProfiles, skillOptions
 import type { AppState } from '../../state/store.ts';
 import type { ApplicationStatus, Opportunity, StepKind } from '../../types.ts';
 import { followUpSteps } from '../apps/followup.ts';
+import { careerKey } from '../discover/names.ts';
 import { evidenceFor } from '../pathways.ts';
 import { buildOpportunityRoadmap, currentRoadmap } from '../roadmap.ts';
 import { buildCoachContext, estimateHours, formatHours, whyStep } from './context.ts';
@@ -592,7 +593,9 @@ export function careerSearch(state: AppState, query: string, limit = 100): Caree
   const q = query.trim().toLowerCase();
   const hit = (p: (typeof careerPaths)[number], reason: string): CareerHit => ({ id: p.id, title: p.title, oneLine: p.oneLine, reason, match: pathMatch(state, p.id) });
   if (!q) {
-    const wanted = new Set([state.goalId, ...(state.profile.careerInterests ?? [])]);
+    // Career interests are names the student kept ("AI Engineer"); a path is wanted when it is the same career.
+    const interestKeys = new Set((state.profile.careerInterests ?? []).map(careerKey).filter(Boolean));
+    const wanted = new Set([state.goalId, ...(state.profile.careerInterests ?? []), ...careerPaths.filter((p) => interestKeys.has(careerKey(p.title))).map((p) => p.id)]);
     return [...careerPaths]
       .map((p) => ({ p, match: pathMatch(state, p.id) ?? 0 }))
       .sort((x, y) => Number(wanted.has(y.p.id)) - Number(wanted.has(x.p.id)) || y.match - x.match)

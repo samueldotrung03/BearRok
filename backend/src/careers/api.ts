@@ -1,5 +1,6 @@
 // HTTP routes for career guides. Every request goes to the agent system's master, which routes it
-// to the career discovery skill. Guides are shared by every student, so no sign-in is needed; `by`
+// to the career discovery skill. Any name of a career finds its guide ("AI Engineer" opens the
+// "AI Engineering" guide). Guides are shared by every student, so no sign-in is needed; `by`
 // names who asks, so each student sees only their own "Add more" history.
 import type { Hono } from 'hono';
 import { z } from 'zod';
@@ -51,6 +52,18 @@ export function mountCareers(app: Hono, guides: CareerGuides) {
     const body = await c.req.json().catch(() => ({}));
     try {
       const { guide } = master.handle<{ guide: Guide }>({ kind: 'career-guide', career: String(body.career ?? ''), refresh: body.refresh === true });
+      return c.json({ guide: guides.view(guide.slug, who(body.by)) }, 202);
+    } catch (e) {
+      const { body: b, status } = fail(e);
+      return c.json(b, status);
+    }
+  });
+
+  // "Search again" on one part: that part is researched again on its own; the others stay as they are.
+  app.post('/api/careers/guides/:slug/sections/:section/retry', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const guide = guides.retry(c.req.param('slug'), c.req.param('section'));
       return c.json({ guide: guides.view(guide.slug, who(body.by)) }, 202);
     } catch (e) {
       const { body: b, status } = fail(e);

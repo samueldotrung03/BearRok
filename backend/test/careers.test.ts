@@ -286,7 +286,7 @@ test('Add more is refused while the guide is researching, twice at once, and for
   assert.throws(() => guides.more('economist', 'basics'), /still being researched/);
   await guides.settled('economist');
   guides.more('economist', 'basics');
-  assert.throws(() => guides.more('economist', 'basics'), /already finding more/);
+  assert.throws(() => guides.more('economist', 'basics'), /already working on this part/);
   await guides.settled('economist');
   assert.throws(() => guides.more('economist', 'salary'), /no such part/);
   assert.throws(() => guides.more('pilot', 'basics'), /No guide/);
@@ -334,13 +334,18 @@ test('guides are kept on disk and reloaded; older guides are upgraded and cut-of
   slow.start('Pilot');
   const cut = new CareerGuides(file, fakeAsk([]), env(true)).get('pilot')!;
   assert.equal(cut.status, 'failed');
-  assert.match(cut.sections.basics.error!, /stopped before it finished/);
+  assert.match(cut.sections.basics.error!, /A restart stopped this part before it finished/);
+  assert.equal(cut.sections.basics.failure, 'interrupted');
 });
 
-test('simulated agents cannot research, and bad input is refused', () => {
+test('simulated agents research every part as labelled samples, and bad input is refused', async () => {
   const guides = new CareerGuides(null, fakeAsk([]), { live: () => false, provider: () => 'simulated', canSearchX: () => false });
-  assert.throws(() => guides.start('Pilot'), /Connect Grok/);
+  guides.start('Pilot');
+  const g = (await guides.settled('pilot'))!;
+  assert.equal(g.provider, 'simulated');
+  for (const id of ['basics', 'voices', 'interview', 'start'] as const) assert.equal(g.sections[id].sample, true, `${id} is labelled a sample`);
   assert.throws(() => guides.start('x'), /between 2 and 60/);
+  assert.throws(() => guides.start('!!'), /letters or numbers/);
   assert.equal(slugFor('  Data Science / AI  '), 'data-science-ai');
 });
 

@@ -52,7 +52,18 @@ export type SectionState<T> = {
   error: string | null;
   /** How many items the last "Add more" added, and when. */
   added?: { count: number; at: string } | null;
+  /** What the last try ran into; null when it went well. Older guides do not have it. */
+  failure?: Failure | null;
+  /** While working: which agent has the part. */
+  stage?: 'researching' | 'validating' | null;
+  /** While working: a search of the whole part, or an "Add more". */
+  mode?: 'research' | 'more' | null;
+  /** Set when what is shown could not be checked by the validator, and why. */
+  unchecked?: string | null;
 };
+
+/** Why a part or the plan did not finish. */
+export type Failure = 'timeout' | 'parse' | 'balance' | 'interrupted' | 'stopped' | 'error';
 
 /** One "Add more" this student asked for. */
 export type GuideAsk = {
@@ -90,13 +101,17 @@ export type Guide = {
   startedAt: string;
   updatedAt: string;
   error: string | null;
+  /** What stopped the guide as a whole: the plan failing, or Grok's balance running out. */
+  failure?: Failure | null;
+  /** Other names students asked for this career by. */
+  aliases?: string[];
   sections: { basics: SectionState<Basics>; voices: SectionState<Voices>; interview: SectionState<Interview>; start: SectionState<Start> };
   /** This student's own asks, oldest first. */
   asks?: GuideAsk[];
   activity?: GuideEvent[];
 };
 
-export type GuideSummary = Pick<Guide, 'slug' | 'title' | 'oneLine' | 'updatedAt' | 'status'>;
+export type GuideSummary = Pick<Guide, 'slug' | 'title' | 'oneLine' | 'updatedAt' | 'status' | 'aliases'> & { query?: string; provider?: Guide['provider'] };
 
 export const SECTION_TITLES: Record<SectionId, string> = {
   basics: 'The basics',
@@ -138,29 +153,76 @@ export const isResearching = (guide: Guide | null) => guide?.status === 'plannin
 /** Anything still running for this guide: its research, or "Add more" on one of its parts. */
 export const isBusy = (guide: Guide | null) => isResearching(guide) || SECTION_IDS.some((id) => guide?.sections[id].status === 'working');
 
+/** True when Grok answered that its usage balance is used up (HTTP 402), for the guide or one of its parts. */
+export const isOutOfBalance = (guide: Guide | null) => Boolean(guide && (guide.failure === 'balance' || SECTION_IDS.some((id) => guide.sections[id].failure === 'balance')));
+
+/**
+ * The state the page is in, said honestly: no guide yet, being planned, being researched part by
+ * part, partly there (some parts failed), ready, failed, or stopped by an empty Grok balance.
+ */
+export type GuideState = 'none' | 'planning' | 'researching' | 'partial' | 'ready' | 'failed' | 'out-of-balance';
+export function guideState(guide: Guide | null): GuideState {
+  if (!guide) return 'none';
+  if (guide.status === 'planning') return 'planning';
+  if (guide.status === 'researching') return 'researching';
+  const filled = SECTION_IDS.filter((id) => guide.sections[id].data).length;
+  if (isOutOfBalance(guide)) return 'out-of-balance';
+  if (guide.status === 'failed' || filled === 0) return 'failed';
+  return SECTION_IDS.some((id) => !guide.sections[id].data || guide.sections[id].failure) ? 'partial' : 'ready';
+}
+
+export const FAILURE_WORDS: Record<Failure, string> = {
+  timeout: 'Timed out',
+  parse: 'Answer could not be read',
+  balance: 'Grok balance used up',
+  interrupted: 'Stopped by a restart',
+  stopped: 'Stopped',
+  error: 'Could not be researched',
+};
+
+/** A working part that is out finding more for an "Add more". Older backends sent no mode; then a part with items was. */
+const findingMore = (s: SectionState<unknown>) => s.mode === 'more' || (!s.mode && s.data !== null);
+
+/** One part's state in a few words, for its tab. */
+export function partLine(guide: Guide, id: SectionId): string {
+  const s = guide.sections[id];
+  if (s.status === 'working') {
+    if (findingMore(s)) return 'Finding more';
+    if (s.stage === 'validating') return 'Checking what was found';
+    return s.data ? 'Searching again' : 'Researching';
+  }
+  if (s.status === 'waiting') return id === 'start' && guide.sections.interview.status !== 'done' ? 'Waits for the interviews' : 'Waiting to start';
+  if (!s.data) return FAILURE_WORDS[s.failure ?? 'error'];
+  if (s.failure) return `Earlier version kept: ${FAILURE_WORDS[s.failure].toLowerCase()}`;
+  return s.unchecked ? 'Ready, not checked' : 'Ready';
+}
+
 /** What the agents are doing right now, in one line, or null when they are not working. */
 export function stepLine(guide: Guide): string | null {
   if (guide.status === 'planning') return `Working out what ${guide.query} involves`;
-  if (guide.status !== 'researching') {
-    // Ready, but one part is out looking for more.
-    const more: Record<SectionId, string> = {
-      basics: 'Finding more on the basics',
-      voices: guide.sections.voices.sample ? 'Writing more sample stories' : 'Finding more posts on X',
-      start: 'Finding more ways to start',
-      interview: 'Finding more interview questions',
-    };
-    const now = SECTION_IDS.find((id) => guide.sections[id].status === 'working');
-    return now ? more[now] : null;
-  }
-  const working: Record<SectionId, string> = {
+  const sample = guide.sections.voices.sample;
+  const now = SECTION_IDS.find((id) => guide.sections[id].status === 'working');
+  const s = now ? (guide.sections[now] as SectionState<unknown>) : null;
+  const more: Record<SectionId, string> = {
+    basics: 'Finding more on the basics',
+    voices: sample ? 'Writing more sample stories' : 'Finding more posts on X',
+    start: 'Finding more ways to start',
+    interview: 'Finding more interview questions',
+  };
+  const research: Record<SectionId, string> = {
     basics: 'Reading the basics',
-    voices: guide.sections.voices.sample ? 'Writing sample stories' : 'Reading what people in the job share on X',
+    voices: sample ? 'Writing sample stories' : 'Reading what people in the job share on X',
     start: 'Mapping how to start',
     interview: 'Collecting interview questions',
   };
-  const done = SECTION_IDS.filter((id) => guide.sections[id].status === 'done' || guide.sections[id].status === 'failed').length;
-  const now = SECTION_IDS.find((id) => guide.sections[id].status === 'working');
-  return `${now ? working[now] : 'Putting the guide together'} · ${done} of ${SECTION_IDS.length} ready`;
+  const doing = now && s ? (findingMore(s) ? more[now] : s.stage === 'validating' ? `Checking ${SECTION_TITLES[now].toLowerCase()}` : research[now]) : null;
+  if (guide.status !== 'researching') {
+    // Ready, with one part searched again on its own, or out looking for more.
+    if (!now || !s) return null;
+    return findingMore(s) ? more[now] : `Searching ${SECTION_TITLES[now].toLowerCase()} again${s.stage === 'validating' ? ': checking what was found' : ''}`;
+  }
+  const ready = SECTION_IDS.filter((id) => guide.sections[id].status === 'done' && !guide.sections[id].failure).length;
+  return `${doing ?? 'Putting the guide together'} · ${ready} of ${SECTION_IDS.length} ready`;
 }
 
 /** Who researched the guide, as the page says it. */
@@ -168,7 +230,8 @@ export function providerLabel(provider: Guide['provider']): string {
   return provider === 'grok' ? 'Grok' : 'simulated agents';
 }
 
-type Load = { guide: Guide | null; error: string | null; busy: boolean };
+/** offline: the last refresh could not reach the backend, so the guide shown is the last one it sent. */
+type Load = { guide: Guide | null; error: string | null; busy: boolean; offline: boolean };
 
 async function readError(res: Response): Promise<string> {
   const body = await res.json().catch(() => ({}));
@@ -191,7 +254,7 @@ const SAMPLE_ONLY = `This public sample copy has no agents behind it, so it only
  * a new one starts the research. While the agents work, the guide is fetched again every two seconds.
  */
 export function useCareerGuide(query: string | null, by = 'guest', student: StudentContext | null = null) {
-  const [state, setState] = useState<Load>({ guide: null, error: null, busy: false });
+  const [state, setState] = useState<Load>({ guide: null, error: null, busy: false, offline: false });
   const timer = useRef<number | null>(null);
   const active = useRef<string | null>(null);
 
@@ -209,10 +272,12 @@ export function useCareerGuide(query: string | null, by = 'guest', student: Stud
         if (!res.ok) throw new Error(await readError(res));
         const { guide } = (await res.json()) as { guide: Guide };
         if (active.current !== slug) return;
-        setState({ guide, error: null, busy: false });
+        setState({ guide, error: null, busy: false, offline: false });
         if (isBusy(guide)) poll(slug);
       } catch {
-        if (active.current === slug) poll(slug);
+        if (active.current !== slug) return;
+        setState((s) => ({ ...s, offline: true }));
+        poll(slug);
       }
     }, 2000);
   }, [by]);
@@ -222,7 +287,7 @@ export function useCareerGuide(query: string | null, by = 'guest', student: Stud
       const slug = slugFor(career);
       active.current = slug;
       stopPolling();
-      setState((s) => ({ guide: s.guide?.slug === slug ? s.guide : null, error: null, busy: true }));
+      setState((s) => ({ guide: s.guide?.slug === slug ? s.guide : null, error: null, busy: true, offline: false }));
       try {
         const res = await fetch(`${API_URL}/api/careers/guides`, {
           method: 'POST',
@@ -232,17 +297,19 @@ export function useCareerGuide(query: string | null, by = 'guest', student: Stud
         if (!res.ok) throw new Error(await readError(res));
         const { guide } = (await res.json()) as { guide: Guide };
         if (active.current !== slug) return;
-        setState({ guide, error: null, busy: false });
+        // Another name of the career opens its guide under the guide's own slug ("AI Engineer" opens "ai-engineering").
+        active.current = guide.slug;
+        setState({ guide, error: null, busy: false, offline: false });
         if (isBusy(guide)) poll(guide.slug);
       } catch (e) {
         if (active.current !== slug) return;
         if (SAMPLE_FEED) {
           const sample = sampleGuideFor(career);
-          setState(sample ? { guide: sample, error: null, busy: false } : { guide: null, error: SAMPLE_ONLY, busy: false });
+          setState(sample ? { guide: sample, error: null, busy: false, offline: false } : { guide: null, error: SAMPLE_ONLY, busy: false, offline: false });
           return;
         }
         const message = e instanceof TypeError ? OFFLINE : e instanceof Error ? e.message : OFFLINE;
-        setState({ guide: null, error: message, busy: false });
+        setState({ guide: null, error: message, busy: false, offline: e instanceof TypeError });
       }
     },
     [poll, by],
@@ -252,7 +319,7 @@ export function useCareerGuide(query: string | null, by = 'guest', student: Stud
     if (query) void request(query);
     else {
       active.current = null;
-      setState({ guide: null, error: null, busy: false });
+      setState({ guide: null, error: null, busy: false, offline: false });
     }
     return stopPolling;
   }, [query, request]);
@@ -271,7 +338,7 @@ export function useCareerGuide(query: string | null, by = 'guest', student: Stud
         if (!res.ok) throw new Error(await readError(res));
         const { guide } = (await res.json()) as { guide: Guide };
         if (active.current !== slug) return null;
-        setState({ guide, error: null, busy: false });
+        setState({ guide, error: null, busy: false, offline: false });
         poll(slug);
         return null;
       } catch (e) {
@@ -280,6 +347,31 @@ export function useCareerGuide(query: string | null, by = 'guest', student: Stud
       }
     },
     [state.guide?.slug, poll, by, student],
+  );
+
+  /** "Search again" on one part: only that part is researched again. Resolves to an error line, or null once the agents have started. */
+  const retryPart = useCallback(
+    async (section: SectionId): Promise<string | null> => {
+      const slug = state.guide?.slug;
+      if (!slug) return 'Open a guide first.';
+      if (SAMPLE_FEED) return 'This is the public sample copy, so there are no agents behind it to search again.';
+      try {
+        const res = await fetch(`${API_URL}/api/careers/guides/${slug}/sections/${section}/retry`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ by }),
+        });
+        if (!res.ok) throw new Error(await readError(res));
+        const { guide } = (await res.json()) as { guide: Guide };
+        if (active.current !== slug) return null;
+        setState({ guide, error: null, busy: false, offline: false });
+        poll(slug);
+        return null;
+      } catch (e) {
+        return e instanceof TypeError ? OFFLINE : e instanceof Error ? e.message : OFFLINE;
+      }
+    },
+    [state.guide?.slug, poll, by],
   );
 
   /** Requests to offer for one part, written by the agents from the part and this student. Empty when they cannot answer. */
@@ -301,7 +393,7 @@ export function useCareerGuide(query: string | null, by = 'guest', student: Stud
     [state.guide?.slug, by, student],
   );
 
-  return { ...state, searchAgain: () => query && request(query, true), retry: () => query && request(query), addMore, suggest };
+  return { ...state, searchAgain: () => query && request(query, true), retry: () => query && request(query), retryPart, addMore, suggest };
 }
 
 /** Guides the agents have already researched, for quick picks. Empty when the backend is away. */

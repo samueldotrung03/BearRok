@@ -16,12 +16,13 @@ import { pathExtras, quizQuestions } from '../data/discover-extra.ts';
 import { pathGroups } from '../data/fields.ts';
 import { careerPaths, opportunities as sampleOpportunities } from '../data/sample.ts';
 import type { AnswerAction } from '../lib/discover/ask.ts';
-import { askerId, slugFor, useCareerGuide, useGuideList, type StudentContext } from '../lib/discover/guide.ts';
+import { askerId, useCareerGuide, useGuideList, type StudentContext } from '../lib/discover/guide.ts';
 import { rankPaths, type PathMatch, type QuizAnswers } from '../lib/discover/match.ts';
 import { currentRoadmap } from '../lib/roadmap.ts';
 import { useLocal } from '../lib/useLocal.ts';
 import { useAuth } from '../auth/AuthProvider.tsx';
-import { withCareerInterest } from '../lib/discover/careerMemory.ts';
+import { inCareerInterests, withCareerInterest, withoutCareerInterest } from '../lib/discover/careerMemory.ts';
+import { careerKey } from '../lib/discover/names.ts';
 import { SAMPLE_FEED, useLive } from '../state/live.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import '../styles/discover.css';
@@ -33,7 +34,7 @@ const oneLines = Object.fromEntries(careerPaths.map((p) => [p.id, p.oneLine]));
 const hues = Object.fromEntries(pathExtras.map((e) => [e.pathId, e.hue]));
 const groups = Object.fromEntries(careerPaths.map((p) => [p.id, p.group ?? 'Other']));
 /** A typed career that names a roadmap path can become the goal. */
-const pathBySlug = Object.fromEntries(careerPaths.map((p) => [slugFor(p.title), p.id]));
+const pathByKey = Object.fromEntries(careerPaths.map((p) => [careerKey(p.title), p.id]));
 
 const MAX_PICKS = 6;
 
@@ -69,8 +70,32 @@ export function Discover() {
     }),
     [state.profile, state.preferences?.notes],
   );
-  const { guide, error, busy, searchAgain, retry, addMore, suggest } = useCareerGuide(career, by, student);
+  const { guide, error, busy, offline, searchAgain, retry, retryPart, addMore, suggest } = useCareerGuide(career, by, student);
   const kept = useGuideList(guide?.status);
+  const [interestNote, setInterestNote] = useState<string | null>(null);
+  const interests = useMemo(() => (state.profile.careerInterests ?? []).filter((c) => c !== 'Not sure yet'), [state.profile.careerInterests]);
+
+  useEffect(() => setInterestNote(null), [guide?.slug]);
+
+  // The student keeps a career in their career interests only when they say so. The opportunity
+  // agents search for those careers and the roadmap lists them first.
+  const toggleInterest = async () => {
+    if (!guide) return;
+    const added = inCareerInterests(state.profile.careerInterests, guide);
+    const next = added ? withoutCareerInterest(state.profile.careerInterests, guide) : withCareerInterest(state.profile.careerInterests, guide.title);
+    if (!next) return;
+    dispatch({ type: 'setProfile', profile: { careerInterests: next } });
+    if (SAMPLE_FEED) {
+      setInterestNote('Kept on this device. This public sample copy has no agents to search for it.');
+      return;
+    }
+    const saved = await auth.saveProfile({ careerInterests: next });
+    // The roadmap ranks a path first only when this career is one of its paths.
+    const path = pathByKey[careerKey(guide.title)] ?? pathByKey[careerKey(guide.slug)];
+    const roadmap = path ? ` Your roadmap lists ${titles[path]} first.` : '';
+    if (!saved) setInterestNote(auth.user ? 'Kept on this device, but your profile could not be saved. Try again in a moment.' : 'Kept on this device. Sign in so your agents search for it too.');
+    else setInterestNote(added ? `${guide.title} is out of your career interests.` : `${guide.title} is in your career interests. Your agents search for it from their next run.${roadmap}`);
+  };
 
   const history = useMemo(() => ({ saved: state.saved, liked: state.liked, dismissed: state.dismissed }), [state.saved, state.liked, state.dismissed]);
   const ranked: PathMatch[] = useMemo(
@@ -96,7 +121,7 @@ export function Discover() {
     // A guide is known by the words that were typed (its slug) and by the title the agents gave it,
     // so "Software engineering" and the guide it became, "Software Engineer", show once.
     const add = (title: string | undefined, also?: string) => {
-      const keys = [title ? slugFor(title) : '', also ?? ''].filter(Boolean);
+      const keys = [title ? careerKey(title) : '', also ? careerKey(also) : ''].filter(Boolean);
       if (!title || !keys.length || keys.some((k) => seen.has(k)) || out.length >= MAX_PICKS) return;
       keys.forEach((k) => seen.add(k));
       out.push(title);
@@ -133,16 +158,8 @@ export function Discover() {
     if (clean.length < 2) return;
     setDraft(clean);
     setFinderOpen(false);
-    // The career the student typed is what the opportunity agents search for next. The public
-    // showcase has no agents, so it does not write one.
-    if (!SAMPLE_FEED) {
-      const next = withCareerInterest(state.profile.careerInterests, clean);
-      if (next) {
-        dispatch({ type: 'setProfile', profile: { careerInterests: next } });
-        void auth.saveProfile({ careerInterests: next });
-      }
-    }
-    if (slugFor(clean) === slugFor(career ?? '')) retry();
+    // Another name of the same career ("AI Engineer" for "AI Engineering") is the same guide.
+    if (careerKey(clean) === careerKey(career ?? '')) retry();
     else setCareer(clean);
     requestAnimationFrame(() => guideRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' }));
   };
@@ -178,7 +195,7 @@ export function Discover() {
   };
 
   const goal = careerPaths.find((p) => p.id === state.goalId);
-  const guidePath = guide ? pathBySlug[slugFor(guide.title)] ?? pathBySlug[guide.slug] : undefined;
+  const guidePath = guide ? pathByKey[careerKey(guide.title)] ?? pathByKey[careerKey(guide.slug)] : undefined;
   const details = openOpportunity ? cards.find((o) => o.id === openOpportunity) : undefined;
 
   return (
@@ -225,7 +242,7 @@ export function Discover() {
           </form>
           <div className="dc-learn-picks">
             {picks.map((title) => (
-              <button key={title} type="button" className={`dc-chip ${slugFor(title) === slugFor(career ?? '') ? 'is-on' : ''}`} onClick={() => learn(title)}>
+              <button key={title} type="button" className={`dc-chip ${careerKey(title) === careerKey(career ?? '') || (guide && careerKey(title) === careerKey(guide.title)) ? 'is-on' : ''}`} onClick={() => learn(title)}>
                 {title}
               </button>
             ))}
@@ -234,6 +251,17 @@ export function Discover() {
               <ChevronDown className="size-4" aria-hidden="true" />
             </button>
           </div>
+          {interests.length > 0 && (
+            <div className="dc-learn-picks dc-interests" aria-label="Your career interests">
+              <span className="dc-eyebrow">Your career interests</span>
+              {interests.map((title) => (
+                <button key={title} type="button" className={`dc-chip ${guide && careerKey(title) && inCareerInterests([title], guide) ? 'is-on' : ''}`} onClick={() => learn(title)}>
+                  <Check className="size-3.5" aria-hidden="true" />
+                  {title}
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
         {finderOpen && (
@@ -280,6 +308,9 @@ export function Discover() {
               key={guide.slug}
               guide={guide}
               onSearchAgain={searchAgain}
+              onRetryPart={retryPart}
+              offline={offline}
+              interest={SAMPLE_FEED && guide.provider === 'simulated' ? undefined : { added: inCareerInterests(state.profile.careerInterests, guide), onToggle: () => void toggleInterest(), note: interestNote }}
               onAddMore={addMore}
               onSuggest={suggest}
               goalAction={guidePath && guidePath !== state.goalId ? () => act({ kind: 'setGoal', pathId: guidePath, label: '' }) : undefined}

@@ -6,8 +6,9 @@ import { config } from '../config.ts';
 import { grokJson, type GrokTool } from '../grok.ts';
 import { cleanDraft, sortByRules, type CalendarEventInput, type EventAsk, type EventVerdict } from './eventSorter.ts';
 import type { Brain, DraftedApplication, DraftInput, MasterInput } from './brain.ts';
+import { MATCH_FACTORS, normalizeMatch } from './match.ts';
 import { aboutOpenness } from './reviewGuard.ts';
-import { CATEGORY_LABEL, type AgentGroup, type ReviewFocus, type Assignment, type Brief, type Candidate, type FoundDeadline, type MemorySummary, type Opportunity, type ScoutSpec } from './types.ts';
+import { CATEGORY_LABEL, type AgentGroup, type ReviewFocus, type Assignment, type Brief, type Candidate, type FoundDeadline, type MemorySummary, type Opportunity, type ScoutSpec, type Verdict } from './types.ts';
 
 /**
  * Which model each level runs on. The master, managers, validators and presentation manager
@@ -66,6 +67,9 @@ export function studentAsk(brief: Brief): string {
     `Student: ${brief.year}, ${brief.location}${brief.remoteOk ? ', remote is fine' : ''}.`,
     `Goal: ${brief.goal}`,
     brief.interests.length ? `Interests: ${brief.interests.join(', ')}` : '',
+    brief.roles?.length ? `Roles they are aiming at: ${brief.roles.join(', ')}` : '',
+    brief.kinds?.length ? `Kinds of opportunity wanted: ${brief.kinds.join(', ')}` : '',
+    brief.skills?.length ? `Skills: ${brief.skills.join(', ')}` : '',
     brief.preferences.length ? `Preferences: ${brief.preferences.join('; ')}` : '',
     brief.hardCriteria.length ? `Must meet: ${brief.hardCriteria.join('; ')}` : '',
     brief.avoid.length ? `Avoid: ${brief.avoid.join('; ')}` : '',
@@ -90,11 +94,29 @@ export function criteriaBrief(brief: Brief): Brief {
   return { ...brief, hardCriteria: brief.hardCriteria.filter((c) => !aboutOpenness(c)) };
 }
 
-/** The validator's job text. Criteria and status ask for the same JSON shape the parser reads. */
+/** How the match reviewer scores: what each factor means and the bands the overall score falls in. */
+export const MATCH_RULE = `Score the match from 0 to 100 against this student's profile and preferences. Give a factor entry for each of these the brief says something about, each scored 0 to 100 with a note of a few words: notes (their custom notes), interests, roles (the roles or careers they are aiming at), category (the kinds of opportunity they want), location (their location, and whether remote is fine), year (their class year against who may apply), skills. Leave out a factor the brief says nothing about. A factor the page is silent on is neutral (50), never 0. Then give score, the overall match: weigh the notes most, then interests and roles, then the rest. Bands: 80 to 100 is what they asked for; 50 to 79 a good partial match; 30 to 49 related and possibly worth a look; below 30 a weak match. If a note rules it out, score at most 10. If a hard criterion in the brief fails on the page's own terms (for example the student wants remote only and it is in person), score at most 15. If the page states a class-year range that leaves the student's year out, the year factor is 0 and score at most 15. Score what the posting is, not a keyword overlap.`;
+
+/**
+ * The validator's job text. The status reviewer answers keep or reject on the hard checks; the
+ * criteria reviewer answers with a match score. Each shape is the one its parser reads.
+ */
 export function reviewJob(focus: ReviewFocus): string {
   return focus === 'status'
-    ? `You are the STATUS reviewer. Another agent checks the student's criteria; your only question is whether this is real and open right now. Open the organizer's own page and confirm the posting exists there and that every date and deadline in the record is what the page says. Correct any field the page contradicts. Check the deadline yourself against the page it was read from; if the record has none, look for it as the deadline rules below describe and fill it in. ${OPEN_FIT} If you opened the page and it neither says it is closed nor gives a deadline that has passed, keep it, even if you cannot confirm today's status. Say which in one sentence. Never use the word placeholder as the reason.`
-    : `You are the CRITERIA reviewer. Another agent checks whether the posting is real and open; your only question is whether it is right for this student. Check, in this order: the student's custom notes, then every hard criterion in the brief, then whether it is the kind of thing this student is looking for and not just a keyword match. Do not judge whether it is still open, its deadline or its dates: the status reviewer decides those, so never reject on them. ${YEAR_FIT} ${SILENCE_FIT} Set keep to false if a note rules it out or if a hard criterion fails on those terms; say which in one sentence. Never use the word placeholder as the reason.`;
+    ? `You are the STATUS reviewer. Another agent scores how well it matches the student; your only question is whether this is real and open right now. Open the organizer's own page and confirm the posting exists there and that every date and deadline in the record is what the page says. Correct any field the page contradicts. Check the deadline yourself against the page it was read from; if the record has none, look for it as the deadline rules below describe and fill it in. ${OPEN_FIT} Set keep to false only when the posting is not real (the page cannot be opened, does not exist or is not this posting), is closed, or its deadline has passed. If you opened the page and it neither says it is closed nor gives a deadline that has passed, keep it, even if you cannot confirm today's status. Do not judge whether it suits the student. Say which in one sentence. Never use the word placeholder as the reason.`
+    : `You are the CRITERIA reviewer. Another agent checks whether the posting is real and open, and drops it if not; you do not keep or reject anything. Your only job is to score how well it matches this student, so they see everything above their own minimum match. Read the student's custom notes first, then the rest of the brief. Do not judge whether it is still open, its deadline or its dates: the status reviewer decides those, so never lower the score for them. ${YEAR_FIT} ${SILENCE_FIT} For you, a criterion that fails means a low score, not a rejection.\n${MATCH_RULE}\nreason is one sentence, addressed to no one, on why it scored this. Never use the word placeholder as the reason.`;
+}
+
+/** The match reviewer's answer: a score, its breakdown, and one line of reason. */
+export const MatchSchema = z.object({
+  score: z.number(),
+  factors: z.array(z.object({ factor: z.enum(MATCH_FACTORS), score: z.number(), note: z.string() })),
+});
+
+/** The criteria reviewer's answer as a verdict: kept for the score to decide, with the match cleaned up. */
+export function criteriaVerdict(data: { reason: string; match: { score: number; factors: { factor: string; score: number; note: string }[] }; record: Candidate }): Verdict {
+  const match = normalizeMatch({ ...data.match, reason: data.reason });
+  return { keep: true, reason: match.reason, fit: match.score / 100, match, record: data.record };
 }
 
 /** Said to every agent that reads a posting: how to get the deadline right. */
@@ -300,19 +322,25 @@ Never invent, paraphrase into new questions, or fill in typical questions for th
     return data;
   }
 
-  async validate(candidate: Candidate, brief: Brief, memory: MemorySummary, focus: ReviewFocus) {
-    const Out = z.object({ keep: z.boolean(), reason: z.string(), fit: z.number(), record: CandidateSchema });
+  async validate(candidate: Candidate, brief: Brief, memory: MemorySummary, focus: ReviewFocus): Promise<Verdict> {
     // Two different agents review every posting. Each has one job, so neither can wave a posting through on the other's ground.
     const job = reviewJob(focus);
-    const { data } = await grokJson({
-      name: focus === 'status' ? 'status_reviewer' : 'criteria_reviewer',
-      model: this.model('validators', TIER.normal),
-      schema: Out,
-      tools: tools(),
-      system: `${job}\nfit is 0 to 1: how well it matches the student's interests and preferences.\n\n${NOTES_RULE}\n${EVIDENCE}${focus === 'status' ? `\n${DEADLINE_RULE}` : '\nLeave deadline and deadlineSource as they are in the record; the other reviewer checks them.'}`,
-      user: `Today is ${today()}.\n${notesBlock(brief.notes)}\nStudent brief: ${JSON.stringify(focus === 'criteria' ? criteriaBrief(brief) : brief)}\nThe student keeps disliking: ${memory.avoidFields.join(', ') || 'nothing yet'}\nPosting: ${JSON.stringify(candidate)}`,
-    });
-    return { ...data, fit: Math.max(0, Math.min(1, data.fit)) };
+    const call = <T extends z.ZodTypeAny>(schema: T) =>
+      grokJson({
+        name: focus === 'status' ? 'status_reviewer' : 'criteria_reviewer',
+        model: this.model('validators', TIER.normal),
+        schema,
+        tools: tools(),
+        system: `${job}\n\n${NOTES_RULE}\n${EVIDENCE}${focus === 'status' ? `\n${DEADLINE_RULE}` : '\nLeave deadline and deadlineSource as they are in the record; the other reviewer checks them.'}`,
+        user: `Today is ${today()}.\n${notesBlock(brief.notes)}\nStudent brief: ${JSON.stringify(focus === 'criteria' ? criteriaBrief(brief) : brief)}\nThe student keeps disliking: ${memory.avoidFields.join(', ') || 'nothing yet'}\nPosting: ${JSON.stringify(candidate)}`,
+      });
+    if (focus === 'status') {
+      const { data } = await call(z.object({ keep: z.boolean(), reason: z.string(), record: CandidateSchema }));
+      // The status review is a hard check, not a score: fit is not its to give.
+      return { keep: data.keep, reason: data.reason, fit: data.keep ? 1 : 0, record: data.record };
+    }
+    const { data } = await call(z.object({ reason: z.string(), match: MatchSchema, record: CandidateSchema }));
+    return criteriaVerdict(data);
   }
 
   async present(kept: Opportunity[], brief: Brief, memory: MemorySummary) {

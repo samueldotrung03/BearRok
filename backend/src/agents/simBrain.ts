@@ -6,7 +6,8 @@ import { currentSignal, StoppedError } from './stop.ts';
 import { sortByRules, type CalendarEventInput, type EventAsk, type EventVerdict } from './eventSorter.ts';
 import { CATALOG, findByUrl, officialUrl, repostUrl, toCandidate, type CatalogItem } from './catalog.ts';
 import { noteMatch, noteSignals } from './scoring.ts';
-import { CATEGORY_LABEL, yearPlural, type ReviewFocus, type Assignment, type Brief, type Candidate, type FoundDeadline, type Category, type Lens, type MemorySummary, type Opportunity, type ScoutSpec } from './types.ts';
+import { normalizeMatch, type Match, type MatchPart } from './match.ts';
+import { CATEGORY_LABEL, yearPlural, type ReviewFocus, type Assignment, type Brief, type Candidate, type FoundDeadline, type Category, type Lens, type MemorySummary, type Opportunity, type ScoutSpec, type Verdict } from './types.ts';
 
 const INTEREST_FIELDS: Record<string, string[]> = {
   coding: ['software'],
@@ -286,41 +287,19 @@ export class SimBrain implements Brain {
     };
   }
 
-  async validate(candidate: Candidate, brief: Brief, memory: MemorySummary, focus: ReviewFocus) {
+  async validate(candidate: Candidate, brief: Brief, memory: MemorySummary, focus: ReviewFocus): Promise<Verdict> {
     await this.pause(1300, candidate.sourceUrl + focus);
-    const reject = (reason: string) => ({ keep: false, reason, fit: 0, record: candidate });
-    const now = this.now().getTime();
-    const signals = noteSignals(brief.notes.map((body) => ({ title: '', body })));
-    const noted = noteMatch({ ...candidate, location: candidate.location }, signals);
-
     if (focus === 'status') {
-      // Is it real and still open?
+      // The hard checks: is it real and still open? Whether it suits the student is the match's to say.
+      const reject = (reason: string) => ({ keep: false, reason, fit: 0, record: candidate });
       if (!findByUrl(candidate.sourceUrl)) return reject('The official page could not be found');
-      if (candidate.deadline && Date.parse(candidate.deadline) < now) return reject(`Closed: the deadline passed on ${candidate.deadline.slice(0, 10)}`);
+      if (candidate.deadline && Date.parse(candidate.deadline) < this.now().getTime()) return reject(`Closed: the deadline passed on ${candidate.deadline.slice(0, 10)}`);
       if (!candidate.deadline && brief.hardCriteria.includes('states a deadline')) return reject("States no deadline, and the student's restrictions skip those");
-    } else {
-      // Does it meet the student's rules, and is it what they are looking for? Notes are checked first.
-      if (noted.avoided.length) return reject(`The student's notes rule this out (${noted.avoided.slice(0, 3).join(', ')})`);
-      if (candidate.eligibleYears && !candidate.eligibleYears.includes(brief.year)) return reject(`Not open to ${yearPlural(brief.year)}: ${candidate.eligibility?.toLowerCase()}`);
-      const item = findByUrl(candidate.sourceUrl);
-      if (candidate.format === 'in_person' && item?.locationKind === 'other city') return reject(`In person in ${candidate.location}, and the student wants near ${brief.location}${brief.remoteOk ? ' or remote' : ''}`);
-      if (candidate.format === 'online' && !brief.remoteOk) return reject('Remote only, and the student wants in person');
-      if (candidate.format !== 'online' && brief.hardCriteria.includes('remote only')) return reject(`In person in ${candidate.location}, and the student's restrictions say remote only`);
-      if (candidate.field && memory.avoidFields.includes(candidate.field)) return reject(`Not what the student is looking for: they keep disliking ${candidate.field} opportunities`);
+      const reason = candidate.deadline ? `Open: the official page gives a deadline of ${candidate.deadline.slice(0, 10)}` : 'Open: the official page is up and lists no closing date';
+      return { keep: true, reason, fit: 1, record: candidate };
     }
-
-    let fit = 0.38;
-    if (candidate.field && brief.interests.includes(candidate.field)) fit += 0.26;
-    if (candidate.tags.includes('first-year friendly') && (brief.year === 'Freshman' || brief.year === 'Sophomore')) fit += 0.12;
-    if (candidate.tags.some((t) => /python|sql|react|figma/i.test(t))) fit += 0.06;
-    fit += hash(candidate.sourceUrl) * 0.14;
-    // Something a note asks for is a strong fit whatever else is true of it.
-    if (noted.wanted.length) fit = Math.max(fit, 0.8) + 0.05 * Math.min(noted.wanted.length, 3);
-    const reason =
-      focus === 'status'
-        ? candidate.deadline ? `Open: the official page gives a deadline of ${candidate.deadline.slice(0, 10)}` : 'Open: the official page is up and lists no closing date'
-        : noted.wanted.length ? "Asked for in the student's notes, and meets every rule" : 'Meets every rule the student set';
-    return { keep: true, reason, fit: Math.min(0.98, Number(fit.toFixed(2))), record: candidate };
+    const match = simMatch(candidate, brief, memory);
+    return { keep: true, reason: match.reason, fit: match.score / 100, match, record: candidate };
   }
 
   async present(kept: Opportunity[], brief: Brief, memory: MemorySummary) {
@@ -342,4 +321,74 @@ export class SimBrain implements Brain {
     }
     return out;
   }
+}
+
+/**
+ * The simulated match reviewer: each factor scored by plain rules over the posting and the brief,
+ * weighed together, with a small spread per posting so scores vary the way a model's do. A note
+ * that rules it out, or a class year the page leaves out, keeps it under the default minimum.
+ */
+export function simMatch(candidate: Candidate, brief: Brief, memory: Pick<MemorySummary, 'avoidFields'>): Match {
+  const parts: MatchPart[] = [];
+  const add = (factor: MatchPart['factor'], score: number, note: string) => parts.push({ factor, score, note });
+  const noted = noteMatch({ ...candidate, location: candidate.location }, noteSignals(brief.notes.map((body) => ({ title: '', body }))));
+  const words = `${candidate.title} ${candidate.tags.join(' ')} ${candidate.field ?? ''}`.toLowerCase();
+  const item = findByUrl(candidate.sourceUrl);
+
+  if (noted.avoided.length) add('notes', 5, `a note rules out ${noted.avoided.slice(0, 2).join(', ')}`);
+  else if (noted.wanted.length) add('notes', 95, `asked for in your notes (${noted.wanted.slice(0, 2).join(', ')})`);
+
+  if (candidate.field && memory.avoidFields.includes(candidate.field)) add('interests', 10, `you keep disliking ${candidate.field}`);
+  // A posting that names the field itself is a closer match than one only filed under it.
+  else if (candidate.field && brief.interests.includes(candidate.field)) add('interests', `${candidate.title} ${candidate.tags.join(' ')}`.toLowerCase().includes(candidate.field) ? 92 : 70,`your interest in ${candidate.field}`);
+  else if (brief.interests.some((i) => words.includes(i))) add('interests', 58, 'touches one of your interests');
+  else add('interests', 10, `${candidate.field ?? 'its field'} is outside your interests`);
+
+  if (brief.roles?.length) {
+    const role = brief.roles.find((r) => r.toLowerCase().split(/\W+/).some((w) => w.length > 3 && words.includes(w)));
+    add('roles', role ? 85 : 40, role ? `fits ${role}` : 'not one of your target roles');
+  }
+  if (brief.kinds?.length) add('category', brief.kinds.includes(candidate.type) ? 85 : 35, brief.kinds.includes(candidate.type) ? `a kind you search for` : `not a kind you search for`);
+
+  const remoteOnly = brief.hardCriteria.includes('remote only');
+  if (candidate.format === 'online') add('location', brief.remoteOk ? 90 : 20, brief.remoteOk ? 'remote' : 'remote, and you want in person');
+  else if (remoteOnly) add('location', 10, `in person in ${candidate.location}, and you want remote only`);
+  else if (item?.locationKind === 'other city') add('location', 15, `in person in ${candidate.location}`);
+  else add('location', candidate.format === 'hybrid' ? 72 : 84, candidate.location ? `near you in ${candidate.location}` : 'near you');
+
+  if (!candidate.eligibleYears) add('year', 60, 'the page does not say who may apply');
+  else if (candidate.eligibleYears.includes(brief.year)) add('year', candidate.tags.includes('first-year friendly') ? 98 : 92, `open to ${yearPlural(brief.year)}`);
+  else add('year', 0, `not open to ${yearPlural(brief.year)}`);
+
+  const skill = (brief.skills ?? []).find((k) => words.includes(k.toLowerCase()));
+  if (skill) add('skills', 85, `uses ${skill}`);
+  else if (candidate.tags.some((t) => /python|sql|react|figma/i.test(t))) add('skills', 62, 'skills you can pick up');
+  else if (brief.skills?.length) add('skills', 45, 'no skills of yours named');
+
+  // What the student is interested in leads, as it does for a model reading the posting; where it
+  // is and who may apply come next, the rest move it a little. Being in person somewhere else
+  // roughly halves it. A spread of about twelve points either way, the same for a posting every time.
+  const of = (factor: MatchPart['factor']) => parts.find((p) => p.factor === factor)?.score;
+  const interest = of('interests')!;
+  const notes = of('notes');
+  const lead = notes !== undefined ? Math.max(notes, interest) : interest;
+  const location = of('location') ?? 60;
+  const minor = ['category', 'skills', 'roles'].map((f) => of(f as MatchPart['factor'])).filter((x): x is number => x !== undefined);
+  const minorMean = minor.length ? minor.reduce((s, x) => s + x, 0) / minor.length : 60;
+  let weighed = 0.5 * lead + 0.2 * location + 0.15 * (of('year') ?? 60) + 0.15 * minorMean;
+  if (location <= 20) weighed *= 0.55;
+  let score = Math.round(weighed + (hash(candidate.sourceUrl + 'match') - 0.5) * 24);
+  if (notes !== undefined && notes >= 90) score = Math.max(score, 80);
+  if (noted.avoided.length) score = Math.min(score, 8);
+  // A restriction the student set that the posting fails (remote only, here) is a weak match.
+  if (remoteOnly && candidate.format !== 'online') score = Math.min(score, 15);
+  if (candidate.eligibleYears && !candidate.eligibleYears.includes(brief.year)) score = Math.min(score, 12);
+  score = Math.max(0, Math.min(98, score));
+  const best = [...parts].sort((a, b) => b.score - a.score)[0];
+  const worst = [...parts].sort((a, b) => a.score - b.score)[0];
+  const reason =
+    score >= 50 ? `Strong on ${best?.note ?? 'your profile'}${worst && worst.score < 40 ? `, though ${worst.note}` : ''}`
+    : score >= 30 ? `A partial match: ${best?.note ?? 'some of your profile'}, but ${worst?.note ?? 'little else'}`
+    : `A weak match: ${worst?.note ?? 'little of your profile'}`;
+  return normalizeMatch({ score, factors: parts, reason });
 }

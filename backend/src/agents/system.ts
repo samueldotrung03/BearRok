@@ -10,6 +10,7 @@ import { Fleet, limiter } from './fleet.ts';
 import { KIND_TITLE, lineupNames, planLineup } from './lineup.ts';
 import { AUTO_GAP_MS, dueSlots, nextSlot } from './autoMode.ts';
 import { groundlessReject } from './reviewGuard.ts';
+import { belowThresholdReason, cleanThreshold, hardCheck, matchFromFit, meetsThreshold, thresholdOf } from './match.ts';
 import { plainError } from '../plainError.ts';
 import { BalanceExhaustedError } from '../quota.ts';
 import { isStopped, StoppedError, throwIfStopped, withSignal } from './stop.ts';
@@ -121,6 +122,8 @@ export interface StudentState {
   scheduleSeconds: number;
   /** Cards the feed should hold; the agents keep searching while it has fewer. */
   feedTarget: number;
+  /** The minimum match in force, a whole percent: the feed holds only cards at or above it. */
+  matchThreshold: number;
   /** What the student has saved and liked now, kept with their account so every device shows the same. */
   saved: string[];
   liked: string[];
@@ -354,6 +357,8 @@ export class AgentSystem {
   /** Postings a validator already turned down, so they are not checked again every run. */
   private rejected = new Map<string, string>();
   private rejectedUrls = new Set<string>();
+  /** Postings that passed the hard checks but scored below the minimum match, by canonical URL, oldest first. */
+  private lowMatch = new Map<string, { url: string; title: string; score: number; at: string }>();
   private applications = new Map<string, Application>();
   /** Days before a deadline to remind the student. Empty turns reminders off. */
   private reminderDays: number[] = [7, 2, 0];
@@ -429,6 +434,7 @@ export class AgentSystem {
 
   student(): StudentState {
     const memory = this.memory();
+    const threshold = thresholdOf(this.profile);
     const rank = (list: Opportunity[]) =>
       rankFeed(list, memory, {
         now: this.opts.now(),
@@ -442,7 +448,8 @@ export class AgentSystem {
       profile: this.profile,
       memory: summarize(memory),
       // Only the kinds of opportunity the student asked for, in their profile or their agent settings.
-      feed: rankFeed([...this.opportunities.values()].filter((o) => this.profile.categories.includes(CATEGORY_OF[o.type]) || (this.agentSettings.kinds ?? []).includes(o.type)), memory, {
+      // Only cards at or above the minimum match; ones from before match scores have none and stay.
+      feed: rankFeed([...this.opportunities.values()].filter((o) => (this.profile.categories.includes(CATEGORY_OF[o.type]) || (this.agentSettings.kinds ?? []).includes(o.type)) && (!o.match || meetsThreshold(o.match.score, threshold))), memory, {
         now: this.opts.now(),
         reasons: this.reasons,
         newIds: this.newIds,
@@ -452,6 +459,7 @@ export class AgentSystem {
       feedbackThreshold: this.opts.feedbackThreshold,
       scheduleSeconds: this.scheduleSeconds,
       feedTarget: this.opts.feedTarget,
+      matchThreshold: threshold,
       saved,
       liked: [...memory.reaction].filter(([id, r]) => r === 'like' && this.opportunities.has(id)).map(([id]) => id),
       savedItems: rank(saved.map((id) => this.opportunities.get(id)!)),
@@ -592,6 +600,7 @@ export class AgentSystem {
         reasons: Object.fromEntries(this.reasons),
         rejected: [...this.rejected].map(([url, reason]) => ({ url, reason })),
         rejectedUrls: [...this.rejectedUrls],
+        lowMatch: [...this.lowMatch.values()],
         searches: this.searches,
         pending: [...this.pending.values()],
         runs: this.runs,
@@ -623,6 +632,7 @@ export class AgentSystem {
     const stale = new Set((l.rejected ?? []).filter((r) => placeholderRejection(r.reason)).map((r) => canon(r.url)));
     this.rejected = new Map((l.rejected ?? []).filter((r) => !stale.has(canon(r.url))).map((r) => [r.url, r.reason]));
     this.rejectedUrls = new Set((l.rejectedUrls ?? []).filter((u) => !stale.has(canon(u))));
+    this.lowMatch = new Map((l.lowMatch ?? []).map((m) => [canon(m.url), { ...m }]));
     this.searches = structuredClone(l.searches ?? []);
     this.pending = new Map((l.pending ?? []).map((p) => [p.key, structuredClone(p)]));
     this.runs = structuredClone(l.runs ?? []);
@@ -749,6 +759,7 @@ export class AgentSystem {
     this.reasons.clear();
     this.rejected.clear();
     this.rejectedUrls.clear();
+    this.lowMatch.clear();
     this.applications.clear();
     this.reminderDays = [7, 2, 0];
     this.resume = null;
@@ -995,6 +1006,24 @@ export class AgentSystem {
     return this.reminderDays;
   }
 
+  /** The minimum match in force, a whole percent: the student's own or the default. */
+  getMatchThreshold() {
+    return thresholdOf(this.profile);
+  }
+
+  /**
+   * Set the minimum match. The feed shows only cards at or above it straight away; the agents read
+   * it at the start of each search. Not a reason to search again on its own. Null when it is not a
+   * whole percent from 0 to 100.
+   */
+  setMatchThreshold(value: unknown): number | null {
+    const threshold = cleanThreshold(value);
+    if (threshold === null) return null;
+    this.profile = { ...this.profile, matchThreshold: threshold };
+    this.emitStudent();
+    return threshold;
+  }
+
   /** Record what happened on the student's Google Calendar. */
   setCalendar(opportunityId: string, patch: Partial<Application['calendar']>) {
     const app = this.applications.get(opportunityId);
@@ -1223,9 +1252,11 @@ export class AgentSystem {
       jobs: [],
       validations: [],
       log: [],
-      stats: { jobs: 0, skipped: 0, candidates: 0, merged: 0, kept: 0, rejected: 0, added: 0 },
+      stats: { jobs: 0, skipped: 0, candidates: 0, merged: 0, kept: 0, rejected: 0, added: 0, belowThreshold: 0, threshold: thresholdOf(this.profile) },
       error: null,
     };
+    // Read once per run, so a change in the agent settings applies from the next search.
+    const threshold = run.stats.threshold!;
     this.run = run;
     this.fillRuns = trigger === 'fill' ? this.fillRuns + 1 : 0;
     this.feedbackSinceRun = 0;
@@ -1314,8 +1345,15 @@ export class AgentSystem {
         brief.preferences.push(`Find more ${MORE_OF[focus]}: the student asked for more of these just now.`);
         log('Master agent', `The student asked for more ${MORE_OF[focus]}, so every search manager is on them this time`, 'good');
       }
+      // What the match reviewer scores against, straight from the profile, whatever the master wrote.
+      const prefs = this.profile.preferences;
+      const roles = [...this.profile.careerInterests, ...(prefs?.lists?.rolesWanted ?? []), ...(prefs?.answers?.rolesWanted ? [prefs.answers.rolesWanted] : [])].map((r) => r.trim()).filter(Boolean);
+      if (roles.length) brief.roles = [...new Set(roles)].slice(0, 10);
+      if (this.profile.skills.length) brief.skills = this.profile.skills.slice(0, 12);
+      brief.kinds = [...new Set(lineup.map((s) => [s.kind, ...(s.also ?? [])]).flat())];
       run.brief = brief;
       run.assignments = assignments;
+      log('Validation agents', `Postings are kept when they match at least ${threshold}% of what you asked for (your minimum match).`);
       const mix = [...new Set(lineup.map((s) => s.kind))].map((k) => `${lineup.filter((s) => s.kind === k).length} on ${MORE_OF[k]}`);
       void split;
       set(master, { status: 'done', detail: `Brief: ${brief.goal}. Search managers: ${mix.join(', ')}.` });
@@ -1336,8 +1374,11 @@ export class AgentSystem {
         ...[...this.opportunities.values()].map((o) => o.sourceUrl),
         ...this.rejectedUrls,
         ...[...this.pending.values()].map((p) => p.candidate.sourceUrl),
+        // Ones that scored below the minimum are only worth finding again once it is lowered.
+        ...[...this.lowMatch.values()].filter((m) => !meetsThreshold(m.score, threshold)).map((m) => m.url),
       ]);
       let alreadyRejected = 0;
+      let alreadyBelow = 0;
       let leadsSeen = 0;
       let noUrl = 0;
       let duplicateLeads = 0;
@@ -1377,33 +1418,61 @@ export class AgentSystem {
       /** Decide one posting once its last review is in. */
       const settle = (key: string, f: Found) => {
         const v = run.validations.find((x) => x.id === idFor(key))!;
-        const against = v.reviews.filter((r) => r.status !== 'kept');
-        if (against.length > 0) {
+        const both = verdicts.get(key) ?? {};
+        // The status reviewer read the official page, so its version of the facts is the one kept;
+        // the criteria reviewer's words are why it fits.
+        const c = (both.status ?? both.criteria)?.record ?? f.candidate;
+        // A review that only failed to run says nothing about the posting: one found earlier
+        // stays, and a new one is kept as pending to be reviewed again on the next run.
+        const failed = v.reviews.filter((r) => r.status === 'rejected' && r.reason?.startsWith('Could not be reviewed'));
+        // Hard checks first: fake, closed, expired or with no real link is dropped whatever it scores.
+        const hard = both.status ? hardCheck(c, both.status, now()) : null;
+        // The score is shown whatever happens next, so the board can say what a dropped posting scored.
+        if (both.criteria?.match) v.match = both.criteria.match;
+        if (hard || failed.length) {
+          const parts = [...(hard ? [`${both.status!.keep ? 'Hard check' : 'Status reviewer'}: ${hard}`] : []), ...failed.map((r) => `${r.reviewer}: ${r.reason}`)];
           v.status = 'rejected';
-          v.reason = against.map((r) => `${r.reviewer}: ${r.reason}`).join(' ');
+          v.reason = parts.join(' ');
           run.stats.rejected++;
-          const failedOnly = against.every((r) => r.reason?.startsWith('Could not be reviewed'));
-          // A review that only failed to run says nothing about the posting: one found earlier
-          // stays, and a new one is kept as pending to be reviewed again on the next run.
-          if (!failedOnly) {
+          if (hard) {
+            if (both.status!.keep) Object.assign(v.reviews.find((r) => r.focus === 'status')!, { status: 'rejected', reason: hard, fit: null });
             this.pending.delete(key);
             this.opportunities.delete(v.id);
+            this.lowMatch.delete(key);
             this.rejected.set(key, v.reason);
             this.rejectedUrls.add(f.candidate.sourceUrl);
           }
-          log('Validation agents', `Rejected "${f.candidate.title}". ${against.map((r) => `${r.reviewer}: ${r.reason}`).join(' ')}`.replace(/\.?$/, '.'), 'bad');
+          log('Validation agents', `Rejected "${f.candidate.title}". ${parts.join(' ')}`.replace(/\.?$/, '.'), 'bad');
           this.emitStudent();
           return;
         }
-        const both = verdicts.get(key)!;
-        // The status reviewer read the official page, so its version of the facts is the one kept;
-        // the criteria reviewer's words are why it fits.
-        const c = (both.status ?? both.criteria)!.record;
-        const fits = v.reviews.map((r) => r.fit ?? 0);
-        const fit = Number((fits.reduce((x, y) => x + y, 0) / fits.length).toFixed(2));
-        v.status = 'kept';
+        // Then the match: kept at or above the student's minimum, whatever else it is.
+        const match = both.criteria!.match ?? matchFromFit(both.criteria!.keep ? both.criteria!.fit : 0, both.criteria!.reason);
+        const fit = match.score / 100;
+        v.match = match;
         v.fit = fit;
-        v.reason = (both.criteria ?? both.status)!.reason;
+        if (!meetsThreshold(match.score, threshold)) {
+          const why = belowThresholdReason(match.score, threshold);
+          v.status = 'rejected';
+          v.belowThreshold = true;
+          v.reason = `${why}. ${match.reason}`;
+          Object.assign(v.reviews.find((r) => r.focus === 'criteria')!, { status: 'rejected', reason: `${why}. ${match.reason}` });
+          run.stats.belowThreshold = (run.stats.belowThreshold ?? 0) + 1;
+          this.pending.delete(key);
+          // Remembered with its score: lowering the minimum lets it back in.
+          this.lowMatch.delete(key);
+          this.lowMatch.set(key, { url: f.candidate.sourceUrl, title: f.candidate.title, score: match.score, at: now().toISOString() });
+          if (this.lowMatch.size > 300) this.lowMatch.delete(this.lowMatch.keys().next().value!);
+          // One already in the feed carries its new score, so the feed leaves it out too.
+          const shown = this.opportunities.get(v.id);
+          if (shown) Object.assign(shown, { match, baseScore: fit, lastCheckedAt: now().toISOString() });
+          log('Validation agents', `Left out "${f.candidate.title}": ${match.score}% match, below your minimum of ${threshold}%. ${match.reason}`.replace(/\.?$/, '.'));
+          this.emitStudent();
+          return;
+        }
+        this.lowMatch.delete(key);
+        v.status = 'kept';
+        v.reason = match.reason;
         const id = v.id;
         const previous = this.opportunities.get(id);
         const unknowns: Unknown[] = c.deadline ? [] : [{ field: 'deadline', label: UNKNOWN_DEADLINE[CATEGORY_OF[c.type]] }];
@@ -1417,6 +1486,7 @@ export class AgentSystem {
           foundAt: previous?.foundAt ?? now().toISOString(),
           lastCheckedAt: now().toISOString(),
           baseScore: fit,
+          match,
           foundBy: assignments.find((a) => a.managerId === f.managerId)?.name ?? f.managerId,
           alsoSeenAt: f.alsoSeenAt,
           application: previous?.application ?? null,
@@ -1458,14 +1528,29 @@ export class AgentSystem {
             try {
               const given = await this.brain.validate(f.candidate, brief, summary, reviewer.focus);
               if (unusableReview(given.reason)) throw new Error('the reviewer gave no answer');
-              // A rejection off the reviewer's own ground, or only for something not confirmed, does not stand.
-              const overruled = given.keep ? null : groundlessReject(reviewer.focus, given.reason);
-              const verdict = { ...given, record: cleanRecord(given.record, f.candidate), ...(overruled ? { keep: true, reason: overruled, fit: Math.max(given.fit, 0.5) } : {}) };
-              if (overruled) log(reviewer.name, `Overruled its rejection of "${f.candidate.title}" (${given.reason.replace(/\.$/, '')}): ${overruled}.`);
-              verdicts.set(key, { ...verdicts.get(key), [reviewer.focus]: verdict });
-              r.status = verdict.keep ? 'kept' : 'rejected';
-              r.reason = verdict.reason;
-              r.fit = verdict.keep ? verdict.fit : null;
+              const record = cleanRecord(given.record, f.candidate);
+              if (reviewer.focus === 'criteria') {
+                // The match reviewer scores; the student's minimum decides. A reviewer that still
+                // turns a posting down outright gives it no match at all, unless the rejection rests
+                // only on whether it is open or on something not confirmed: then it counts as neutral.
+                const overruled = given.match || given.keep ? null : groundlessReject('criteria', given.reason);
+                if (overruled) log(reviewer.name, `Overruled its rejection of "${f.candidate.title}" (${given.reason.replace(/\.$/, '')}): ${overruled}.`);
+                const match = given.match ?? (overruled ? matchFromFit(Math.max(given.fit, 0.5), overruled) : matchFromFit(given.keep ? given.fit : 0, given.reason));
+                verdicts.set(key, { ...verdicts.get(key), criteria: { ...given, keep: true, fit: match.score / 100, match, reason: match.reason, record } });
+                r.status = 'kept';
+                r.reason = `${match.score}% match. ${match.reason}`;
+                r.fit = match.score / 100;
+                r.match = match;
+              } else {
+                // A rejection only for something not confirmed does not stand.
+                const overruled = given.keep ? null : groundlessReject(reviewer.focus, given.reason);
+                const verdict = { ...given, record, ...(overruled ? { keep: true, reason: overruled } : {}) };
+                if (overruled) log(reviewer.name, `Overruled its rejection of "${f.candidate.title}" (${given.reason.replace(/\.$/, '')}): ${overruled}.`);
+                verdicts.set(key, { ...verdicts.get(key), status: verdict });
+                r.status = verdict.keep ? 'kept' : 'rejected';
+                r.reason = verdict.reason;
+                r.fit = null;
+              }
             } catch (e) {
               // A review that could not be done is not a pass.
               r.status = 'rejected';
@@ -1573,6 +1658,11 @@ export class AgentSystem {
                       alreadyRejected++;
                       return;
                     }
+                    const low = this.lowMatch.get(official);
+                    if (low && !meetsThreshold(low.score, threshold) && !this.opportunities.has(idFor(official))) {
+                      alreadyBelow++;
+                      return;
+                    }
                     const existing = found.get(official);
                     if (existing) {
                       run.stats.merged++;
@@ -1600,13 +1690,14 @@ export class AgentSystem {
         }),
       );
       if (alreadyRejected) log('Worker fleet', `${alreadyRejected} postings were turned down in an earlier run and were not checked again`);
+      if (alreadyBelow) log('Worker fleet', `${alreadyBelow} postings scored below your minimum match of ${threshold}% in an earlier run and were not checked again`);
       run.stats.candidates = found.size;
       run.stats.jobs = fleet.started;
       run.stats.skipped = fleet.jobs.filter((j) => j.status === 'skipped').length;
       const ofKind = (kind: string, status: string) => fleet.jobs.filter((j) => j.kind === kind && j.status === status).length;
       // A reader that ran and found no posting; skipped and failed readers are counted apart.
       const extractEmpty = fleet.jobs.filter((j) => j.kind === 'extract' && j.status === 'done' && j.result === 'page could not be read').length;
-      const funnel = `Funnel: scouts ${ofKind('scout', 'done')} done, ${ofKind('scout', 'failed')} failed, ${ofKind('scout', 'skipped')} skipped; leads ${leadsSeen}; readers ${ofKind('extract', 'done')} done, ${extractEmpty} with no posting, ${ofKind('extract', 'failed')} failed, ${ofKind('extract', 'skipped')} skipped; duplicate leads ${duplicateLeads}; no link ${noUrl}; already turned down ${alreadyRejected}; sent to review ${found.size}.`;
+      const funnel = `Funnel: scouts ${ofKind('scout', 'done')} done, ${ofKind('scout', 'failed')} failed, ${ofKind('scout', 'skipped')} skipped; leads ${leadsSeen}; readers ${ofKind('extract', 'done')} done, ${extractEmpty} with no posting, ${ofKind('extract', 'failed')} failed, ${ofKind('extract', 'skipped')} skipped; duplicate leads ${duplicateLeads}; no link ${noUrl}; already turned down ${alreadyRejected}; already below the minimum match ${alreadyBelow}; sent to review ${found.size}.`;
       log('Worker fleet', funnel, found.size ? 'good' : 'bad');
       run.stats.funnel = {
         jobs: fleet.started,
@@ -1622,6 +1713,9 @@ export class AgentSystem {
         },
         noLink: noUrl,
         alreadyRejected,
+        alreadyBelowThreshold: alreadyBelow,
+        belowThreshold: 0,
+        threshold,
         reviewed: found.size,
         rejected: run.stats.rejected,
         rejectedReasons: [],
@@ -1649,10 +1743,10 @@ export class AgentSystem {
       run.stats.kept = kept.length;
       run.stats.added = this.newIds.size;
       this.emitRun();
-      log('Validation agents', `Reviewed all ${run.validations.length} postings, ${REVIEWERS.length} reviews each, as they came in: kept ${kept.length}, rejected ${run.stats.rejected}`, 'good');
-      const rejectedWhy = run.validations.filter((v) => v.status === 'rejected').map((v) => v.reason ?? '');
+      log('Validation agents', `Reviewed all ${run.validations.length} postings, ${REVIEWERS.length} reviews each, as they came in: kept ${kept.length}, rejected ${run.stats.rejected}, below your minimum match of ${threshold}%: ${run.stats.belowThreshold ?? 0}`, 'good');
+      const rejectedWhy = run.validations.filter((v) => v.status === 'rejected' && !v.belowThreshold).map((v) => v.reason ?? '');
       const unfinished = run.validations.flatMap((v) => v.reviews.filter((r) => r.reason?.startsWith('Could not be reviewed')).map((r) => r.reason ?? ''));
-      if (run.stats.funnel) Object.assign(run.stats.funnel, { rejected: run.stats.rejected, rejectedReasons: reasonCounts(rejectedWhy), unfinishedReviews: unfinished.length, kept: kept.length, saved: this.newIds.size });
+      if (run.stats.funnel) Object.assign(run.stats.funnel, { rejected: run.stats.rejected, rejectedReasons: reasonCounts(rejectedWhy), belowThreshold: run.stats.belowThreshold ?? 0, unfinishedReviews: unfinished.length, kept: kept.length, saved: this.newIds.size });
       if (rejectedWhy.length) {
         const line = `Rejected because: ${reasonTally(rejectedWhy)}`;
         log('Validation agents', line, 'bad');

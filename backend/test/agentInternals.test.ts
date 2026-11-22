@@ -16,7 +16,7 @@ const brief: Brief = {
   notes: ['paid internships only'],
 };
 
-test('worker prompts carry the student request, and reviewers match the keep/reason/fit/record shape', () => {
+test('worker prompts carry the student request; the status reviewer keeps or rejects, the criteria reviewer scores', () => {
   const ask = studentAsk(brief);
   assert.match(ask, /Freshman/);
   assert.match(ask, /Berkeley, CA/);
@@ -26,10 +26,14 @@ test('worker prompts carry the student request, and reviewers match the keep/rea
   const criteria = reviewJob('criteria');
   const status = reviewJob('status');
   assert.match(criteria, /undergraduates, all students/);
-  assert.match(criteria, /keep to false/);
+  // The criteria reviewer no longer keeps or rejects: it scores the match, factor by factor.
+  assert.doesNotMatch(criteria, /keep to false/);
+  assert.match(criteria, /Score the match from 0 to 100/);
+  assert.match(criteria, /notes \(their custom notes\), interests, roles/);
+  assert.match(status, /Set keep to false only when the posting is not real/);
   assert.match(status, /ongoing club or program/);
   assert.match(status, /deadline has passed/);
-  // Both jobs still ask the model for the fields the parser reads: keep, reason, fit, and a record.
+  // Both jobs ask for a one-line reason, which the parsers read along with keep or the match.
   assert.match(criteria, /one sentence/);
   assert.match(status, /one sentence/);
 });

@@ -143,7 +143,15 @@ test('validators: realistic AI/ML internships are kept unless the page itself ru
   assert.equal(overruled.length, 3);
   assert.ok(overruled.some((l) => l.text.includes('could not verify')));
   // Real rejections are remembered, so the same posting is not checked again.
-  const remembered = s.memorySnapshot().learned.rejected.map((r) => r.url);
-  for (const p of POSTINGS.filter((x) => !x.kept)) assert.ok(remembered.some((u) => u.includes(p.slug)), p.slug);
+  // A hard-check rejection (status) is final; a criteria one is a 0% match, remembered with its
+  // score so lowering the minimum match lets it back in.
+  const learned = s.memorySnapshot().learned;
+  const remembered = learned.rejected.map((r) => r.url);
+  for (const p of POSTINGS.filter((x) => !x.kept && x.status)) assert.ok(remembered.some((u) => u.includes(p.slug)), p.slug);
+  for (const p of POSTINGS.filter((x) => !x.kept && x.criteria)) {
+    const low = learned.lowMatch?.find((m) => m.url.includes(p.slug));
+    assert.ok(low && low.score < 30, `${p.slug} is remembered below the minimum match`);
+    assert.ok(!remembered.some((u) => u.includes(p.slug)), `${p.slug} is not a permanent rejection`);
+  }
   assert.equal(run.stats.funnel!.kept, 3 + run.validations.filter((v) => !POSTINGS.some((p) => p.title === v.title) && v.status === 'kept').length);
 });

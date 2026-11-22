@@ -7,7 +7,8 @@ Object.assign(globalThis, {
   localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, key: () => null, length: 0 },
 });
 
-describe('agent settings', () => {
+// Importing a page pulls in the app shell. That render takes about seven seconds here, past Vitest's five-second default.
+describe('agent settings', { timeout: 20_000 }, () => {
   it('opens from a button at the top of the Agents page, and the page no longer offers "Internships only"', async () => {
     const { Agents } = await import('../../pages/Agents.tsx');
     const { StoreProvider } = await import('../../state/StoreProvider.tsx');

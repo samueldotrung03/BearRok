@@ -60,7 +60,8 @@ const guide = (over: Partial<Guide> = {}): Guide => ({
 
 const renderGuide = (g: Guide, firstPart: SectionId = 'basics') => renderToString(createElement(CareerGuide, { guide: g, onSearchAgain: () => {}, onAddMore: async () => null, firstPart }));
 
-describe('Discover page', () => {
+// Importing a page pulls in the app shell. That render takes about seven seconds here, past Vitest's five-second default.
+describe('Discover page', { timeout: 20_000 }, () => {
   it('opens on the career search with quick picks and the path finder closed', () => {
     const html = render();
     for (const text of ['Career discovery', 'Which career do you want to learn about?', 'Learn', 'Not sure? Find my path', 'Type a career above, or pick one, to see its guide.']) {
@@ -78,7 +79,7 @@ describe('Discover page', () => {
   });
 });
 
-describe('Career guide', () => {
+describe('Career guide', { timeout: 20_000 }, () => {
   it('lists the four parts as tabs with the interviews before how to start, and shows only the first', () => {
     const html = renderGuide(guide());
     const tabs = html.slice(html.indexOf('role="tablist"'), html.indexOf('role="tabpanel"'));

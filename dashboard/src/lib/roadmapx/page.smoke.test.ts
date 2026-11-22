@@ -32,7 +32,8 @@ afterEach(() => {
   delete (globalThis as { localStorage?: unknown }).localStorage;
 });
 
-describe('Roadmap page', () => {
+// Importing a page pulls in the app shell. That render takes about seven seconds here, past Vitest's five-second default.
+describe('Roadmap page', { timeout: 20_000 }, () => {
   it('opens the goal picker on the field of the current goal and lists only that field’s goals', () => {
     stubGoal('path-health');
     const html = render();
@@ -52,7 +53,7 @@ describe('Roadmap page', () => {
   });
 });
 
-describe('Roadmap journey page', () => {
+describe('Roadmap journey page', { timeout: 20_000 }, () => {
   it('renders the 3D journey for every goal without a missing value', async () => {
     const { Roadmap: Journey } = await import('../../pages/Roadmap.tsx');
     for (const path of careerPaths) {

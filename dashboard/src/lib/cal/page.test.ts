@@ -30,7 +30,8 @@ async function render(view: string, extra: Record<string, unknown> = {}) {
   return renderToString(createElement(MemoryRouter, null, page));
 }
 
-describe('Calendar page', () => {
+// Importing a page pulls in the app shell. That render takes about seven seconds here, past Vitest's five-second default.
+describe('Calendar page', { timeout: 20_000 }, () => {
   beforeEach(() => store.clear());
 
   it.each(['month', 'week', 'day', 'agenda'])('renders the %s view with the schedule recommendation, the plan and the honesty line', async (view) => {
@@ -59,7 +60,7 @@ describe('Calendar page', () => {
   });
 });
 
-describe('Calendar page layout', () => {
+describe('Calendar page layout', { timeout: 20_000 }, () => {
   it('puts the calendar first with the upcoming application deadlines beside it, and has no .ics export or add-to-calendar link', async () => {
     const html = await render('month');
     expect(html).toContain('>Deadlines<');
@@ -70,7 +71,7 @@ describe('Calendar page layout', () => {
   });
 });
 
-describe('Calendar views', () => {
+describe('Calendar views', { timeout: 20_000 }, () => {
   it('offers Month, Week and Day, and the day view lists the day by the hour inside the fixed frame', async () => {
     const html = await render('day');
     for (const label of ['Month', 'Week', 'Day', 'Agenda']) expect(html).toMatch(new RegExp(`role="tab"[^>]*>(<svg[\\s\\S]*?</svg>)?${label}</button>`));
@@ -94,7 +95,7 @@ describe('Calendar views', () => {
   });
 });
 
-describe('Calendar and Google Calendar', () => {
+describe('Calendar and Google Calendar', { timeout: 20_000 }, () => {
   it("offers to connect the student's own Google Calendar, with no filter row or switch", async () => {
     const html = await render('month');
     expect(html).toContain('>Google Calendar<');
@@ -107,7 +108,7 @@ describe('Calendar and Google Calendar', () => {
   });
 });
 
-describe('Adding events', () => {
+describe('Adding events', { timeout: 20_000 }, () => {
   it('has an Add event button, and the form takes a date and an optional time', async () => {
     const html = await render('month');
     expect(html).toContain('aria-label="Add event"');
@@ -116,7 +117,7 @@ describe('Adding events', () => {
   });
 });
 
-describe('Calendar header', () => {
+describe('Calendar header', { timeout: 20_000 }, () => {
   it('keeps the same controls in every view, so nothing moves when the view changes', async () => {
     for (const view of ['month', 'week', 'day', 'agenda']) {
       const html = await render(view);
@@ -135,7 +136,7 @@ describe('Calendar header', () => {
   });
 });
 
-describe('Calendar wording', () => {
+describe('Calendar wording', { timeout: 20_000 }, () => {
   it('does not say "free", and does not label each event "Google Calendar"', async () => {
     for (const view of ['month', 'week', 'day', 'agenda']) {
       const html = (await render(view)).replace(/<!-- -->/g, '');

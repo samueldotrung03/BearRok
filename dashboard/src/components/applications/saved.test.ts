@@ -21,7 +21,8 @@ async function wrap(child: ReturnType<typeof createElement>) {
 
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString();
 
-describe('saved details', () => {
+// Importing a page pulls in the app shell. That render takes about seven seconds here, past Vitest's five-second default.
+describe('saved details', { timeout: 20_000 }, () => {
   it('shows the deadline with where it was read, and says plainly what the posting did not state', async () => {
     const { SavedDetails } = await import('./SavedDetails.tsx');
     // A posting the sample student is not tracking.
@@ -74,7 +75,7 @@ describe('saved details', () => {
   });
 });
 
-describe('applications page', () => {
+describe('applications page', { timeout: 20_000 }, () => {
   it('has the List and Sheet view tabs, and Saved as the first stage', async () => {
     const { Applications } = await import('../../pages/Applications.tsx');
     const html = await wrap(createElement(Applications));
@@ -93,7 +94,7 @@ describe('applications page', () => {
   });
 });
 
-describe('sheet view', () => {
+describe('sheet view', { timeout: 20_000 }, () => {
   it('is always a spreadsheet: every column is set and blank rows wait to be filled, even with nothing loaded', async () => {
     const { SheetView, SHEET_COLUMNS } = await import('./SheetView.tsx');
     const html = await wrap(createElement(SheetView, { refreshKey: 'x' }));
@@ -114,7 +115,7 @@ describe('sheet view', () => {
   });
 });
 
-describe('empty kinds', () => {
+describe('empty kinds', { timeout: 20_000 }, () => {
   it('an empty kind says so and offers to search for more of it', async () => {
     const { EmptyKind } = await import('../../pages/Feed.tsx');
     const html = await wrap(createElement(EmptyKind, { type: 'research', searching: false, onSearch: () => {} }));
@@ -123,7 +124,7 @@ describe('empty kinds', () => {
   });
 });
 
-describe('status and sheet updates', () => {
+describe('status and sheet updates', { timeout: 20_000 }, () => {
   it('saving a card puts it at Saved, and the status menu has no "not tracking"', async () => {
     const { reducer } = await import('../../state/store.ts');
     const { initialState } = await import('../../data/sample.ts');
@@ -145,7 +146,7 @@ describe('status and sheet updates', () => {
   });
 });
 
-describe('feed on launch', () => {
+describe('feed on launch', { timeout: 20_000 }, () => {
   it('says it is loading, not that there is nothing, before the student’s data has arrived', async () => {
     const { Feed } = await import('../../pages/Feed.tsx');
     const html = await wrap(createElement(Feed));

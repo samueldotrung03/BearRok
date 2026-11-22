@@ -19,7 +19,9 @@ async function row(over: Record<string, unknown> = {}) {
   return renderToString(createElement(MemoryRouter, null, createElement(AuthProvider, null, createElement(StoreProvider, null, createElement(LiveProvider, null, createElement(OpportunityRow, { opportunity: o as never, onDismiss: () => {} }))))));
 }
 
-describe('feed row', () => {
+// The first card render pulls in the feed components. With the suite's two workers that
+// takes longer than Vitest's five-second default.
+describe('feed row', { timeout: 20_000 }, () => {
   it('shows the whole picture beside the title, organizer and reason', async () => {
     const html = await row();
     expect(html).toContain('feed-row-layout');

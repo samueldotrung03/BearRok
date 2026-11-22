@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { addRecent, answerParts, clearRecent, recentSearches, shortDate } from './search.ts';
 
-describe('search', () => {
+// Importing a page pulls in the app shell. Under a full parallel run the first import can take over a minute, past Vitest's five-second default.
+describe('search', { timeout: 180_000 }, () => {
   beforeEach(() => {
     const data = new Map<string, string>();
     globalThis.localStorage = {
@@ -48,7 +49,7 @@ describe('search', () => {
   });
 });
 
-describe('search page: leaving mid-search', () => {
+describe('search page: leaving mid-search', { timeout: 180_000 }, () => {
   it('comes back finished with what it had, not stuck searching', async () => {
     const { restoredRun } = await import('../pages/Search.tsx');
     const base = { q: 'nasa', own: [], answer: null, note: '', offline: false, contextParts: [] };

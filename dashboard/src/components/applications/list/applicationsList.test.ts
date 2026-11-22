@@ -15,8 +15,8 @@ async function inProviders(child: ReturnType<typeof createElement>) {
   return renderToString(createElement(MemoryRouter, null, createElement(AuthProvider, null, createElement(StoreProvider, null, createElement(LiveProvider, null, child))))).replace(/<!-- -->/g, '');
 }
 
-// Importing a page pulls in the app shell. That render takes about seven seconds here, past Vitest's five-second default.
-describe('Applications page', { timeout: 20_000 }, () => {
+// Importing a page pulls in the app shell. Under a full parallel run the first import can take over a minute, past Vitest's five-second default.
+describe('Applications page', { timeout: 180_000 }, () => {
   it('with nothing tracked, says saving a card puts it here and offers New application, with no sample data', async () => {
     const { Applications } = await import('../../../pages/Applications.tsx');
     const { StoreProvider } = await import('../../../state/StoreProvider.tsx');
@@ -36,7 +36,7 @@ describe('Applications page', { timeout: 20_000 }, () => {
   });
 });
 
-describe('application row', { timeout: 20_000 }, () => {
+describe('application row', { timeout: 180_000 }, () => {
   it('links into the portal and shows status, days left, progress and the custom label', async () => {
     const { ApplicationListRow } = await import('./ApplicationListRow.tsx');
     const now = Date.parse('2026-11-19T12:00:00Z');

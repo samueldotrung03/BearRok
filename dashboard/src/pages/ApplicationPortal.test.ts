@@ -40,7 +40,8 @@ const tabs: PortalTab[] = [
   { ...base, id: 'n1', kind: 'note', title: 'People to ask', prompt: '', body: 'Professor Lee', source: 'student' },
 ];
 
-describe('application portal page', () => {
+// Importing a page pulls in the app shell. Under a full parallel run the first import can take over a minute, past Vitest's five-second default.
+describe('application portal page', { timeout: 180_000 }, () => {
   it('opens on the route with the id and says it is loading, with no backend needed to render', async () => {
     const { ApplicationPortal } = await import('./ApplicationPortal.tsx');
     const html = text(await render('/applications/opp-robotics', '/applications/:id', createElement(ApplicationPortal)));
@@ -115,7 +116,7 @@ describe('application portal page', () => {
   });
 });
 
-describe('portal editors', () => {
+describe('portal editors', { timeout: 180_000 }, () => {
   it('an upload part lists its files and says plainly that they stay on this computer', async () => {
     const { TabEditor } = await import('../components/applications/portal/TabEditor.tsx');
     const html = text(await render('/x', '/x', createElement(TabEditor, { tab: tabs[1]!, index: 1, total: 3, onChange: () => {}, onDelete: () => {} })));
@@ -148,7 +149,7 @@ describe('portal editors', () => {
   });
 });
 
-describe('view all page', () => {
+describe('view all page', { timeout: 180_000 }, () => {
   it('opens on its route and says it is loading', async () => {
     const { ApplicationView } = await import('./ApplicationView.tsx');
     const html = text(await render('/applications/opp-robotics/view', '/applications/:id/view', createElement(ApplicationView)));

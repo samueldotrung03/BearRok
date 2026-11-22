@@ -27,7 +27,8 @@ function fakeBackend(start: number | null, opts: { failGet?: boolean } = {}) {
   return { request, calls, stored: () => stored };
 }
 
-describe('match score on cards', () => {
+// The first card render pulls in the feed components and takes about eight seconds here, past Vitest's five-second default.
+describe('match score on cards', { timeout: 20_000 }, () => {
   it('reads the agents’ match, falls back to the fit score for older cards, and clamps', () => {
     expect(matchPercent({ baseScore: 0.4, match: { score: 72, factors: [], reason: '' } })).toBe(72);
     expect(matchPercent({ baseScore: 0.456, match: null })).toBe(46);
@@ -54,7 +55,7 @@ describe('match score on cards', () => {
   });
 });
 
-describe('minimum match setting', () => {
+describe('minimum match setting', { timeout: 20_000 }, () => {
   it('keeps a typed or slid value a whole percent from 0 to 100', () => {
     expect(DEFAULT_MATCH_THRESHOLD).toBe(30);
     expect(cleanThreshold('45')).toBe(45);
@@ -113,7 +114,7 @@ describe('minimum match setting', () => {
   });
 });
 
-describe('run history funnel', () => {
+describe('run history funnel', { timeout: 20_000 }, () => {
   it('says how many postings fell under the minimum match, apart from rejections', () => {
     const base = {
       jobs: 24, scouts: { done: 8, failed: 0, skipped: 0 }, leads: 22, duplicates: 0,

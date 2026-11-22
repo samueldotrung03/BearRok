@@ -29,8 +29,8 @@ async function render(saved?: unknown) {
   return renderToString(createElement(MemoryRouter, null, page));
 }
 
-// Importing a page pulls in the app shell. That render takes about seven seconds here, past Vitest's five-second default.
-describe('Today page', { timeout: 20_000 }, () => {
+// Importing a page pulls in the app shell. Under a full parallel run the first import can take over a minute, past Vitest's five-second default.
+describe('Today page', { timeout: 180_000 }, () => {
   beforeEach(() => store.clear());
 
   it('renders every section for the sample student', async () => {

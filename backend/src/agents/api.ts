@@ -5,18 +5,18 @@ import { readFileSync } from 'node:fs';
 import type { Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { AuthUser, Verifier } from '../auth.ts';
-import { createDeadlineEvent, deleteEvent } from '../calendar.ts';
+import { createDeadlineEvent, deleteEvent, deleteStudentEvent, expired, insertStudentEvent, readStudentCalendar, updateStudentEvent, type EventDraft } from '../calendar.ts';
 import { readResume, RESUME_MAX_BYTES, RESUME_TYPES } from '../resume.ts';
-import { exportApplications, trackerRows, writeTracker } from '../sheets.ts';
+import { exportApplications, openSheet, parseSheetId, trackerRows, writeTracker } from '../sheets.ts';
 import type { Store } from '../store/index.ts';
 import { config, provider } from '../config.ts';
 import { extractResumeProfile, type ResumeExtraction } from '../resumeExtract.ts';
 import { cleanTimes, defaultTimes, validTimeZone } from './autoMode.ts';
 import { randomBytes } from 'node:crypto';
-import { allCalendarsIn, consentUrl, exchangeCode, pkce, refreshAccess, revoke, servicesIn, type GoogleService, type OAuthClient } from '../googleOAuth.ts';
+import { allCalendarsIn, consentUrl, emailFromIdToken, exchangeCode, OAUTH_ENV, pkce, refreshAccess, revoke, servicesIn, type GoogleService, type OAuthClient } from '../googleOAuth.ts';
 import type { AgentSystem } from './system.ts';
 import { PORTAL_LIMITS } from './portal.ts';
-import { AGENT_GROUPS, APPLICATION_STATUSES, CATEGORIES, CATEGORY_OF, type Action, type AgentGroup, type AgentSettings, type OppType, type Category, type ClassYear, type Profile, type StudentPreferences } from './types.ts';
+import { AGENT_GROUPS, APPLICATION_STATUSES, CATEGORIES, CATEGORY_OF, type Action, type AgentGroup, type AgentSettings, type OppType, type Category, type ClassYear, type LinkedSheet, type Profile, type StudentPreferences } from './types.ts';
 import { RoadmapRequest, type RoadmapWriter } from '../roadmap.ts';
 import { ownMatches, searchContext, SearchRequest, type SearchWriter } from '../search.ts';
 
@@ -43,6 +43,10 @@ export interface AgentsOptions {
    * and the backend keeps them connected. `redirectBase` is where Google sends them back.
    */
   google?: { client: OAuthClient; redirectBase: string; fetch?: typeof fetch } | null;
+  /** Why the server has no OAuth client although one was meant to be set (a bad file, half the pair). */
+  googleProblem?: string | null;
+  /** Opens a sheet the student picked, replaceable in tests. */
+  openSheet?: (accessToken: string, spreadsheetId: string) => ReturnType<typeof openSheet>;
   /** Told each time a student proves who they are, with the token they proved it with. */
   onToken?: (uid: string, token: string) => void;
   /** How long to wait after a change before saving, so a burst of changes is one write. */
@@ -458,36 +462,73 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   });
 
   // ---- the lasting Google connection ---------------------------------------------------------
+  // Every Google token stays here. A page asks for what it wants done (sync, read the calendar,
+  // link a sheet) and the backend makes the call with an access token from the stored grant.
   const oauth = opts.google ?? null;
+  const googleFetch = oauth?.fetch ?? fetch;
   const redirectUri = oauth ? `${oauth.redirectBase}/auth/google/callback` : '';
   /** Consent screens opened and not yet answered, by state. They expire after ten minutes. */
   const consents = new Map<string, { system: AgentSystem; verifier: string; expires: number; services: GoogleService[]; replace: boolean }>();
-  /** Access tokens already traded for, so Google is not asked on every call. */
-  const access = new WeakMap<AgentSystem, { token: string; expires: number }>();
+  /** Access tokens already traded for, so Google is not asked on every call. Memory only. */
+  const access = new WeakMap<AgentSystem, { token: string; expires: number; grant: string }>();
+  const SERVICE_NAME: Record<GoogleService, string> = { calendar: 'Google Calendar', sheets: 'Google Sheets' };
 
-  /**
-   * An access token for one Google service: the one the request carries, or one made from the
-   * student's lasting connection. Null when neither has it.
-   */
-  async function googleToken(c: Context, system: AgentSystem, service: GoogleService): Promise<string | null> {
-    const sent = c.req.header('x-google-access-token');
-    if (sent) return sent;
-    const grant = system.getGoogle();
-    if (!oauth || !grant || !grant.services.includes(service)) return null;
-    const cached = access.get(system);
-    if (cached && cached.expires > Date.now() + 60_000) return cached.token;
-    try {
-      const fresh = await refreshAccess(oauth.client, grant.refreshToken, oauth.fetch);
-      access.set(system, { token: fresh.access_token, expires: Date.now() + fresh.expires_in * 1000 });
-      return fresh.access_token;
-    } catch (e) {
-      // The student took the access back in their Google account: forget the connection.
-      if ((e as { revoked?: boolean }).revoked) system.setGoogle(null);
-      return null;
+  /** Why there is no access token for a call, in words for the page, with the HTTP status to send. */
+  class NoAccess extends Error {
+    readonly status: 400 | 401 | 503;
+    readonly reason: 'not_configured' | 'not_connected' | 'not_granted' | 'revoked' | 'failed';
+    constructor(message: string, status: NoAccess['status'], reason: NoAccess['reason']) {
+      super(message);
+      this.status = status;
+      this.reason = reason;
     }
   }
 
-  app.get('/api/google/config', (c) => c.json({ enabled: Boolean(oauth) }));
+  /**
+   * An access token for one Google service, made from the student's lasting connection. Throws
+   * NoAccess when there is none, saying why. Nothing a request carries is ever used as a token.
+   */
+  async function googleAccess(system: AgentSystem, service: GoogleService): Promise<string> {
+    if (!oauth) throw new NoAccess('Google is not set up on this server.', 503, 'not_configured');
+    const grant = system.getGoogle();
+    if (!grant) throw new NoAccess('Connect your Google account in Settings first.', 400, 'not_connected');
+    if (!grant.services.includes(service)) throw new NoAccess(`${SERVICE_NAME[service]} was not allowed when Google was connected. Connect again and tick it on Google's screen.`, 400, 'not_granted');
+    const cached = access.get(system);
+    // Only reused for the grant it was made from, so a replaced connection never gets the old one's access.
+    if (cached && cached.grant === grant.refreshToken && cached.expires > Date.now() + 60_000) return cached.token;
+    try {
+      const fresh = await refreshAccess(oauth.client, grant.refreshToken, oauth.fetch);
+      access.set(system, { token: fresh.access_token, expires: Date.now() + fresh.expires_in * 1000, grant: grant.refreshToken });
+      return fresh.access_token;
+    } catch (e) {
+      // The student took the access back in their Google account: forget the connection.
+      if ((e as { revoked?: boolean }).revoked) {
+        system.setGoogle(null);
+        throw new NoAccess('Google access was taken back from your Google account. Connect again.', 401, 'revoked');
+      }
+      throw new NoAccess('Google could not be reached just now. Try again in a moment.', 503, 'failed');
+    }
+  }
+
+  /** The token, or null when there is none for a call that can go on without Google. */
+  const googleAccessOrNull = (system: AgentSystem, service: GoogleService) => googleAccess(system, service).catch(() => null);
+
+  /** A NoAccess as the page's answer; anything else is passed on. */
+  const noAccess = (c: Context, e: unknown) => {
+    if (e instanceof NoAccess) return c.json({ error: e.message, reason: e.reason }, e.status);
+    throw e;
+  };
+
+  /**
+   * Who may connect Google: a signed-in student, or the local user when sign-in is off (that one
+   * person is the demo student). With sign-in on, the shared guest cannot.
+   */
+  const mayConnect = (c: Context) => c.req.param('id') === 'me' || (!enabled && c.req.param('id') === 'demo');
+
+  // Whether the server can connect Google at all, and if not what to set. No secret is ever sent.
+  app.get('/api/google/config', (c) =>
+    c.json({ enabled: Boolean(oauth), problem: oauth ? null : (opts.googleProblem ?? null), needs: oauth ? [] : OAUTH_ENV, redirectUri: oauth ? redirectUri : null }),
+  );
 
   // ---- agent settings: models per agent group (Grok only) and minimums per kind ------------------
   const GROUP_LABEL: Record<AgentGroup, string> = {
@@ -567,37 +608,53 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     return c.json({ verdicts: await system.sortCalendarEvents(events) });
   });
 
+  // Where the student's Google connection stands, for Settings and the Calendar page. Never a token.
   app.get(`${base}/google`, async (c) => {
     const system = await systemOf(c);
     const grant = system.getGoogle();
-    return c.json({ enabled: Boolean(oauth), services: grant?.services ?? [], connectedAt: grant?.connectedAt ?? null, allCalendars: grant?.allCalendars === true });
+    return c.json({
+      enabled: Boolean(oauth),
+      problem: oauth ? null : (opts.googleProblem ?? null),
+      needs: oauth ? [] : OAUTH_ENV,
+      mayConnect: mayConnect(c),
+      connected: Boolean(grant),
+      email: grant?.email ?? null,
+      services: grant?.services ?? [],
+      connectedAt: grant?.connectedAt ?? null,
+      allCalendars: grant?.allCalendars === true,
+      calendarSync: system.getCalendarSync(),
+      sheet: system.getSheet(),
+    });
   });
 
-  // The address of Google's consent screen for Calendar and Sheets, for the page to open in the
-  // student's browser. Asked for with the sign-in header, so no BearRok token goes into a URL.
+  // The address of Google's consent screen, for the page to open in the student's browser. Asked
+  // for with the sign-in header, so no BearRok token goes into a URL. One consent covers the
+  // account, Calendar and Sheets.
   app.post(`${base}/google/connect`, async (c) => {
-    if (!oauth) return c.json({ error: 'Google connection is not set up on this server' }, 503);
-    if (c.req.param('id') !== 'me') return c.json({ error: 'sign in first' }, 401);
+    if (!oauth) return c.json({ error: 'Google is not set up on this server.', reason: 'not_configured', needs: OAUTH_ENV }, 503);
+    if (!mayConnect(c)) return c.json({ error: 'sign in first' }, 401);
     const system = await systemOf(c);
-    const user = await userOf(c);
+    const user = c.req.param('id') === 'me' ? await userOf(c) : null;
     const body = await c.req.json().catch(() => ({}));
     const asked: unknown[] = Array.isArray(body?.services) ? body.services : ['calendar', 'sheets'];
     const wanted = asked.filter((s): s is GoogleService => s === 'calendar' || s === 'sheets');
     // Switching to another Google account starts afresh: nothing from the old one is carried over.
     const switching = body?.switchAccount === true;
     const services = switching ? wanted : [...new Set([...wanted, ...(system.getGoogle()?.services ?? [])])];
+    const asking: GoogleService[] = services.length ? services : ['calendar', 'sheets'];
     const { verifier, challenge } = pkce();
     const state = randomBytes(24).toString('base64url');
     for (const [k, v] of consents) if (v.expires < Date.now()) consents.delete(k);
-    consents.set(state, { system, verifier, expires: Date.now() + 10 * 60_000, services: services.length ? services : ['calendar', 'sheets'], replace: switching });
-    return c.json({ url: consentUrl(oauth.client, { redirectUri, services: services.length ? services : ['calendar', 'sheets'], state, challenge, loginHint: switching ? null : user.email, chooseAccount: switching }) });
+    consents.set(state, { system, verifier, expires: Date.now() + 10 * 60_000, services: asking, replace: switching });
+    return c.json({ url: consentUrl(oauth.client, { redirectUri, services: asking, state, challenge, loginHint: switching ? null : (user?.email ?? null), chooseAccount: switching }) });
   });
 
   // Google sends the student back here with a code, which is traded for the lasting connection.
   app.get('/auth/google/callback', async (c) => {
+    const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
     const page = (title: string, text: string, status: 200 | 400 | 502 = 200) =>
       c.html(
-        `<!doctype html><meta charset="utf-8"><title>BearRok</title><body style="font:16px system-ui;display:grid;place-items:center;min-height:90vh;margin:0;background:#f3f7fc;color:#152b43"><div style="max-width:420px;text-align:center"><h1 style="font-size:22px">${title}</h1><p>${text}</p></div></body>`,
+        `<!doctype html><meta charset="utf-8"><title>BearRok</title><body style="font:16px system-ui;display:grid;place-items:center;min-height:90vh;margin:0;background:#f3f7fc;color:#152b43"><div style="max-width:420px;text-align:center"><h1 style="font-size:22px">${esc(title)}</h1><p>${esc(text)}</p></div></body>`,
         status,
       );
     const pending = consents.get(c.req.query('state') ?? '');
@@ -614,16 +671,16 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
       if (!refreshToken) return page('Not connected', 'Google did not give BearRok lasting access. Press Connect again.', 502);
       const granted = servicesIn(tokens.scope);
       const services = [...new Set([...(before?.services ?? []), ...granted])];
-      pending.system.setGoogle({ refreshToken, services, connectedAt: new Date().toISOString(), allCalendars: allCalendarsIn(tokens.scope) || (before?.allCalendars ?? false) });
-      access.set(pending.system, { token: tokens.access_token, expires: Date.now() + tokens.expires_in * 1000 });
+      const email = emailFromIdToken(tokens.id_token) ?? before?.email ?? null;
+      pending.system.setGoogle({ refreshToken, services, connectedAt: new Date().toISOString(), allCalendars: allCalendarsIn(tokens.scope) || (before?.allCalendars ?? false), email });
+      access.set(pending.system, { token: tokens.access_token, expires: Date.now() + tokens.expires_in * 1000, grant: refreshToken });
       // Google's consent screen has a box for each permission, unticked to start with. Continuing
       // without ticking them gives BearRok nothing it can use, so the student is told plainly.
       const missing = pending.services.filter((s) => !services.includes(s));
-      const name = { calendar: 'Google Calendar', sheets: 'Google Sheets' };
       if (missing.length) {
         return page(
-          `${missing.map((s) => name[s]).join(' and ')} not allowed`,
-          `Google did not give BearRok access to ${missing.map((s) => name[s]).join(' or ')}. Go back to BearRok, press Connect again, and on Google's screen tick ${missing.length === 2 ? 'both permissions (or "Select all")' : 'the permission'} before you press Continue. If Google showed no boxes to tick, the app's Google setup does not list these permissions yet.`,
+          `${missing.map((s) => SERVICE_NAME[s]).join(' and ')} not allowed`,
+          `Google did not give BearRok access to ${missing.map((s) => SERVICE_NAME[s]).join(' or ')}. Go back to BearRok, press Connect again, and on Google's screen tick ${missing.length === 2 ? 'both permissions (or "Select all")' : 'the permission'} before you press Continue. If Google showed no boxes to tick, the app's Google setup does not list these permissions yet.`,
           400,
         );
       }
@@ -633,23 +690,72 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     }
   });
 
-  // A fresh access token for the page, for reading the student's own calendar.
-  app.post(`${base}/google/token`, async (c) => {
-    const system = await systemOf(c);
-    const body = await c.req.json().catch(() => ({}));
-    const service: GoogleService = body?.service === 'sheets' ? 'sheets' : 'calendar';
-    const token = await googleToken(c, system, service);
-    if (!token) return c.json({ error: 'not connected' }, 404);
-    return c.json({ accessToken: token, expiresAt: access.get(system)?.expires ?? Date.now() + 50 * 60_000 });
-  });
-
+  // Disconnect: Google is told to forget the grant, and nothing of it is kept here. The linked sheet
+  // stays linked (it is the student's own file) and is written again once Google is connected.
   app.delete(`${base}/google`, async (c) => {
     const system = await systemOf(c);
     const grant = system.getGoogle();
     if (grant) await revoke(grant.refreshToken, oauth?.fetch);
     access.delete(system);
     system.setGoogle(null);
-    return c.json({ services: [] });
+    return c.json({ connected: false, services: [] });
+  });
+
+  // ---- the student's own Google Calendar, for the Calendar page --------------------------------
+  /** A Calendar call; access that has run out is dropped so the next call makes a fresh one. */
+  const calendarCall = async <T,>(c: Context, system: AgentSystem, run: (token: string) => Promise<T>) => {
+    try {
+      const token = await googleAccess(system, 'calendar');
+      return c.json(await run(token));
+    } catch (e) {
+      if (e instanceof NoAccess) return noAccess(c, e);
+      if (expired(e)) {
+        access.delete(system);
+        return c.json({ error: 'Google access has run out. Try again; connect Google again if it keeps happening.', reason: 'expired' }, 401);
+      }
+      return c.json({ error: e instanceof Error ? e.message : String(e), reason: 'failed' }, 502);
+    }
+  };
+  const draftFrom = (body: any): EventDraft | null => {
+    const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+    const hhmm = (v: unknown) => (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v) ? v : null);
+    const title = text(body?.title, 300);
+    const day = typeof body?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : null;
+    if (!title || !day) return null;
+    return { title, day, time: hhmm(body.time), endTime: hhmm(body.endTime), description: text(body.description, 4000) ?? undefined, timeZone: validTimeZone(body.timeZone) ?? 'UTC' };
+  };
+
+  app.get(`${base}/google/calendar/events`, async (c) => {
+    const system = await systemOf(c);
+    const from = c.req.query('from') ?? '';
+    const to = c.req.query('to') ?? '';
+    if (Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to))) return c.json({ error: 'from and to must be times' }, 400);
+    return calendarCall(c, system, (token) => readStudentCalendar(token, from, to, googleFetch));
+  });
+
+  app.post(`${base}/google/calendar/events`, async (c) => {
+    const system = await systemOf(c);
+    const draft = draftFrom(await c.req.json().catch(() => null));
+    if (!draft) return c.json({ error: 'send a title and a day' }, 400);
+    return calendarCall(c, system, (token) => insertStudentEvent(token, draft, googleFetch));
+  });
+
+  app.patch(`${base}/google/calendar/events/:eventId`, async (c) => {
+    const system = await systemOf(c);
+    const draft = draftFrom(await c.req.json().catch(() => null));
+    if (!draft) return c.json({ error: 'send a title and a day' }, 400);
+    return calendarCall(c, system, async (token) => {
+      await updateStudentEvent(token, c.req.param('eventId'), draft, googleFetch);
+      return { ok: true };
+    });
+  });
+
+  app.delete(`${base}/google/calendar/events/:eventId`, async (c) => {
+    const system = await systemOf(c);
+    return calendarCall(c, system, async (token) => {
+      await deleteStudentEvent(token, c.req.param('eventId'), googleFetch);
+      return { ok: true };
+    });
   });
 
   // ---- application manager -------------------------------------------------------------
@@ -713,8 +819,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   });
 
   // Set a status, save draft answers, or supply a missing deadline. Marking to_apply or applying
-  // sets reminders, and puts the deadline on Google Calendar when the request carries the
-  // student's Google access token in X-Google-Access-Token (needs the calendar.events permission).
+  // sets reminders, and puts the deadline on Google Calendar when the student has connected it.
   app.put(`${base}/applications/:oppId`, async (c) => {
     const system = await systemOf(c);
     const oppId = c.req.param('oppId');
@@ -724,7 +829,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     const application = system.setApplication(oppId, { status: body.status, drafts, deadline: typeof body.deadline === 'string' ? body.deadline : undefined });
     if (!application) return c.json({ error: 'opportunity not found' }, 404);
 
-    const google = await googleToken(c, system, 'calendar');
+    const google = await googleAccessOrNull(system, 'calendar');
     const event = application.status === 'to_apply' || application.status === 'applying' ? system.calendarEvent(application) : null;
     if (google) {
       try {
@@ -747,12 +852,16 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
    * Bring the student's Google Calendar in line with their applications: every To apply or
    * Applying application with a deadline gets one event, a changed deadline moves it, and one that
    * is no longer active loses it. The app calls this on its own whenever Google Calendar is
-   * connected, so nobody has to add events by hand.
+   * connected, and Settings has Sync now. The outcome is kept for Settings to show.
    */
   app.post(`${base}/calendar/sync`, async (c) => {
     const system = await systemOf(c);
-    const google = await googleToken(c, system, 'calendar');
-    if (!google) return c.json({ error: 'connect Google Calendar first' }, 400);
+    let google: string;
+    try {
+      google = await googleAccess(system, 'calendar');
+    } catch (e) {
+      return noAccess(c, e);
+    }
     let added = 0;
     let removed = 0;
     const errors: string[] = [];
@@ -777,43 +886,70 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
         errors.push(`${app.title}: ${message}`);
       }
     }
+    system.setCalendarSync({ at: new Date().toISOString(), added, removed, errors });
     return c.json({ added, removed, errors });
   });
 
-  // Write the application tracker to a new Google Sheet in the student's Drive.
+  // Write the application tracker to a new Google Sheet in the student's Drive, once.
   app.post(`${base}/applications/export`, async (c) => {
     const system = await systemOf(c);
-    const google = c.req.header('x-google-access-token');
-    if (!google) return c.json({ error: 'connect Google Sheets first' }, 400);
     try {
+      const google = await googleAccess(system, 'sheets');
       const sheet = await (opts.sheets ?? exportApplications)(google, system.listApplications(), new Date());
       return c.json(sheet);
     } catch (e) {
+      if (e instanceof NoAccess) return noAccess(c, e);
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
     }
   });
 
-  // The saved tracker: every saved posting with its status, deadline, details and links. The app
-  // shows these rows as its own spreadsheet, and writes the same rows to a linked Google Sheet.
+  // The tracker: every saved posting and application with its status, deadline, details and links.
+  // The app shows these rows as its own spreadsheet, and writes the same rows to a linked Google Sheet.
   app.get(`${base}/sheet`, async (c) => {
     const system = await systemOf(c);
     const [header, ...rows] = trackerRows(system.trackerItems(), new Date());
     return c.json({ header, rows, ids: system.trackerItems().map((i) => i.opportunity?.id ?? i.application!.opportunityId), linked: system.getSheet() });
   });
 
-  // Write the tracker to the student's linked Google Sheet, linking a new one the first time.
-  app.post(`${base}/sheet/sync`, async (c) => {
-    const system = await systemOf(c);
-    const google = await googleToken(c, system, 'sheets');
-    if (!google) return c.json({ error: 'connect Google Sheets first' }, 400);
+  /** Write the tracker to `target` (or a new sheet when null) and link it. */
+  const writeAndLink = async (c: Context, system: AgentSystem, target: LinkedSheet | null) => {
     try {
+      const google = await googleAccess(system, 'sheets');
       const now = new Date();
-      const written = await (opts.tracker ?? writeTracker)(google, system.getSheet(), trackerRows(system.trackerItems(), now), now);
-      system.setSheet({ ...written, syncedAt: now.toISOString() });
+      const written = await (opts.tracker ?? ((t, l, r, d) => writeTracker(t, l, r, d, googleFetch)))(google, target, trackerRows(system.trackerItems(), now), now);
+      system.setSheet({ spreadsheetId: written.spreadsheetId, url: written.url, title: written.title ?? target?.title ?? null, tab: written.tab, syncedAt: now.toISOString() });
       return c.json({ linked: system.getSheet() });
     } catch (e) {
+      if (e instanceof NoAccess) return noAccess(c, e);
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
     }
+  };
+
+  // Write the tracker to the student's linked Google Sheet, making one the first time.
+  // { create: true } makes a new sheet even when one is linked (the old one stays in Drive).
+  app.post(`${base}/sheet/sync`, async (c) => {
+    const system = await systemOf(c);
+    const body = await c.req.json().catch(() => ({}));
+    return writeAndLink(c, system, body?.create === true ? null : system.getSheet());
+  });
+
+  // Use a sheet the student already has: { sheet: its link or id }. It is opened, given the
+  // Applications tab if it has none, linked, and written straight away.
+  app.post(`${base}/sheet/link`, async (c) => {
+    const system = await systemOf(c);
+    const body = await c.req.json().catch(() => ({}));
+    const id = typeof body?.sheet === 'string' ? parseSheetId(body.sheet) : null;
+    if (!id) return c.json({ error: 'Paste the address of a Google Sheet (docs.google.com/spreadsheets/d/…).' }, 400);
+    let opened: Awaited<ReturnType<typeof openSheet>>;
+    try {
+      const google = await googleAccess(system, 'sheets');
+      opened = await (opts.openSheet ?? ((t, i) => openSheet(t, i, googleFetch)))(google, id);
+    } catch (e) {
+      if (e instanceof NoAccess) return noAccess(c, e);
+      const status = (e as { status?: number }).status;
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, status === 404 || status === 403 ? 400 : 502);
+    }
+    return writeAndLink(c, system, { ...opened, syncedAt: '' });
   });
 
   // Stop writing to the linked sheet. The file stays in the student's Drive.
@@ -827,7 +963,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     const system = await systemOf(c);
     const removed = system.removeApplication(c.req.param('oppId'));
     if (!removed) return c.json({ error: 'application not found' }, 404);
-    const google = await googleToken(c, system, 'calendar');
+    const google = await googleAccessOrNull(system, 'calendar');
     if (google && removed.calendar.eventId) await calendar.remove(google, removed.calendar.eventId).catch(() => {});
     return c.json({ ok: true });
   });

@@ -1,8 +1,10 @@
-// Google Sheets: write the student's application tracker to a new spreadsheet in their own Drive.
-// Uses the student's Google access token (spreadsheets permission) for that one call; it is not stored.
+// Google Sheets: write the student's applications (Saved first, then To apply, Applying, Applied)
+// to a spreadsheet in their own Drive. The access token comes from the backend's lasting Google
+// connection for each call; it is never stored here or sent to a page.
 import type { Application, Opportunity } from './agents/types.ts';
 
-const STATUS_LABEL: Record<Application['status'], string> = { interested: 'Interested', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
+/** Saved is the first stage of an application (status "interested"); the sheet uses the app's words. */
+export const STATUS_LABEL: Record<Application['status'], string> = { interested: 'Saved', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
 const HEADER = ['Opportunity', 'Organizer', 'Status', 'Deadline', 'Next reminder', 'Apply at', 'Materials', 'Prompts'];
 
 export function sheetRows(applications: Application[]): string[][] {
@@ -112,47 +114,103 @@ export function trackerRows(items: TrackerItem[], now: Date): string[][] {
   ];
 }
 
-const SHEET_TAB = 'Saved';
+/** The tab BearRok writes in a sheet it makes or one the student picks. */
+export const SHEET_TAB = 'Applications';
+/** Sheets linked before Saved joined Applications were written to this tab; they keep it. */
+export const LEGACY_TAB = 'Saved';
+
+const API = 'https://sheets.googleapis.com/v4/spreadsheets';
+const sheetUrl = (id: string) => `https://docs.google.com/spreadsheets/d/${id}`;
+
+/** A spreadsheet id from what the student pasted: the sheet's address, or the id itself. Null if neither. */
+export function parseSheetId(input: string): string | null {
+  const text = input.trim();
+  const fromUrl = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
+  if (fromUrl) return fromUrl[1]!;
+  return /^[a-zA-Z0-9_-]{20,}$/.test(text) ? text : null;
+}
+
+/** A Sheets error with Google's status kept, so the routes can answer in words. */
+const fail = async (res: Response) => Object.assign(new Error(`Google Sheets ${res.status}: ${(await res.text()).slice(0, 200)}`), { status: res.status });
+
+const addTab = (fetchImpl: typeof fetch, headers: Record<string, string>, id: string, title: string) =>
+  fetchImpl(`${API}/${id}:batchUpdate`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ requests: [{ addSheet: { properties: { title, gridProperties: { frozenRowCount: 1 } } } }] }),
+    signal: AbortSignal.timeout(20_000),
+  });
 
 /**
- * Write the tracker to the student's linked Google Sheet, replacing what was there, or make a new
- * sheet when none is linked or the linked one is gone. Uses the student's access token for this
- * call only; it is not stored.
+ * Open a sheet the student picked, to link it: its name, and the tab BearRok writes, added when it
+ * is not there yet. Nothing already in the sheet is changed. A sheet that cannot be opened is an
+ * error in words the student can act on.
+ */
+export async function openSheet(accessToken: string, spreadsheetId: string, fetchImpl: typeof fetch = fetch): Promise<{ spreadsheetId: string; url: string; title: string | null; tab: string }> {
+  const headers = { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' };
+  const id = encodeURIComponent(spreadsheetId);
+  const res = await fetchImpl(`${API}/${id}?fields=spreadsheetId,spreadsheetUrl,properties.title,sheets.properties.title`, { headers, signal: AbortSignal.timeout(20_000) });
+  if (res.status === 404) throw Object.assign(new Error('That sheet was not found. Check the link, or create a new sheet.'), { status: 404 });
+  if (res.status === 403) throw Object.assign(new Error('The connected Google account cannot open that sheet. Share it with that account, or create a new sheet.'), { status: 403 });
+  if (!res.ok) throw await fail(res);
+  const body = (await res.json()) as { spreadsheetId: string; spreadsheetUrl?: string; properties?: { title?: string }; sheets?: { properties?: { title?: string } }[] };
+  const tabs = (body.sheets ?? []).map((t) => t.properties?.title);
+  if (!tabs.includes(SHEET_TAB)) {
+    const add = await addTab(fetchImpl, headers, id, SHEET_TAB);
+    if (!add.ok) throw await fail(add);
+  }
+  return { spreadsheetId: body.spreadsheetId, url: body.spreadsheetUrl ?? sheetUrl(body.spreadsheetId), title: body.properties?.title ?? null, tab: SHEET_TAB };
+}
+
+/**
+ * Write the tracker to the student's linked Google Sheet, replacing what was on its tab, or make a
+ * new sheet when none is linked or the linked one was deleted. A linked sheet that lost its tab
+ * gets it back. Uses the access token for this call only.
  */
 export async function writeTracker(
   accessToken: string,
-  linked: { spreadsheetId: string } | null,
+  linked: { spreadsheetId: string; tab?: string; title?: string | null } | null,
   rows: string[][],
   today: Date,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ spreadsheetId: string; url: string }> {
+): Promise<{ spreadsheetId: string; url: string; title: string | null; tab: string }> {
   const headers = { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' };
-  const api = 'https://sheets.googleapis.com/v4/spreadsheets';
   if (linked) {
+    const tab = linked.tab ?? LEGACY_TAB;
     const id = encodeURIComponent(linked.spreadsheetId);
-    const range = encodeURIComponent(`${SHEET_TAB}!A1:Z`);
-    const clear = await fetchImpl(`${api}/${id}/values/${range}:clear`, { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(20_000) });
-    // A sheet the student deleted, renamed the tab of, or that belongs to another Google account
-    // than the one now connected is replaced by a new one; anything else is an error.
-    if (clear.ok) {
-      const put = await fetchImpl(`${api}/${id}/values/${encodeURIComponent(`${SHEET_TAB}!A1`)}?valueInputOption=RAW`, {
+    const write = async (): Promise<Response> => {
+      const clear = await fetchImpl(`${API}/${id}/values/${encodeURIComponent(`${tab}!A1:Z`)}:clear`, { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(20_000) });
+      if (!clear.ok) return clear;
+      const put = await fetchImpl(`${API}/${id}/values/${encodeURIComponent(`${tab}!A1`)}?valueInputOption=RAW`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({ values: rows }),
         signal: AbortSignal.timeout(20_000),
       });
-      if (!put.ok) throw new Error(`Google Sheets ${put.status}: ${(await put.text()).slice(0, 200)}`);
-      return { spreadsheetId: linked.spreadsheetId, url: `https://docs.google.com/spreadsheets/d/${linked.spreadsheetId}` };
+      if (!put.ok) throw await fail(put);
+      return put;
+    };
+    let res = await write();
+    // 400: the tab was renamed or deleted. It is added back and written, so the student's file stays linked.
+    if (res.status === 400) {
+      const add = await addTab(fetchImpl, headers, id, tab);
+      if (!add.ok) throw await fail(add);
+      res = await write();
     }
-    if (clear.status !== 404 && clear.status !== 400 && clear.status !== 403) throw new Error(`Google Sheets ${clear.status}: ${(await clear.text()).slice(0, 200)}`);
+    if (res.ok) return { spreadsheetId: linked.spreadsheetId, url: sheetUrl(linked.spreadsheetId), title: linked.title ?? null, tab };
+    // 404: the sheet was deleted. 403: it belongs to another Google account than the one now
+    // connected (the student switched). Either way a new sheet is made below, and Settings shows
+    // its name and link, so the change is in plain sight.
+    if (res.status !== 404 && res.status !== 403) throw await fail(res);
   }
+  const title = `BearRok applications (${today.toISOString().slice(0, 10)})`;
   const cell = (value: string, bold = false) => ({ userEnteredValue: { stringValue: value }, ...(bold ? { userEnteredFormat: { textFormat: { bold: true } } } : {}) });
-  const res = await fetchImpl(api, {
+  const res = await fetchImpl(API, {
     method: 'POST',
     headers,
     signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({
-      properties: { title: `BearRok saved opportunities (${today.toISOString().slice(0, 10)})` },
+      properties: { title },
       sheets: [
         {
           properties: { title: SHEET_TAB, gridProperties: { frozenRowCount: 1 } },
@@ -161,7 +219,7 @@ export async function writeTracker(
       ],
     }),
   });
-  if (!res.ok) throw new Error(`Google Sheets ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const body = (await res.json()) as { spreadsheetId: string; spreadsheetUrl?: string };
-  return { spreadsheetId: body.spreadsheetId, url: body.spreadsheetUrl ?? `https://docs.google.com/spreadsheets/d/${body.spreadsheetId}` };
+  if (!res.ok) throw await fail(res);
+  const body = (await res.json()) as { spreadsheetId: string; spreadsheetUrl?: string; properties?: { title?: string } };
+  return { spreadsheetId: body.spreadsheetId, url: body.spreadsheetUrl ?? sheetUrl(body.spreadsheetId), title: body.properties?.title ?? title, tab: SHEET_TAB };
 }

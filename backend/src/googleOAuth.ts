@@ -25,19 +25,53 @@ export interface GoogleGrant {
   refreshToken: string;
   services: GoogleService[];
   connectedAt: string;
+  email?: string | null;
 }
 
 /** The OAuth client from GOOGLE_OAUTH_CLIENT_ID and _SECRET, or from the JSON file Google Cloud downloads. */
 export function oauthClientFrom(env: NodeJS.ProcessEnv): OAuthClient | null {
+  return oauthSetup(env).client;
+}
+
+/**
+ * Whether this server has a Google OAuth client, and if not, what exactly is missing, in words
+ * Settings can show. Never includes the secret itself.
+ */
+export function oauthSetup(env: NodeJS.ProcessEnv): { client: OAuthClient | null; problem: string | null } {
   const id = env.GOOGLE_OAUTH_CLIENT_ID?.trim();
   const secret = env.GOOGLE_OAUTH_CLIENT_SECRET?.trim();
-  if (id && secret) return { clientId: id, clientSecret: secret };
+  if (id && secret) return { client: { clientId: id, clientSecret: secret }, problem: null };
   const file = env.GOOGLE_OAUTH_CLIENT_FILE?.trim();
-  if (!file) return null;
+  if (!file) {
+    if (id || secret) return { client: null, problem: `GOOGLE_OAUTH_CLIENT_${id ? 'SECRET' : 'ID'} is not set; both GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET are needed.` };
+    return { client: null, problem: null };
+  }
   try {
     const json = JSON.parse(readFileSync(file, 'utf8'));
     const c = json.installed ?? json.web;
-    return c?.client_id && c?.client_secret ? { clientId: c.client_id, clientSecret: c.client_secret } : null;
+    if (c?.client_id && c?.client_secret) return { client: { clientId: c.client_id, clientSecret: c.client_secret }, problem: null };
+    return { client: null, problem: 'GOOGLE_OAUTH_CLIENT_FILE is set, but the file has no client_id and client_secret. Download the JSON again from Google Cloud.' };
+  } catch {
+    return { client: null, problem: 'GOOGLE_OAUTH_CLIENT_FILE is set, but the file cannot be read. Check the path.' };
+  }
+}
+
+/** The env vars a server needs for a Google connection, for Settings to list when none is set. */
+export const OAUTH_ENV = ['GOOGLE_OAUTH_CLIENT_FILE', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET'];
+
+/** Asked for with every connection, so Settings can say which Google account is connected. */
+export const IDENTITY_SCOPES = ['openid', 'email'];
+
+/**
+ * The address in the id_token Google returns with the tokens. It comes straight from Google's
+ * token endpoint over TLS, so it is read, not verified again (Google's guidance for this case).
+ */
+export function emailFromIdToken(idToken: string | undefined): string | null {
+  const payload = idToken?.split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { email?: unknown };
+    return typeof claims.email === 'string' && claims.email.includes('@') ? claims.email : null;
   } catch {
     return null;
   }
@@ -56,7 +90,7 @@ export function consentUrl(client: OAuthClient, opts: { redirectUri: string; ser
     client_id: client.clientId,
     redirect_uri: opts.redirectUri,
     response_type: 'code',
-    scope: [...opts.services.map((s) => GOOGLE_SCOPES[s]), ...(opts.services.includes('calendar') ? [ALL_CALENDARS_SCOPE] : [])].join(' '),
+    scope: [...IDENTITY_SCOPES, ...opts.services.map((s) => GOOGLE_SCOPES[s]), ...(opts.services.includes('calendar') ? [ALL_CALENDARS_SCOPE] : [])].join(' '),
     // offline + consent: Google returns a refresh token, so the student is not asked again.
     access_type: 'offline',
     // select_account shows Google's account picker, for switching to another account.
@@ -75,6 +109,7 @@ interface TokenReply {
   expires_in: number;
   refresh_token?: string;
   scope?: string;
+  id_token?: string;
 }
 
 async function tokenCall(body: Record<string, string>, fetchImpl: typeof fetch): Promise<TokenReply> {

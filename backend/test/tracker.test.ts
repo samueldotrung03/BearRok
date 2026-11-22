@@ -6,6 +6,7 @@ import { AgentSystem } from '../src/agents/system.ts';
 import { createApp } from '../src/app.ts';
 import { TRACKER_HEADER, trackerRows, writeTracker } from '../src/sheets.ts';
 import { LocalStore } from '../src/store/local.ts';
+import { connectGoogle, fakeGoogle as fakeGoogleApi } from './googleFake.ts';
 
 const NOW = new Date('2026-11-19T12:00:00Z');
 
@@ -37,7 +38,7 @@ test('tracker: every saved posting is a row with its status, deadline, details a
   assert.ok(row[col('Apply link')]!.startsWith('http'));
   assert.equal(row[col('Calendar')], 'Added once Google Calendar is connected');
   assert.equal(row[col('Saved on')], NOW.toISOString().slice(0, 10));
-  assert.equal(rows[0]![col('Status')], 'Interested', 'saving makes it Interested');
+  assert.equal(rows[0]![col('Status')], 'Saved', 'saving puts it at the first stage, Saved');
   if (undated) assert.equal(rows[2]![col('Deadline')], 'Not stated');
 });
 
@@ -53,12 +54,16 @@ test('tracker: a linked sheet is updated in place, and replaced only if it was d
   }) as typeof fetch;
   const rows = [TRACKER_HEADER, ['A']];
 
-  assert.deepEqual(await writeTracker('tok', null, rows, NOW, fake), { spreadsheetId: 'new-sheet', url: 'https://docs.google.com/spreadsheets/d/new-sheet' });
+  assert.deepEqual(await writeTracker('tok', null, rows, NOW, fake), { spreadsheetId: 'new-sheet', url: 'https://docs.google.com/spreadsheets/d/new-sheet', title: 'BearRok applications (2026-11-19)', tab: 'Applications' });
   assert.deepEqual(calls, ['POST ']);
 
   calls.length = 0;
   assert.equal((await writeTracker('tok', { spreadsheetId: 'mine' }, rows, NOW, fake)).spreadsheetId, 'mine');
-  assert.deepEqual(calls, ['POST /mine/values/Saved!A1%3AZ:clear', 'PUT /mine/values/Saved!A1?valueInputOption=RAW'], 'cleared and rewritten, no new file');
+  assert.deepEqual(calls, ['POST /mine/values/Saved!A1%3AZ:clear', 'PUT /mine/values/Saved!A1?valueInputOption=RAW'], 'a sheet linked before keeps its Saved tab: cleared and rewritten, no new file');
+
+  calls.length = 0;
+  assert.equal((await writeTracker('tok', { spreadsheetId: 'mine', tab: 'Applications' }, rows, NOW, fake)).tab, 'Applications');
+  assert.deepEqual(calls, ['POST /mine/values/Applications!A1%3AZ:clear', 'PUT /mine/values/Applications!A1?valueInputOption=RAW']);
 
   calls.length = 0;
   gone = true;
@@ -78,9 +83,10 @@ test('tracker: the app reads the rows, links a sheet on first sync, and keeps wr
   const written: { linked: unknown; rows: string[][] }[] = [];
   const { app } = createApp(new LocalStore(null), {}, {
     demo: s,
+    google: fakeGoogleApi().google,
     tracker: async (_token, linked, rows) => {
       written.push({ linked, rows });
-      return { spreadsheetId: 'sheet-1', url: 'https://docs.google.com/spreadsheets/d/sheet-1' };
+      return { spreadsheetId: 'sheet-1', url: 'https://docs.google.com/spreadsheets/d/sheet-1', title: 'BearRok applications', tab: 'Applications' };
     },
   });
   const get = await (await app.request('/api/students/demo/sheet')).json() as any;
@@ -89,12 +95,13 @@ test('tracker: the app reads the rows, links a sheet on first sync, and keeps wr
   assert.deepEqual(get.ids, [o.id]);
   assert.equal(get.linked, null);
 
-  assert.equal((await app.request('/api/students/demo/sheet/sync', { method: 'POST' })).status, 400, 'needs Google Sheets connected');
-  const sync = async () => (await (await app.request('/api/students/demo/sheet/sync', { method: 'POST', headers: { 'x-google-access-token': 'tok' } })).json()) as any;
+  assert.equal((await app.request('/api/students/demo/sheet/sync', { method: 'POST', headers: { 'x-google-access-token': 'tok' } })).status, 400, 'needs Google connected on the server');
+  connectGoogle(s);
+  const sync = async () => (await (await app.request('/api/students/demo/sheet/sync', { method: 'POST' })).json()) as any;
   assert.equal((await sync()).linked.spreadsheetId, 'sheet-1');
   await sync();
   assert.equal(written[0]!.linked, null);
-  assert.deepEqual(written[1]!.linked, { spreadsheetId: 'sheet-1', url: 'https://docs.google.com/spreadsheets/d/sheet-1', syncedAt: (written[1]!.linked as any).syncedAt });
+  assert.deepEqual(written[1]!.linked, { spreadsheetId: 'sheet-1', url: 'https://docs.google.com/spreadsheets/d/sheet-1', title: 'BearRok applications', tab: 'Applications', syncedAt: (written[1]!.linked as any).syncedAt });
   assert.equal(s.student().sheet?.spreadsheetId, 'sheet-1');
   // The link is part of what the student set, so it is kept with their account.
   assert.equal(s.memorySnapshot().profile.sheet?.spreadsheetId, 'sheet-1');
@@ -128,6 +135,7 @@ test('calendar: with Google Calendar connected, every To apply and Applying dead
   let n = 0;
   const { app } = createApp(new LocalStore(null), {}, {
     demo: s,
+    google: fakeGoogleApi().google,
     calendar: {
       create: async (_token, event) => {
         const id = `ev-${++n}`;
@@ -137,9 +145,10 @@ test('calendar: with Google Calendar connected, every To apply and Applying dead
       remove: async (_token, id) => void events.delete(id),
     },
   });
-  const sync = async () => (await (await app.request('/api/students/demo/calendar/sync', { method: 'POST', headers: { 'x-google-access-token': 'tok' } })).json()) as any;
+  const sync = async () => (await (await app.request('/api/students/demo/calendar/sync', { method: 'POST' })).json()) as any;
 
-  assert.equal((await app.request('/api/students/demo/calendar/sync', { method: 'POST' })).status, 400, 'needs Google Calendar connected');
+  assert.equal((await app.request('/api/students/demo/calendar/sync', { method: 'POST', headers: { 'x-google-access-token': 'tok' } })).status, 400, 'needs Google connected on the server');
+  connectGoogle(s);
   assert.deepEqual(await sync(), { added: 2, removed: 0, errors: [] });
   assert.equal(events.size, 2);
   assert.equal(s.getApplication(a!.id)!.calendar.state, 'synced');
@@ -152,6 +161,9 @@ test('calendar: with Google Calendar connected, every To apply and Applying dead
   s.setApplication(b!.id, { status: 'applied' });
   assert.deepEqual(await sync(), { added: 1, removed: 1, errors: [] });
   assert.deepEqual([...events.values()], ['2027-03-01T23:59:00.000Z']);
+  // The last sync is kept for Settings to show.
+  assert.deepEqual({ ...s.getCalendarSync(), at: 'x' }, { at: 'x', added: 1, removed: 1, errors: [] });
+  assert.equal(s.student().calendarSync?.added, 1);
 });
 
 test('google: students connect once; the backend keeps fresh access from the stored refresh token and uses it for calendar writes', async () => {
@@ -165,7 +177,8 @@ test('google: students connect once; the backend keeps fresh access from the sto
     if (body.get('grant_type') === 'authorization_code') {
       assert.equal(body.get('code'), 'the-code');
       assert.ok(body.get('code_verifier'));
-      return new Response(JSON.stringify({ access_token: 'acc-1', expires_in: 3600, refresh_token: 'refresh-1', scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/spreadsheets' }));
+      const idToken = ['x', Buffer.from(JSON.stringify({ email: 'ana@gmail.com' })).toString('base64url'), 'sig'].join('.');
+      return new Response(JSON.stringify({ access_token: 'acc-1', expires_in: 3600, refresh_token: 'refresh-1', id_token: idToken, scope: 'openid email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/spreadsheets' }));
     }
     if (body.get('grant_type') === 'refresh_token') {
       refreshes++;
@@ -187,10 +200,12 @@ test('google: students connect once; the backend keeps fresh access from the sto
   });
   const json = async (path: string, init?: RequestInit) => (await (await app.request(path, init)).json()) as any;
 
-  assert.deepEqual(await json('/api/google/config'), { enabled: true });
-  assert.deepEqual((await json('/api/students/demo/google')).services, []);
-  // Only a signed-in student can connect; the guest cannot.
-  assert.equal((await app.request('/api/students/demo/google/connect', { method: 'POST' })).status, 401);
+  assert.deepEqual(await json('/api/google/config'), { enabled: true, problem: null, needs: [], redirectUri: 'http://127.0.0.1:8787/auth/google/callback' });
+  const before = await json('/api/students/demo/google');
+  assert.deepEqual([before.connected, before.services, before.email], [false, [], null]);
+  // With sign-in off, the local user is the demo student and may connect.
+  assert.equal(before.mayConnect, true);
+  assert.equal((await app.request('/api/students/demo/google/connect', { method: 'POST' })).status, 200);
 
   // Signed in, the consent screen asks for lasting access; Google's reply links the account.
   const user = { uid: 'u1', name: 'Ana', email: 'ana@example.org', picture: null, provider: 'google' as const, emailVerified: true };
@@ -217,6 +232,9 @@ test('google: students connect once; the backend keeps fresh access from the sto
   assert.equal(consent.searchParams.get('access_type'), 'offline');
   assert.equal(consent.searchParams.get('redirect_uri'), 'http://127.0.0.1:8787/auth/google/callback');
   assert.match(consent.searchParams.get('scope')!, /calendar\.events.*spreadsheets/);
+  assert.match(consent.searchParams.get('scope')!, /^openid email /, 'asks who the account is, for Settings to show');
+  // With sign-in on, the shared guest cannot connect.
+  assert.equal((await signedIn.request('/api/students/demo/google/connect', { method: 'POST' })).status, 401);
   assert.equal(consent.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(consent.searchParams.get('login_hint'), 'ana@example.org');
 
@@ -226,6 +244,11 @@ test('google: students connect once; the backend keeps fresh access from the sto
   assert.deepEqual(ana.getGoogle()?.services, ['calendar', 'sheets']);
   assert.equal(ana.memorySnapshot().profile.google?.refreshToken, 'refresh-1', 'kept with the account');
   assert.ok(!JSON.stringify(ana.student()).includes('refresh-1'), 'never sent to a page');
+  assert.equal(ana.getGoogle()?.email, 'ana@gmail.com', 'the Google account, from the id_token');
+  const status = (await (await signedIn.request('/api/students/me/google', { headers: { authorization: 'Bearer t' } })).json()) as any;
+  assert.deepEqual([status.connected, status.email, status.services], [true, 'ana@gmail.com', ['calendar', 'sheets']]);
+  for (const secret of ['refresh-1', 'acc-1', 'secret']) assert.ok(!JSON.stringify(status).includes(secret), `the status never carries ${secret}`);
+  assert.deepEqual(ana.student().google, { email: 'ana@gmail.com', services: ['calendar', 'sheets'], connectedAt: ana.getGoogle()!.connectedAt, allCalendars: false });
   // A used link cannot be used again.
   assert.equal((await signedIn.request(`/auth/google/callback?code=x&state=${consent.searchParams.get('state')}`)).status, 400);
 
@@ -245,17 +268,28 @@ test('google: students connect once; the backend keeps fresh access from the sto
     verify: async () => user,
     forUser: () => restarted,
     google: { client: { clientId: 'cid', clientSecret: 'secret' }, redirectBase: 'http://127.0.0.1:8787', fetch: fakeGoogle },
+    calendar: {
+      create: async (token) => {
+        used.push(token);
+        return { eventId: 'ev', htmlLink: 'https://calendar.google.com/e' };
+      },
+      remove: async () => {},
+    },
   });
-  const token = await (await again.request('/api/students/me/google/token', { method: 'POST', headers: h, body: '{"service":"calendar"}' })).json() as any;
-  assert.equal(token.accessToken, 'acc-r1');
-  assert.equal(refreshes, 1);
-  await again.request('/api/students/me/google/token', { method: 'POST', headers: h, body: '{"service":"calendar"}' });
-  assert.equal(refreshes, 1, 'reused until it is about to expire');
+  // No route hands an access token to a page any more.
+  assert.equal((await again.request('/api/students/me/google/token', { method: 'POST', headers: h, body: '{"service":"calendar"}' })).status, 404);
+  const twice = restarted.student().feed.filter((f) => f.opportunity.deadline).slice(0, 2).map((f) => f.opportunity.id);
+  for (const id of twice) await again.request(`/api/students/me/applications/${id}`, { method: 'PUT', headers: h, body: JSON.stringify({ status: 'to_apply' }) });
+  assert.equal(refreshes, 1, 'one fresh token from the refresh token, reused until it is about to expire');
+  assert.equal(used.at(-1), 'acc-r1');
 
-  // Disconnecting forgets it.
+  // Disconnecting forgets it, and Google is told to.
   await again.request('/api/students/me/google', { method: 'DELETE', headers: h });
   assert.equal(restarted.getGoogle(), null);
-  assert.equal((await again.request('/api/students/me/google/token', { method: 'POST', headers: h, body: '{}' })).status, 404);
+  assert.equal(restarted.student().google, null);
+  assert.ok(calls.some((c) => c.startsWith('https://oauth2.googleapis.com/revoke')), 'the grant is revoked at Google');
+  const after = (await (await again.request('/api/students/me/calendar/sync', { method: 'POST', headers: h })).json()) as any;
+  assert.equal(after.reason, 'not_connected');
   void o;
   void json;
   void calls;

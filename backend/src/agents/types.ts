@@ -493,7 +493,16 @@ export interface ProfileMemory {
    * The student's lasting Google connection (Calendar, Sheets): a refresh token the backend trades
    * for access when it needs it. Never sent to a page.
    */
-  google?: { refreshToken: string; services: ('calendar' | 'sheets')[]; connectedAt: string; allCalendars?: boolean } | null;
+  google?: {
+    refreshToken: string;
+    services: ('calendar' | 'sheets')[];
+    connectedAt: string;
+    allCalendars?: boolean;
+    /** The Google account's address, read from Google's sign-in reply. Shown in Settings. */
+    email?: string | null;
+  } | null;
+  /** The last time the deadlines were written to Google Calendar, and what Google refused then. */
+  calendarSync?: CalendarSync | null;
   /** Models per agent group and minimums per kind, set on the Agents page. */
   agentSettings?: AgentSettings;
 }
@@ -502,6 +511,17 @@ export interface LinkedSheet {
   spreadsheetId: string;
   url: string;
   syncedAt: string;
+  /** The spreadsheet's name in Drive, when known. */
+  title?: string | null;
+  /** The tab BearRok writes. Sheets linked before this was kept use "Saved". */
+  tab?: string;
+}
+
+export interface CalendarSync {
+  at: string;
+  added: number;
+  removed: number;
+  errors: string[];
 }
 
 /** Section 2: what the app learned. The student does not edit it. */

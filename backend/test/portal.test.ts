@@ -7,6 +7,7 @@ import type { Opportunity, PortalTab } from '../src/agents/types.ts';
 import type { AgentsOptions } from '../src/agents/api.ts';
 import { createApp } from '../src/app.ts';
 import { LocalStore } from '../src/store/local.ts';
+import { connectGoogle, fakeGoogle } from './googleFake.ts';
 
 const NOW = new Date('2026-11-19T12:00:00Z');
 
@@ -31,7 +32,7 @@ function setup(opps: Opportunity[] = [ACME, BARE], calendar?: AgentsOptions['cal
   const snap = s.memorySnapshot();
   snap.learned.opportunities = structuredClone(opps);
   s.restore(snap);
-  const { app } = createApp(new LocalStore(null), {}, { demo: s, calendar });
+  const { app } = createApp(new LocalStore(null), {}, { demo: s, calendar, google: fakeGoogle().google });
   const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const res = await app.request(`/api/students/demo${path}`, { method, headers: { 'content-type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, body: (await res.json()) as any };
@@ -235,7 +236,9 @@ test('portal: a custom application can be marked applied, goes on the tracker an
     create: async (_token, event) => { calls.push(`create ${event.title}`); return { eventId: 'evt-9', htmlLink: 'https://calendar.google.com/event?eid=9' }; },
     remove: async (_token, eventId) => { calls.push(`remove ${eventId}`); },
   });
-  const google = { 'x-google-access-token': 'g-token' };
+  // Connected on the server; the page sends no token.
+  connectGoogle(s);
+  const google = {};
   const id = (await call('POST', '/applications', { title: 'Hackathon team', deadline: '2026-12-01T17:00:00Z' })).body.application.opportunityId;
 
   const synced = await call('PUT', `/applications/${id}`, { status: 'applying' }, google);

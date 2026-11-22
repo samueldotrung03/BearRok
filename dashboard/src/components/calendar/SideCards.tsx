@@ -3,7 +3,7 @@
 // calendars, the Career only filter). Deadlines are their own card (UpcomingDeadlines).
 import { ArrowRight, ArrowUpRight, CalendarDays, Sparkles, TriangleExclamationPoint } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useAuth } from '../../auth/AuthProvider.tsx';
+import { useLive } from '../../state/live.tsx';
 import type { Brief } from '../../lib/cal/brief.ts';
 import { shortDay } from '../../lib/cal/days.ts';
 import type { GoogleSyncState } from '../../lib/cal/google.ts';
@@ -80,7 +80,7 @@ export function ScheduleCard({
 
 /** Connect a different Google account in place of the one connected now. */
 function SwitchAccount() {
-  const auth = useAuth();
+  const live = useLive();
   const [waiting, setWaiting] = useState(false);
   const attempt = useRef<AbortController | null>(null);
   useEffect(() => () => attempt.current?.abort(), []);
@@ -94,7 +94,7 @@ function SwitchAccount() {
         attempt.current = controller;
         setWaiting(true);
         try {
-          await auth.connectGoogle('calendar', controller.signal, { switchAccount: true });
+          await live.connectGoogle(controller.signal, { switchAccount: true });
         } catch {
           // The card shows the state on the next read.
         } finally {

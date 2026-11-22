@@ -2,7 +2,7 @@
 // no agents behind it. It answers the few calls the pages make to show the sample student's
 // application portals and saved sheet, from the sample data, and says plainly that anything else
 // needs the real agents. Nothing here is sent anywhere; portal edits last only this visit.
-import { SHEET_COLUMNS } from '../components/saved/SheetView.tsx';
+import { SHEET_COLUMNS } from '../components/applications/SheetView.tsx';
 import { applicationInfo, opportunities } from '../data/sample.ts';
 import { statusLabel } from '../lib/applications.ts';
 import type { Portal, PortalApplication, PortalTab } from '../lib/portal/types.ts';

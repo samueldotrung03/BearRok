@@ -1,5 +1,5 @@
 // One calendar for everything with a date. The calendar comes first, and beside it the upcoming
-// application deadlines (To apply and Applying on the Saved page), which BearRok puts on the
+// application deadlines (To apply and Applying in Applications), which BearRok puts on the
 // student's Google Calendar by itself once it is connected. Orange is what the student has to do
 // (they committed to it), blue is what they should do (it moves them toward the goal).
 // On top of that: a brief of today, a week plan that places work before each deadline, clash
@@ -38,7 +38,6 @@ import {
 import { DEFAULT_HOURS, acceptedTitle, targetsFrom, type PlanBlock } from '../lib/cal/planner.ts';
 import { calendarItems, dayKey } from '../lib/calendar.ts';
 import { deleteGoogleEvent, googleItems, insertGoogleEvent, updateGoogleEvent, useGoogleEvents, type EventDraft, type GoogleSyncState } from '../lib/cal/google.ts';
-import { useAuth } from '../auth/AuthProvider.tsx';
 import { careerOnlyEvents, useCareerSort } from '../lib/cal/careerSort.ts';
 import { authMessage } from '../auth/errors.ts';
 import { ConnectCalendar } from '../components/CalendarStatus.tsx';
@@ -196,8 +195,8 @@ export function Calendar() {
   };
 
   // ---- what is added here goes on the student's Google Calendar too --------------------------
-  const auth = useAuth();
-  const googleToken = auth.google.calendar;
+  // Connected on the backend; every Google call goes through it, with no token here.
+  const googleOn = live.google.services.includes('calendar') && live.status === 'connected';
   const draftOf = (p: PersonalItem): EventDraft => ({
     title: p.title,
     day: p.day,
@@ -208,10 +207,10 @@ export function Calendar() {
   const pushing = useRef(new Set<string>());
   const pushToGoogle = useCallback(
     async (p: PersonalItem) => {
-      if (!googleToken || p.google || pushing.current.has(p.id)) return;
+      if (!googleOn || p.google || pushing.current.has(p.id)) return;
       pushing.current.add(p.id);
       try {
-        const made = await insertGoogleEvent(googleToken, draftOf(p));
+        const made = await insertGoogleEvent(live.request, draftOf(p));
         setPersonal((list) => list.map((x) => (x.id === p.id ? { ...x, google: made } : x)));
         google.refresh();
       } catch {
@@ -221,17 +220,17 @@ export function Calendar() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [googleToken],
+    [googleOn],
   );
   // Anything added while Google was not connected goes there once it is.
   useEffect(() => {
-    if (!googleToken) return;
+    if (!googleOn) return;
     for (const p of personal) if (!p.google && !p.done && p.day >= today) void pushToGoogle(p);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [googleToken, personal.length]);
+  }, [googleOn, personal.length]);
   const removeFromGoogle = (list: PersonalItem[]) => {
-    if (!googleToken) return;
-    for (const p of list) if (p.google) void deleteGoogleEvent(googleToken, p.google.eventId).catch(() => {});
+    if (!googleOn) return;
+    for (const p of list) if (p.google) void deleteGoogleEvent(live.request, p.google.eventId).catch(() => {});
   };
   // The event whose card is open, and the add or edit form (a personal item's id, or "new").
   const [opened, setOpened] = useState<CxItem | null>(null);
@@ -290,7 +289,7 @@ export function Calendar() {
       setPersonal((list) => list.map((p) => (p.id === id ? { ...p, ...patch } : p)));
       // A change to what or when moves the Google event too; ticking it done does not.
       const moved = current && ['title', 'day', 'time', 'endTime', 'note'].some((k) => k in patch);
-      if (current?.google && googleToken && moved) void updateGoogleEvent(googleToken, current.google.eventId, draftOf({ ...current, ...patch })).then(google.refresh, () => {});
+      if (current?.google && googleOn && moved) void updateGoogleEvent(live.request, current.google.eventId, draftOf({ ...current, ...patch })).then(google.refresh, () => {});
       if (patch.day) select(patch.day);
     },
     remove: (id) => {
@@ -472,7 +471,7 @@ export function Calendar() {
             key={editing}
             initial={editItem}
             day={selected}
-            googleConnected={Boolean(googleToken)}
+            googleConnected={googleOn}
             onCancel={() => setEditing(null)}
             onSave={(fields) => {
               if (editItem) actions.update(editItem.id, fields);

@@ -288,7 +288,7 @@ export function PortalWorkspace({ id, application, portal, restored = false }: {
         const res = await liveRef.current.request(base, { method: 'PUT', body: JSON.stringify({ status: next }) });
         if (!res.ok) throw new Error(`The account answered ${res.status}`);
       } else {
-        // One request, checked; the Saved page's copy is updated only once the account has it.
+        // One request, checked; the list's copy is updated only once the account has it.
         const res = await liveRef.current.request(base, { method: 'PUT', body: JSON.stringify({ status: next }) });
         if (!res.ok) throw new Error(`The account answered ${res.status}`);
         dispatch({ type: 'setApplication', id, status: next });

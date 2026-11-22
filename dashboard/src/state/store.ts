@@ -52,6 +52,20 @@ export type Action =
   /** What the account says is saved and liked, for the postings it knows; others are left as they are. */
   | { type: 'syncReactions'; known: string[]; saved: string[]; liked: string[]; statuses?: Record<string, ApplicationStatus> };
 
+/**
+ * Saved and Applications are one list: a saved posting is an application at the first stage,
+ * Saved (status "interested"). State kept before saving started tracking can have saves with no
+ * application; they get one here. Nothing is removed and no status or draft is changed. Returns the
+ * same object when there is nothing to add.
+ */
+export function migrateSavedState(state: AppState): AppState {
+  const missing = state.saved.filter((id) => !state.applications[id] && !state.dismissed.includes(id));
+  if (missing.length === 0) return state;
+  const applications = { ...state.applications };
+  for (const id of missing) applications[id] = { status: 'interested', drafts: {}, materialsDone: [] };
+  return { ...state, applications };
+}
+
 /** The id a feed opportunity gets when it is added to the roadmap as an extra step. */
 export const extraStepId = (opportunityId: string) => `extra-${opportunityId}`;
 
@@ -130,7 +144,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return suggest(next, action.goalId ?? null);
     }
     case 'load':
-      return action.state;
+      return migrateSavedState(action.state);
     case 'setPreferences':
       return { ...state, preferences: action.preferences };
     case 'setProfile':
@@ -252,8 +266,8 @@ export function loadState(initial: AppState, uid: string | null = null): AppStat
     const stored = JSON.parse(raw) as Partial<AppState>;
     const next = { ...initial, ...stored, profile: { ...initial.profile, ...stored.profile } };
     // Sample applications added since this state was saved are brought in once; the student's own stay as they are.
-    if ((stored.seed ?? 1) < (initial.seed ?? 1)) return { ...next, seed: initial.seed, applications: { ...initial.applications, ...stored.applications } };
-    return next;
+    if ((stored.seed ?? 1) < (initial.seed ?? 1)) return migrateSavedState({ ...next, seed: initial.seed, applications: { ...initial.applications, ...stored.applications } });
+    return migrateSavedState(next);
   } catch {
     return initial;
   }

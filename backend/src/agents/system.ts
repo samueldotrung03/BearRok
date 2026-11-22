@@ -36,6 +36,7 @@ import {
   type Interaction,
   type LearnedMemory,
   type LinkedSheet,
+  type CalendarSync,
   type ProfileMemory,
   type AgentSettings,
   type LogEvent,
@@ -134,6 +135,10 @@ export interface StudentState {
   savedItems: FeedEntry[];
   /** The Google Sheet the saved list is written to, or null for the app's own sheet only. */
   sheet: LinkedSheet | null;
+  /** The lasting Google connection as a page may see it: no token, only who and what. Null when not connected. */
+  google: { email: string | null; services: ('calendar' | 'sheets')[]; connectedAt: string; allCalendars: boolean } | null;
+  /** The last write of deadlines to Google Calendar. */
+  calendarSync: CalendarSync | null;
   runCount: number;
   mode: 'simulated' | 'live';
   /** Which model family the agents are on. */
@@ -382,6 +387,7 @@ export class AgentSystem {
   private sheet: LinkedSheet | null = null;
   /** The student's lasting Google connection. Kept with their account; never put in student(). */
   private google: ProfileMemory['google'] = null;
+  private calendarSync: CalendarSync | null = null;
   /** Postings a picture is being looked for right now, so two passes do not look for the same one. */
   private picturing = new Set<string>();
   /** Called after anything worth saving changed. */
@@ -464,6 +470,8 @@ export class AgentSystem {
       liked: [...memory.reaction].filter(([id, r]) => r === 'like' && this.opportunities.has(id)).map(([id]) => id),
       savedItems: rank(saved.map((id) => this.opportunities.get(id)!)),
       sheet: this.sheet,
+      google: this.google ? { email: this.google.email ?? null, services: [...this.google.services], connectedAt: this.google.connectedAt, allCalendars: this.google.allCalendars === true } : null,
+      calendarSync: this.calendarSync,
       runCount: this.runCount,
       mode: this.brain.mode,
       provider: this.brain.mode === 'live' ? (this.opts.provider ?? 'grok') : 'simulated',
@@ -592,6 +600,7 @@ export class AgentSystem {
         scheduleSeconds: this.scheduleSeconds,
         sheet: this.sheet,
         google: this.google,
+        calendarSync: this.calendarSync,
         agentSettings: this.agentSettings,
       },
       learned: {
@@ -621,6 +630,7 @@ export class AgentSystem {
     if (Array.isArray(p?.reminderDays)) this.reminderDays = p.reminderDays;
     this.sheet = p?.sheet ?? null;
     this.google = p?.google ?? null;
+    this.calendarSync = p?.calendarSync ?? null;
     this.agentSettings = upgradeSettings(p?.agentSettings);
     this.autoDone = [...(memory.learned?.autoDone ?? [])];
     this.brain.setModels?.(this.agentSettings.models);
@@ -645,10 +655,29 @@ export class AgentSystem {
     const saver = this.saver;
     this.saver = null;
     this.setSchedule(p?.scheduleSeconds ?? 0);
+    const migrated = this.migrateSaved();
     this.saver = saver;
+    // What the migration added is kept, so the next start finds it already there.
+    if (migrated > 0) this.saver?.();
     this.syncAutoTimer();
     // Observers attached before the memory was loaded (the activity feed is) start again from the restored run.
     for (const o of this.observers) o('restored', this.run);
+  }
+
+  /**
+   * Saved and Applications are one list: a saved posting is an application at the first stage,
+   * Saved (status "interested"). Saves made before saving started tracking, or whose application
+   * was lost, get that application here, so nothing saved goes missing from Applications. Nothing
+   * is removed and no status is changed. Returns how many were added.
+   */
+  migrateSaved(): number {
+    const memory = this.memory();
+    let added = 0;
+    for (const id of memory.saved) {
+      if (this.applications.has(id) || !this.opportunities.has(id) || memory.reaction.get(id) === 'dislike') continue;
+      if (this.setApplication(id, { status: 'interested' })) added++;
+    }
+    return added;
   }
 
   /**
@@ -979,10 +1008,21 @@ export class AgentSystem {
     return this.google;
   }
 
-  /** Saved straight away: it is what lets the student skip connecting next time. */
+  /** Saved straight away: it is what lets the student skip connecting next time. Pages see it change live. */
   setGoogle(google: ProfileMemory['google']) {
     this.google = google;
+    if (!google) this.calendarSync = null;
     this.saver?.();
+    this.emitStudent();
+  }
+
+  getCalendarSync() {
+    return this.calendarSync;
+  }
+
+  setCalendarSync(sync: CalendarSync | null) {
+    this.calendarSync = sync;
+    this.emitStudent();
   }
 
   setSheet(sheet: LinkedSheet | null) {

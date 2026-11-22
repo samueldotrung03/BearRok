@@ -8,6 +8,7 @@ import type { Category, Interaction, Opportunity } from '../src/agents/types.ts'
 import { createApp } from '../src/app.ts';
 import type { AuthUser } from '../src/auth.ts';
 import { LocalStore } from '../src/store/local.ts';
+import { connectGoogle, fakeGoogle } from './googleFake.ts';
 
 const NOW = new Date('2026-11-18T20:00:00Z');
 const even: Record<Category, number> = { internship: 1, event: 1, club: 1, program: 1 };
@@ -285,37 +286,39 @@ test('applications: no deadline means no invented reminder, until the student su
   assert.equal(fixed.reminders.length, 3);
 });
 
-test('applications API: with a Google token the deadline goes on the calendar, and comes off when applied', async () => {
+test('applications API: with Google connected on the server the deadline goes on the calendar, and comes off when applied', async () => {
   const s = system();
   await s.trigger('first');
   const calls: string[] = [];
   const { app } = createApp(new LocalStore(null), {}, {
     demo: s,
+    google: fakeGoogle().google,
     calendar: {
       create: async (token, event) => { calls.push(`create ${token} ${event.title}`); return { eventId: 'evt-1', htmlLink: 'https://calendar.google.com/event?eid=1' }; },
       remove: async (token, id) => { calls.push(`remove ${token} ${id}`); },
     },
   });
   const o = s.student().feed.find((f) => f.opportunity.deadline)!.opportunity;
-  const put = async (body: unknown, google?: string) => {
-    const res = await app.request(`/api/students/demo/applications/${o.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...(google ? { 'x-google-access-token': google } : {}) }, body: JSON.stringify(body) });
+  const put = async (body: unknown, headers: Record<string, string> = {}) => {
+    const res = await app.request(`/api/students/demo/applications/${o.id}`, { method: 'PUT', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
     return { status: res.status, body: (await res.json()) as any };
   };
 
-  // Without a token: reminders and the link only.
-  const link = await put({ status: 'to_apply' });
+  // Not connected: reminders and the link only. A token sent in a header is not used.
+  const link = await put({ status: 'to_apply' }, { 'x-google-access-token': 'from-the-page' });
   assert.equal(link.body.application.calendar.state, 'link');
-  assert.equal(calls.length, 0);
+  assert.equal(calls.length, 0, 'a token sent by a page is never used');
 
-  const synced = await put({ status: 'applying', drafts: { 'Why do you want to join?': 'Because.' } }, 'g-token');
+  connectGoogle(s);
+  const synced = await put({ status: 'applying', drafts: { 'Why do you want to join?': 'Because.' } });
   assert.equal(synced.body.application.calendar.state, 'synced');
   assert.equal(synced.body.application.calendar.eventId, 'evt-1');
   assert.equal(synced.body.application.drafts['Why do you want to join?'], 'Because.');
-  assert.match(calls[0]!, /^create g-token Due: /);
+  assert.match(calls[0]!, /^create tok Due: /, 'the access token the backend made from the stored grant');
 
-  const done = await put({ status: 'applied' }, 'g-token');
+  const done = await put({ status: 'applied' });
   assert.equal(done.body.application.calendar.state, 'none');
-  assert.equal(calls.at(-1), 'remove g-token evt-1');
+  assert.equal(calls.at(-1), 'remove tok evt-1');
 
   assert.equal((await put({ status: 'maybe' })).status, 400);
   const list = (await (await app.request('/api/students/demo/applications')).json()) as any;
@@ -375,14 +378,18 @@ test('settings: connection status, and exporting applications to a Google Sheet'
   const { app } = createApp(new LocalStore(null), {}, {
     demo: s,
     grok: { connected: true, mode: 'cli', detail: 'subscription' },
+    google: fakeGoogle().google,
     sheets: async (token, applications) => { sent = { token, rows: applications.length }; return { spreadsheetId: 'sheet-1', url: 'https://docs.google.com/spreadsheets/d/sheet-1' }; },
   });
   assert.deepEqual(await (await app.request('/api/connections')).json(), { grok: { connected: true, mode: 'cli', detail: 'subscription' }, signIn: false });
 
-  assert.equal((await app.request('/api/students/demo/applications/export', { method: 'POST' })).status, 400);
-  const res = await app.request('/api/students/demo/applications/export', { method: 'POST', headers: { 'x-google-access-token': 'g-token' } });
+  const refused = await app.request('/api/students/demo/applications/export', { method: 'POST', headers: { 'x-google-access-token': 'g-token' } });
+  assert.equal(refused.status, 400, 'not connected: a token in a header does not count');
+  assert.equal(((await refused.json()) as any).reason, 'not_connected');
+  connectGoogle(s);
+  const res = await app.request('/api/students/demo/applications/export', { method: 'POST' });
   assert.deepEqual(await res.json(), { spreadsheetId: 'sheet-1', url: 'https://docs.google.com/spreadsheets/d/sheet-1' });
-  assert.deepEqual(sent, { token: 'g-token', rows: 1 });
+  assert.deepEqual(sent, { token: 'tok', rows: 1 });
 
   const { sheetRows } = await import('../src/sheets.ts');
   const rows = sheetRows(s.listApplications());

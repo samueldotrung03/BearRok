@@ -9,7 +9,7 @@ import { createApp } from './app.ts';
 import { CareerGuides } from './careers/guide.ts';
 import { firebaseVerifier, webConfig } from './auth.ts';
 import { config, liveAvailable } from './config.ts';
-import { oauthClientFrom } from './googleOAuth.ts';
+import { oauthSetup } from './googleOAuth.ts';
 import { openStore } from './store/index.ts';
 import { cached, writeRoadmap } from './roadmap.ts';
 import { cachedSearch, writeSearch } from './search.ts';
@@ -41,16 +41,20 @@ const memory = account
       deleteStudent: (id: string) => (isGuest(id) ? store : account).deleteStudent(id),
     }
   : store;
-// A lasting Google connection needs a "Desktop app" OAuth client (GOOGLE_OAUTH_CLIENT_FILE, or
-// GOOGLE_OAUTH_CLIENT_ID and _SECRET). Without one, pages connect Google for one session at a time.
-const oauthClient = oauthClientFrom(process.env);
+// A Google connection (account, Calendar, Sheets) needs a "Desktop app" OAuth client:
+// GOOGLE_OAUTH_CLIENT_FILE, or GOOGLE_OAUTH_CLIENT_ID and _SECRET. Without one, Settings says what
+// to set and offers nothing Google. Google sends the student back to the loopback address on this
+// port (a Desktop app client accepts any port); GOOGLE_OAUTH_REDIRECT_BASE overrides it.
+const { client: oauthClient, problem: googleProblem } = oauthSetup(process.env);
+const redirectBase = process.env.GOOGLE_OAUTH_REDIRECT_BASE?.trim().replace(/\/+$/, '') || `http://127.0.0.1:${config.port}`;
 const careers = new CareerGuides();
 // Career guide parts a restart stopped are picked up again (or stay marked, for the student to retry).
 const resumed = careers.resume();
 if (resumed.length) console.log(`career guides: picked up ${resumed.join(', ')} after the restart`);
 const { app } = createApp(store, {}, {
   memory,
-  google: oauthClient ? { client: oauthClient, redirectBase: `http://127.0.0.1:${config.port}` } : null,
+  google: oauthClient ? { client: oauthClient, redirectBase } : null,
+  googleProblem,
   onToken: (uid, token) => tokens.set(uid, token),
   demo: newSystem(),
   // A student who signs in gets their own agents, named from their Google name or, for email sign-in, the part before the @.
@@ -74,7 +78,7 @@ serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
   console.log(`  store:  ${store.kind === 'firestore' ? 'Firestore' : account ? `Firestore under each student's own sign-in; guests in a local file (${config.localDataFile})` : `local file (${config.localDataFile})`}`);
   const m = config.xaiModels;
   console.log(`  agents: ${!liveAvailable() ? 'simulated on sample data (no XAI_API_KEY)' : config.grokTransport === 'cli' ? `live Grok through the CLI on this machine's subscription (${config.grokCli.bin})` : `live Grok API: master/managers/validation/presentation ${m.normal}, workers ${m.low}`}`);
-  console.log(`  google: ${oauthClient ? 'lasting connection for Calendar and Sheets (OAuth client set)' : 'one session at a time (no GOOGLE_OAUTH_CLIENT_FILE)'}`);
+  console.log(`  google: ${oauthClient ? `OAuth client set; Google sends students back to ${redirectBase}/auth/google/callback` : (googleProblem ?? 'not set up (set GOOGLE_OAUTH_CLIENT_FILE, or GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET)')}`);
   console.log(`  sign-in: ${verify ? `Google and email, Firebase project ${config.firebaseWeb.projectId}` : 'off (set FIREBASE_WEB_API_KEY and FIREBASE_PROJECT_ID)'}`);
   console.log(`  watch:  http://localhost:${port}/`);
 });

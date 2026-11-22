@@ -1,4 +1,4 @@
-// The application deadlines coming up: everything marked To apply or Applying on the Saved page,
+// The application deadlines coming up: everything marked To apply or Applying in Applications,
 // soonest first, with whether each is on the student's Google Calendar. While Google Calendar is
 // connected the app adds and moves these events itself.
 import { CalendarCheck } from 'lucide-react';

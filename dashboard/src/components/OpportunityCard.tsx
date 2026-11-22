@@ -502,7 +502,7 @@ export function OpportunityRow({
   opportunity: Opportunity;
   onDismiss: (o: Opportunity) => void;
   onRoadmap?: boolean;
-  /** More controls at the end of the row's button line, such as the application status on the Saved page. */
+  /** More controls at the end of the row's button line, such as the application status on a Saved row. */
   actions?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);

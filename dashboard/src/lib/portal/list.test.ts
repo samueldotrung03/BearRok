@@ -9,6 +9,8 @@ import {
   filterExceptStatus,
   mergeApplications,
   normalizePrefs,
+  savedPageTarget,
+  stageFromQuery,
   progressLabel,
   progressOf,
   sortApplications,
@@ -102,11 +104,12 @@ describe('mergeApplications', () => {
     expect(a).toMatchObject({ opportunityId: 'a', title: 'Record title', organizer: 'Record org', status: 'applying', deadline: inDays(3), progress: { done: 2, total: 4 }, kind: 'research', custom: false });
   });
 
-  it('lists custom applications that have no posting, and leaves Interested postings out', () => {
+  it('lists custom applications that have no posting, and Saved (Interested) postings as the first stage', () => {
     const live = { b: tracked('b', 'interested'), c: tracked('c', 'to_apply') };
     const records: ApplicationRecord[] = [{ opportunityId: 'custom-1', title: 'My own', status: 'to_apply', deadline: null, actionUrl: null, custom: true }];
     const rows = mergeApplications(live, records, [posting('b'), posting('c')]);
-    expect(rows.map((r) => r.opportunityId).sort()).toEqual(['c', 'custom-1']);
+    expect(rows.map((r) => r.opportunityId).sort()).toEqual(['b', 'c', 'custom-1']);
+    expect(rows.find((r) => r.opportunityId === 'b')?.status).toBe('interested');
     expect(rows.find((r) => r.opportunityId === 'custom-1')).toMatchObject({ custom: true, kind: 'custom', title: 'My own' });
     // Before the records arrive, a tracked posting still shows with the posting's own title.
     expect(rows.find((r) => r.opportunityId === 'c')?.title).toBe('Posting c');
@@ -114,6 +117,14 @@ describe('mergeApplications', () => {
 
   it('works before GET /applications has answered', () => {
     expect(mergeApplications({ c: tracked('c', 'applied') }, null, [])).toHaveLength(1);
+  });
+
+  it('shows a saved posting the account does not track yet as Saved, once, and leaves out one with no posting known', () => {
+    const rows = mergeApplications({ c: tracked('c', 'to_apply') }, null, [posting('s'), posting('c')], ['s', 'c', 'gone']);
+    expect(rows.map((r) => [r.opportunityId, r.status]).sort()).toEqual([
+      ['c', 'to_apply'],
+      ['s', 'interested'],
+    ]);
   });
 });
 
@@ -160,6 +171,14 @@ describe('filterApplications', () => {
     expect(ids(filterApplications(list, { ...base, status: 'applied' }, NOW))).toEqual(['c']);
     expect(ids(filterApplications(list, { ...base, status: 'applying' }, NOW))).toEqual(['b']);
   });
+  it('Saved is the first stage and Everything includes it; active does not', () => {
+    const withSaved = [...list, row('s', { status: 'interested', title: 'Kept card' })];
+    expect(ids(filterApplications(withSaved, { ...base, status: 'saved' }, NOW))).toEqual(['s']);
+    expect(ids(filterApplications(withSaved, { ...base, status: 'all' }, NOW))).toEqual(['a', 'b', 'c', 'd', 's']);
+    expect(ids(filterApplications(withSaved, base, NOW))).toEqual(['a', 'b', 'd']);
+    expect(statusCounts(withSaved).saved).toBe(1);
+    expect(statusCounts(withSaved).all).toBe(5);
+  });
   it('narrows by kind, including the student’s own', () => {
     expect(ids(filterApplications(list, { ...base, kind: 'custom' }, NOW))).toEqual(['d']);
     expect(ids(filterApplications(list, { ...base, kind: 'club' }, NOW))).toEqual(['b']);
@@ -172,15 +191,33 @@ describe('filterApplications', () => {
     expect(ids(filterApplications(list, { ...base, dueSoon: true }, NOW))).toEqual(['a']);
   });
   it('counts each status chip over the other filters', () => {
-    expect(statusCounts(filterExceptStatus(list, { kind: 'all', query: '', dueSoon: false }, NOW))).toEqual({ active: 3, to_apply: 2, applying: 1, applied: 1 });
-    expect(statusCounts(filterExceptStatus(list, { kind: 'all', query: '', dueSoon: true }, NOW))).toEqual({ active: 1, to_apply: 1, applying: 0, applied: 1 });
+    expect(statusCounts(filterExceptStatus(list, { kind: 'all', query: '', dueSoon: false }, NOW))).toEqual({ saved: 0, active: 3, to_apply: 2, applying: 1, applied: 1, all: 4 });
+    expect(statusCounts(filterExceptStatus(list, { kind: 'all', query: '', dueSoon: true }, NOW))).toEqual({ saved: 0, active: 1, to_apply: 1, applying: 0, applied: 1, all: 2 });
+  });
+});
+
+describe('stage links', () => {
+  it('reads a pipeline stage from the address and sends the old Saved page to that stage', () => {
+    expect(stageFromQuery('saved')).toBe('saved');
+    expect(stageFromQuery('all')).toBe('all');
+    expect(stageFromQuery('applying')).toBe('applying');
+    expect(stageFromQuery('sheet')).toBeNull();
+    expect(stageFromQuery(null)).toBeNull();
+    expect(stageFromQuery('')).toBeNull();
+    expect(savedPageTarget('')).toBe('/applications?stage=saved');
+    expect(savedPageTarget('?stage=saved')).toBe('/applications?stage=saved');
+    expect(savedPageTarget('?view=sheet')).toBe('/applications?view=sheet');
+    expect(savedPageTarget('?view=sheet&stage=saved')).toBe('/applications?view=sheet');
   });
 });
 
 describe('remembered preferences', () => {
   it('keeps known values and resets unknown ones', () => {
     expect(normalizePrefs({ sort: 'name', status: 'applied', kind: 'custom', dueSoon: true })).toEqual({ sort: 'name', status: 'applied', kind: 'custom', dueSoon: true });
-    expect(normalizePrefs({ sort: 'deadline', status: 'all', kind: 'nope' })).toEqual({ sort: 'soonest', status: 'active', kind: 'all', dueSoon: false });
+    expect(normalizePrefs({ sort: 'deadline', status: 'nope', kind: 'nope' })).toEqual({ sort: 'soonest', status: 'active', kind: 'all', dueSoon: false });
+    // Saved and Everything are stages now.
+    expect(normalizePrefs({ status: 'saved' }).status).toBe('saved');
+    expect(normalizePrefs({ status: 'all' }).status).toBe('all');
     expect(normalizePrefs(null)).toEqual({ sort: 'soonest', status: 'active', kind: 'all', dueSoon: false });
   });
 });

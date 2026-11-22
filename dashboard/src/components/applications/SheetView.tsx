@@ -1,12 +1,12 @@
-// The saved list as a spreadsheet: one row per saved posting with its status, deadline, details
-// and every link. This sheet is always here, with its columns set even before anything is saved.
-// The rows come from the backend, so this table and a Google Sheet made from it say the same
-// thing. "Create Google Sheet" asks Google for access and makes a new sheet in the student's
-// Drive, which then updates on its own while Google Sheets is connected.
-import { Download, ExternalLink, Sheet, Unlink } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth } from '../../auth/AuthProvider.tsx';
-import { authMessage } from '../../auth/errors.ts';
+// Applications as a spreadsheet: one row per saved posting and application with its stage,
+// deadline, details and every link. This sheet is always here, with its columns set even before
+// anything is saved. The rows come from the backend, so this table and the linked Google Sheet say
+// the same thing. Google itself is connected in Settings > Connections; here the student can make
+// the Google Sheet, write it now, or stop writing it. The backend does every Google call.
+import { Download, ExternalLink, RefreshCw, Sheet, Unlink } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
+import { serviceState } from '../../lib/google/connection.ts';
 import { relativeTime } from '../../lib/time.ts';
 import { useLive } from '../../state/live.tsx';
 
@@ -74,16 +74,12 @@ function Cell({ value, column }: { value: string; column: string }) {
 const csv = (rows: string[][]) => rows.map((r) => r.map((v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)).join(',')).join('\n');
 
 export function SheetView({ refreshKey }: { refreshKey: string }) {
-  const auth = useAuth();
   const live = useLive();
   const [data, setData] = useState<SheetData | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [busy, setBusy] = useState<'link' | 'sync' | null>(null);
-  // The sheet updates itself (live.tsx); this view only writes once, when the sheet is created.
-  const [message, setMessage] = useState<string | null>(null);
-  const linking = useRef<AbortController | null>(null);
-  // Leaving the page stops waiting for Google.
-  useEffect(() => () => linking.current?.abort(), []);
+  const [busy, setBusy] = useState(false);
+  // The sheet updates itself (live.tsx); this view writes it on request.
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Read again whenever what is saved, or where it stands, changes.
   useEffect(() => {
@@ -105,49 +101,14 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey, live.status]);
 
-  const sync = async (token: string) => {
-    setBusy('sync');
+  const sheets = serviceState(live.google, 'sheets');
+  const write = async (create: boolean) => {
+    setBusy(true);
     setMessage(null);
-    const res = await live.request('/sheet/sync', { method: 'POST', headers: { 'x-google-access-token': token } }).catch(() => null);
-    const body = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : { error: 'The backend cannot be reached.' };
-    setMessage(res?.ok ? (live.sheet ? 'Your Google Sheet is up to date.' : 'Your Google Sheet is created in your Drive.') : `Could not write to Google Sheets: ${body.error ?? 'unknown error'}`);
-    setBusy(null);
+    const out = await live.syncSheet({ create });
+    setMessage(out.ok ? { ok: true, text: live.sheet && !create ? 'Your Google Sheet is up to date.' : 'Your Google Sheet is made in your Drive.' } : { ok: false, text: out.error ?? 'Google Sheets could not be written.' });
+    setBusy(false);
   };
-
-  // Create: ask Google for Sheets access if this session has none, then make the sheet in their Drive.
-  // Clicking again while Google's tab is open starts over, so a closed tab never leaves it stuck.
-  const link = async () => {
-    linking.current?.abort();
-    setBusy(null);
-    setMessage(null);
-    try {
-      let token = auth.google.sheets;
-      if (!token) {
-        const controller = new AbortController();
-        linking.current = controller;
-        setMessage('Finish in the Google tab that opened. Closed it? Press the button again.');
-        await auth.connectGoogle('sheets', controller.signal);
-        if (linking.current !== controller) return;
-        // The new token reaches this component on the next render; the backend gets it from there.
-        setBusy(null);
-        setMessage('Google Sheets connected. Creating your sheet…');
-        return;
-      }
-      await sync(token);
-    } catch (e) {
-      // Started over or cancelled: nothing to report.
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      setMessage(authMessage(e));
-      setBusy(null);
-    }
-  };
-
-  // Right after connecting, write the sheet once with the new token.
-  const pendingFirstWrite = message === 'Google Sheets connected. Creating your sheet…';
-  useEffect(() => {
-    if (pendingFirstWrite && auth.google.sheets) void sync(auth.google.sheets);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingFirstWrite, auth.google.sheets]);
 
   const download = () => {
     if (!data) return;
@@ -155,14 +116,13 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `bearrok-saved-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `bearrok-applications-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const sheet = live.sheet;
-  const connected = Boolean(auth.google.sheets);
-  const signedIn = auth.status === 'signedIn';
+  const connected = sheets === 'ready';
   const header = useMemo(() => (data?.header.length ? data.header : SHEET_COLUMNS), [data]);
   const rows = data?.rows ?? [];
   const blanks = Math.max(0, MIN_ROWS - rows.length);
@@ -176,19 +136,26 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
         <div className="min-w-0 flex-1">
           {sheet ? (
             <>
-              <p className="text-sm font-semibold text-ink">Also in your Google Sheet</p>
+              <p className="text-sm font-semibold text-ink">Also in {sheet.title ? `“${sheet.title}”` : 'your Google Sheet'}</p>
               <p className="text-sm text-ink-2">
-                {connected ? 'Updates on its own whenever you save, unsave or change a status.' : 'Google access has run out, so it is not updating. Connect Google Sheets to resume; nothing is lost meanwhile.'} Last updated{' '}
-                {relativeTime(sheet.syncedAt)}.
+                {connected ? 'Updates on its own whenever you save, unsave or change a status.' : 'Not updating: Google is not connected with Sheets. Reconnect in Settings; nothing is lost meanwhile.'}{' '}
+                {sheet.syncedAt ? `Last written ${relativeTime(sheet.syncedAt)}.` : 'Not written yet.'}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm font-semibold text-ink">Your saved list as a spreadsheet</p>
-              <p className="text-sm text-ink-2">Every saved opportunity is logged here with its details and application links. Create a Google Sheet to have a copy in your own Drive.</p>
+              <p className="text-sm font-semibold text-ink">Your applications as a spreadsheet</p>
+              <p className="text-sm text-ink-2">
+                Everything saved and every application is logged here with its details and links.{' '}
+                {connected ? 'Create a Google Sheet to have a copy in your own Drive.' : 'Connect Google in Settings to keep a copy in your own Drive.'}
+              </p>
             </>
           )}
-          {message && <p className="mt-1 text-sm text-ink-2">{message}</p>}
+          {message && (
+            <p className={`mt-1 text-sm ${message.ok ? 'text-ink-2' : 'text-red-700'}`} role={message.ok ? undefined : 'alert'}>
+              {message.text}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {sheet && (
@@ -196,10 +163,20 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
               Open in Google Sheets <ExternalLink className="size-3.5" aria-hidden="true" />
             </a>
           )}
-          {!(sheet && connected) && signedIn && (
-            <button type="button" onClick={() => void link()} disabled={busy !== null} className="btn-primary inline-flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-sm font-semibold text-white disabled:opacity-60">
-              <Sheet className="size-4" aria-hidden="true" /> {sheet ? 'Connect Google Sheets' : 'Create Google Sheet'}
+          {connected && sheet && (
+            <button type="button" onClick={() => void write(false)} disabled={busy} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-white px-3.5 text-sm font-semibold text-ink disabled:opacity-60">
+              <RefreshCw className={`size-4 ${busy ? 'animate-spin motion-reduce:animate-none' : ''}`} aria-hidden="true" /> {busy ? 'Writing…' : 'Sync now'}
             </button>
+          )}
+          {connected && !sheet && (
+            <button type="button" onClick={() => void write(true)} disabled={busy} className="btn-primary inline-flex h-10 items-center gap-1.5 rounded-xl px-3.5 text-sm font-semibold text-white disabled:opacity-60">
+              <Sheet className="size-4" aria-hidden="true" /> {busy ? 'Creating…' : 'Create Google Sheet'}
+            </button>
+          )}
+          {!connected && live.google.server?.enabled && (
+            <Link to="/settings#connections" className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-white px-3.5 text-sm font-semibold text-ink">
+              Connect Google
+            </Link>
           )}
           <button type="button" onClick={download} disabled={!data?.rows.length} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-white px-3.5 text-sm font-semibold text-ink disabled:opacity-50">
             <Download className="size-4" aria-hidden="true" /> Download
@@ -207,7 +184,7 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
           {sheet && (
             <button
               type="button"
-              onClick={() => void live.request('/sheet', { method: 'DELETE' })}
+              onClick={() => void live.unlinkSheet()}
               title="Stop updating this Google Sheet. The file stays in your Drive, and Create Google Sheet makes a new one."
               className="inline-flex h-10 items-center gap-1.5 rounded-xl px-2.5 text-sm font-semibold text-ink-3 hover:text-ink"
             >
@@ -220,13 +197,13 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
       {(loadError || !data || rows.length === 0) && (
         <p className="border-b border-line px-5 py-2.5 text-sm text-ink-3">
           {loadError
-            ? 'Your saved list cannot be loaded right now; it fills in here once the app can reach your account.'
+            ? 'Your applications cannot be loaded right now; they fill in here once the app can reach your account.'
             : !data
-              ? 'Loading your saved list…'
+              ? 'Loading your applications…'
               : 'Nothing saved yet. Save cards in the feed and each one is logged here as a row.'}
         </p>
       )}
-      <div className="saved-sheet-scroll" tabIndex={0} aria-label="Saved opportunities spreadsheet">
+      <div className="saved-sheet-scroll" tabIndex={0} aria-label="Applications spreadsheet">
         <table className="saved-sheet-table">
           <thead>
             <tr>

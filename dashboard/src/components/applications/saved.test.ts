@@ -1,4 +1,5 @@
-// The Saved page and the expanded details of a saved row, rendered to HTML.
+// Applications with Saved as its first stage, the expanded details of a Saved row, and Sheet view,
+// rendered to HTML.
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
@@ -73,13 +74,22 @@ describe('saved details', () => {
   });
 });
 
-describe('saved page', () => {
-  it('has the Saved and Sheet view tabs', async () => {
-    const { Saved } = await import('../../pages/Saved.tsx');
-    const html = await wrap(createElement(Saved));
-    expect(html).toContain('role="tablist"');
-    expect(html).toContain('>Saved<');
-    expect(html).toContain('Sheet view');
+describe('applications page', () => {
+  it('has the List and Sheet view tabs, and Saved as the first stage', async () => {
+    const { Applications } = await import('../../pages/Applications.tsx');
+    const html = await wrap(createElement(Applications));
+    expect(html).toContain('aria-label="Applications views"');
+    expect(html).toContain('>List<');
+    expect(html).toContain('>Sheet view<');
+  });
+
+  it('opens Sheet view from the old Saved page address', async () => {
+    const { Applications } = await import('../../pages/Applications.tsx');
+    const html = renderToString(
+      createElement(MemoryRouter, { initialEntries: ['/applications?view=sheet'] }, createElement((await import('../../auth/AuthProvider.tsx')).AuthProvider, null,
+        createElement((await import('../../state/StoreProvider.tsx')).StoreProvider, null, createElement((await import('../../state/live.tsx')).LiveProvider, null, createElement(Applications))))),
+    );
+    expect(html).toContain('aria-label="Applications spreadsheet"');
   });
 });
 
@@ -89,9 +99,10 @@ describe('sheet view', () => {
     const html = await wrap(createElement(SheetView, { refreshKey: 'x' }));
     for (const column of SHEET_COLUMNS) expect(html).toContain(`<th scope="col" data-column="${column}">${column}</th>`);
     expect(html.match(/class="saved-sheet-blank"/g)?.length).toBe(14);
-    expect(html).toContain('Loading your saved list');
-    // Signed out there is no account to make a Google Sheet for, so only the description offers it.
-    expect(html).toContain('Create a Google Sheet to have a copy in your own Drive');
+    expect(html).toContain('Loading your applications');
+    // Google is not connected, so the sheet says where to connect it rather than offering to make one.
+    expect(html).toContain('Connect Google in Settings to keep a copy in your own Drive');
+    expect(html).not.toContain('Create Google Sheet');
   });
 
   it('has the same columns as the sheet the backend writes', async () => {
@@ -104,14 +115,6 @@ describe('sheet view', () => {
 });
 
 describe('empty kinds', () => {
-  it('lists every kind on the Saved page, with 0 for the ones nothing is saved in', async () => {
-    const { Saved } = await import('../../pages/Saved.tsx');
-    const { typeMeta } = await import('../meta.ts');
-    const html = await wrap(createElement(Saved));
-    for (const meta of Object.values(typeMeta)) expect(html).toContain(`>${meta.plural}</span><span class="feed-cat-count">0</span>`);
-    expect(html).toContain('>All</span><span class="feed-cat-count">0</span>');
-  });
-
   it('an empty kind says so and offers to search for more of it', async () => {
     const { EmptyKind } = await import('../../pages/Feed.tsx');
     const html = await wrap(createElement(EmptyKind, { type: 'research', searching: false, onSearch: () => {} }));
@@ -121,7 +124,7 @@ describe('empty kinds', () => {
 });
 
 describe('status and sheet updates', () => {
-  it('saving a card makes it Interested, and the status menu has no "not tracking"', async () => {
+  it('saving a card puts it at Saved, and the status menu has no "not tracking"', async () => {
     const { reducer } = await import('../../state/store.ts');
     const { initialState } = await import('../../data/sample.ts');
     const fresh = { ...initialState, saved: [], applications: {} };
@@ -132,7 +135,7 @@ describe('status and sheet updates', () => {
     const { StatusSelect } = await import('../StatusSelect.tsx');
     const html = await wrap(createElement(StatusSelect, { id: 'not-saved' }));
     expect(html).not.toMatch(/not tracking/i);
-    expect(html).toContain('<option value="interested" selected="">Interested</option>');
+    expect(html).toContain('<option value="interested" selected="">Saved</option>');
   });
 
   it('the sheet has no update button: a created Google Sheet updates on its own', async () => {

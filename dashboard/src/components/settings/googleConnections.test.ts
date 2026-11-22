@@ -53,8 +53,8 @@ beforeEach(() => {
   live.calendar = { connected: false, syncing: false, errors: [] };
 });
 
-// Importing a page pulls in the app shell. Under a full parallel run the first import can take over a minute, past Vitest's five-second default.
-describe('Google connection states', { timeout: 180_000 }, () => {
+// Importing a page pulls in the app shell. Under a full parallel run the first import has been measured at about three minutes, past Vitest's five-second default.
+describe('Google connection states', { timeout: 300_000 }, () => {
   it('says the server is not set up and names the env vars to set', async () => {
     live.google = { ...emptyGoogle, server: { enabled: false, problem: null, needs: ['GOOGLE_OAUTH_CLIENT_FILE', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET'], mayConnect: false } };
     const page = await html();

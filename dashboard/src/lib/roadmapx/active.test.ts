@@ -10,8 +10,8 @@ Object.assign(globalThis, {
   localStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k), clear: () => store.clear(), key: () => null, length: 0 },
 });
 
-// Importing a page pulls in the app shell. Under a full parallel run the first import can take over a minute, past Vitest's five-second default.
-describe('roadmap applications', { timeout: 180_000 }, () => {
+// Importing a page pulls in the app shell. Under a full parallel run the first import has been measured at about three minutes, past Vitest's five-second default.
+describe('roadmap applications', { timeout: 300_000 }, () => {
   it('only Applying and To apply get a roadmap, Applying first, soonest deadline first', () => {
     const [a, b, c, d] = opportunities.slice(0, 4).map((o, i) => ({ ...o, deadline: `2027-0${4 - i}-01T00:00:00Z` }));
     const byId = new Map([a!, b!, c!, d!].map((o) => [o.id, o]));

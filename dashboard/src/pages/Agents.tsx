@@ -10,7 +10,7 @@ import { AgentSettingsButton, autoLine } from '../components/agents/AgentSetting
 import { AnimatedNumber, clockText, compact } from '../components/agents/AnimatedNumber.tsx';
 import { Funnel } from '../components/agents/Funnel.tsx';
 import { useBackendStatus, useReducedMotion, type BackendState } from '../components/agents/hooks.ts';
-import { LiveBoard } from '../components/agents/live/LiveBoard.tsx';
+import { LiveMap } from '../components/agents/live/LiveMap.tsx';
 import { RunHistory } from '../components/agents/live/RunHistory.tsx';
 import { TeamAbout, TeamMap } from '../components/agents/TeamMap.tsx';
 import type { TeamId } from '../lib/agents/team.ts';
@@ -106,7 +106,7 @@ function LiveAgents({ activity }: { activity: ActivityState & { retry: () => voi
 
   return (
     <Page title="Your agents" subtitle="Every agent of the current run, what it is doing and for how long, and a report of each past run.">
-      <LiveBoard
+      <LiveMap
         state={activity}
         now={now}
         reduced={reduced}

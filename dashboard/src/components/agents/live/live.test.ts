@@ -1,65 +1,74 @@
 // Every state of the live view and of History, rendered to markup the way the page renders them.
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { agent, at, liveOf, report, runOf, T0 } from '../../../lib/activity/fixtures.ts';
 import type { ActivityState } from '../../../lib/activity/useActivity.ts';
 import { TellBar } from '../TellAgents.tsx';
-import { LiveBoard } from './LiveBoard.tsx';
+import { LiveMap } from './LiveMap.tsx';
 import { RunHistory } from './RunHistory.tsx';
 
 type BoardState = Pick<ActivityState, 'status' | 'live' | 'attempt' | 'error'>;
 const board = (state: Partial<BoardState>, extra: { reduced?: boolean; hasHistory?: boolean } = {}) =>
   renderToStaticMarkup(
-    createElement(LiveBoard, {
-      state: { status: 'live', live: null, attempt: 0, error: null, ...state },
-      now: T0 + 30_000,
-      reduced: extra.reduced ?? false,
-      actions: createElement('button', { type: 'button' }, 'Run now'),
-      hasHistory: extra.hasHistory ?? false,
-      onRetry: () => {},
-    }),
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(LiveMap, {
+        state: { status: 'live', live: null, attempt: 0, error: null, ...state },
+        now: T0 + 30_000,
+        reduced: extra.reduced ?? false,
+        actions: createElement('button', { type: 'button' }, 'Run now'),
+        hasHistory: extra.hasHistory ?? false,
+        onRetry: () => {},
+      }),
+    ),
   );
 const count = (html: string, needle: string) => html.split(needle).length - 1;
 
-describe('LiveBoard', () => {
-  it('connecting: skeleton rows in every column and no run yet', () => {
+describe('Live map', () => {
+  it('connecting: a skeleton in every layer and no arrows yet', () => {
     const html = board({ status: 'connecting' });
     expect(html).toContain('Connecting to your agents');
-    expect(count(html, 'ag-live-skeleton')).toBe(10);
-    expect(html).not.toContain('ag-flow-track');
+    expect(count(html, 'ag-map-skeleton')).toBe(5);
+    expect(html).not.toContain('ag-map-arrow');
   });
 
-  it('no run yet: five empty columns that say what starts them, pointing at History', () => {
+  it('no run yet: five empty layers that say what starts them, pointing at History', () => {
     const html = board({ live: { ...liveOf(), run: null, agents: [], flows: [] } }, { hasHistory: true });
     expect(html).toContain('Live view');
     expect(html).toContain('No run yet');
-    expect(count(html, 'class="ag-live-empty"')).toBe(5);
+    expect(count(html, 'class="ag-map-empty"')).toBe(5);
     expect(html).toContain('The last run is in History below.');
   });
 
-  it('running: a row per agent with status, elapsed time and detail, grouped by manager', () => {
+  it('running: one icon per agent, its latest action under it, grouped by manager', () => {
     const live = liveOf();
     const html = board({ live });
-    expect(html).toContain('Run #3');
-    expect(count(html, 'class="ag-live-row"')).toBe(live.agents.length);
-    expect(html).toContain('Reader · Data Science Society');
+    expect(html).toContain('Live run');
+    expect(html).toContain('#3');
+    expect(count(html, 'class="ag-map-node"')).toBe(live.agents.length);
+    expect(html).toContain('data-kind="reader"');
     expect(html).toContain('data-status="timed_out"');
     expect(html).toContain('grok CLI timed out after 120s');
-    expect(html).toContain('Clubs manager · 2');
-    expect(html).toContain('Internships manager · 2');
+    expect(html).toContain('Clubs manager');
+    expect(html).toContain('Internships manager');
     // Started 1 s after the run, now is 30 s in.
     expect(html).toContain('0:29');
     expect(html).toContain('Waiting for a free worker');
+    expect(html).toContain('agents working');
     // Failures so far are called out while the run goes on.
     expect(html).toContain('1 agent has failed or timed out so far');
   });
 
-  it('flows move only where the receiving level has work, and hold still under reduced motion', () => {
+  it('arrows point down for assignments and up for results, and hold still under reduced motion', () => {
     const html = board({ live: liveOf() });
-    expect(count(html, 'data-active="true"')).toBe(2);
-    expect(count(html, 'data-active="false"')).toBe(2);
-    expect(html).toContain('handed to the workers, work moving now.');
+    expect(html).toContain('data-direction="down"');
+    expect(html).toContain('data-direction="up"');
+    expect(html).toContain('up to Clubs manager');
+    expect(html).toContain('down to the workers, work moving now.');
+    expect(html).toContain('data-active="false"');
     expect(board({ live: liveOf() }, { reduced: true })).toContain('data-reduced="true"');
   });
 
@@ -87,22 +96,23 @@ describe('LiveBoard', () => {
     const html = board({ status: 'reconnecting', live: liveOf(), attempt: 3 });
     expect(html).toContain('data-stale="true"');
     expect(html).toContain('Reconnecting… (try 3)');
-    expect(count(html, 'class="ag-live-row"')).toBe(liveOf().agents.length);
+    expect(count(html, 'class="ag-map-node"')).toBe(liveOf().agents.length);
   });
 
-  it('error: the reason and a Retry button instead of the board', () => {
+  it('error: the reason and a Retry button instead of the map', () => {
     const html = board({ status: 'error', error: 'the agent server answered 503' });
     expect(html).toContain('Could not load your agents’ activity: the agent server answered 503.');
     expect(html).toMatch(/<button[^>]*>Retry<\/button>/);
-    expect(html).not.toContain('ag-live-board');
+    expect(html).not.toContain('ag-map');
     expect(html).not.toContain('>Offline<');
   });
 
-  it('a long column scrolls inside itself and every row keeps its full text in its label', () => {
+  it('a long group scrolls inside its box and every agent keeps its full text in its label', () => {
     const live = liveOf();
     for (let i = 0; i < 40; i++) live.agents.push(agent(`job:x${i}`, { task: `Read: Club with a long and awkward name number ${i}` }));
     const html = board({ live });
-    expect(count(html, 'class="ag-live-row"')).toBe(live.agents.length);
+    expect(count(html, 'class="ag-map-node"')).toBe(live.agents.length);
+    expect(html).toContain('ag-map-box-scroll');
     expect(html).toContain('aria-label="Reader · Club with a long and awkward name number 39. Running, 0:29. Read: Club with a long and awkward name number 39"');
   });
 });
@@ -159,15 +169,19 @@ describe('RunHistory', () => {
 describe('Tell your agents in the live view', () => {
   const tellBoard = (status: 'live' | 'error', tellStatus: { tone: 'quiet' | 'warn'; text: string } | null) =>
     renderToStaticMarkup(
-      createElement(LiveBoard, {
-        state: { status, live: status === 'live' ? liveOf() : null, attempt: 0, error: status === 'error' ? 'the agent server answered 503' : null },
-        now: T0,
-        reduced: false,
-        actions: null,
-        hasHistory: false,
-        tell: createElement(TellBar, { live: true, onSend: () => {}, status: tellStatus }),
-        onRetry: () => {},
-      }),
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(LiveMap, {
+          state: { status, live: status === 'live' ? liveOf() : null, attempt: 0, error: status === 'error' ? 'the agent server answered 503' : null },
+          now: T0,
+          reduced: false,
+          actions: null,
+          hasHistory: false,
+          tell: createElement(TellBar, { live: true, onSend: () => {}, status: tellStatus }),
+          onRetry: () => {},
+        }),
+      ),
     );
 
   it('sits under the request line and says whether the note was saved, with no rule preview', () => {

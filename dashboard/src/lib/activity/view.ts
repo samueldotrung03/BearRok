@@ -31,7 +31,7 @@ export const OUTCOME_WORD: Record<RunOutcome, string> = {
 };
 
 /** What each empty column says while there is nothing in it. */
-const EMPTY_HINT: Record<ActivityLevel, string> = {
+export const EMPTY_HINT: Record<ActivityLevel, string> = {
   master: 'Starts first, when a run begins.',
   manager: 'Briefed by the master.',
   worker: 'Sent by the managers.',

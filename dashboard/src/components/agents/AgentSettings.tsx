@@ -4,6 +4,8 @@
 import { Play, Settings2, Square, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useLive } from '../../state/live.tsx';
+import { DEFAULT_MATCH_THRESHOLD, loadThreshold, saveThreshold } from '../../lib/match.ts';
+import { MinimumMatch } from './MinimumMatch.tsx';
 
 type Group = { id: string; label: string; tier: string };
 type Kind = 'internship' | 'event' | 'club' | 'hackathon' | 'research' | 'scholarship';
@@ -104,9 +106,17 @@ function AgentSettingsDialog({ onClose }: { onClose: () => void }) {
   // Saving is only offered once the saved settings have loaded, so defaults never overwrite them.
   const [loaded, setLoaded] = useState(false);
   const [state, setState] = useState<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading');
+  // The minimum match is a profile preference with its own endpoint: loaded and saved beside the rest.
+  const [threshold, setThreshold] = useState(DEFAULT_MATCH_THRESHOLD);
+  const [savedThreshold, setSavedThreshold] = useState<number | null>(null);
 
   useEffect(() => {
     ref.current?.showModal();
+    void loadThreshold(live.request).then((value) => {
+      if (value === null) return;
+      setThreshold(value);
+      setSavedThreshold(value);
+    });
     void live
       .request('/agent-settings')
       .then(async (res) => {
@@ -136,9 +146,12 @@ function AgentSettingsDialog({ onClose }: { onClose: () => void }) {
     setState('saving');
     const body = { ...settings, auto: { ...settings.auto, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } };
     const res = await live.request('/agent-settings', { method: 'PUT', body: JSON.stringify(body) }).catch(() => null);
-    setState(res?.ok ? 'saved' : 'error');
-    if (res?.ok) ref.current?.close();
-    return Boolean(res?.ok);
+    // Only a minimum that loaded and then changed is sent, so a failed load never overwrites it.
+    const ok = Boolean(res?.ok) && (await saveThreshold(live.request, threshold, savedThreshold));
+    if (ok) setSavedThreshold(threshold);
+    setState(ok ? 'saved' : 'error');
+    if (ok) ref.current?.close();
+    return ok;
   };
   const toggleKind = (id: Kind | 'all') => setSettings((s) => toggleKinds(s, id));
   const searched = searchedKinds(settings.kinds, profileKinds);
@@ -280,6 +293,8 @@ function AgentSettingsDialog({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         </section>
+
+        <MinimumMatch value={threshold} onChange={setThreshold} disabled={savedThreshold === null} />
 
         <section className="ags-section">
           <h3>Find at least</h3>

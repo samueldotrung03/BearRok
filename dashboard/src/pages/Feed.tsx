@@ -21,7 +21,7 @@ import { Link, useSearchParams } from 'react-router';
 import { BrandMark } from '../components/Brand.tsx';
 import { toggleDock } from '../components/Dock.tsx';
 import { formatLabel, typeMeta } from '../components/meta.ts';
-import { Cover, Details, OpportunityRow } from '../components/OpportunityCard.tsx';
+import { Cover, Details, MatchChip, OpportunityRow } from '../components/OpportunityCard.tsx';
 import { PhotoLikeBurst, usePhotoLike } from '../components/PhotoLike.tsx';
 import { emptyFeedCopy } from '../state/feedCopy.ts';
 import { DataBadge, useLive, useOpportunities } from '../state/live.tsx';
@@ -203,6 +203,9 @@ function Slide({
               <li className="reel-chip reel-chip-solid">
                 <meta.icon className="size-3.5" aria-hidden="true" />
                 {meta.label}
+              </li>
+              <li className="flex">
+                <MatchChip opportunity={o} />
               </li>
               {ranked.signals.slice(0, 2).map((signal) => (
                 <li key={signal} className="reel-chip">

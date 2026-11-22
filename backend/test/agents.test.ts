@@ -82,9 +82,13 @@ test('run: master, four search managers, fleet, validators and presentation mana
   assert.deepEqual(run.agents.map((a) => a.level), ['master', 'manager', 'manager', 'manager', 'manager', 'presentation']);
   assert.deepEqual(run.assignments.map((a) => a.category), ['internship', 'event', 'club', 'program']);
   assert.ok(run.jobs.some((j) => j.kind === 'scout') && run.jobs.some((j) => j.kind === 'extract') && run.jobs.some((j) => j.kind === 'application'));
-  assert.ok(run.stats.rejected > 0, 'validation turned something down');
+  assert.ok(run.stats.rejected + (run.stats.belowThreshold ?? 0) > 0, 'validation turned something down');
+  assert.ok((run.stats.belowThreshold ?? 0) > 0, 'something scored below the default minimum match');
+  assert.equal(run.stats.threshold, 30);
   const feed = s.student().feed;
   assert.equal(feed.length, run.stats.kept);
+  // Every card carries its match, at or above the default minimum.
+  for (const f of feed) assert.ok(f.opportunity.match && f.opportunity.match.score >= 30, `${f.opportunity.title} has a match of at least 30%`);
   // Nothing closed or restricted to upper years reaches a freshman.
   for (const f of feed) {
     assert.ok(!f.opportunity.deadline || Date.parse(f.opportunity.deadline) > NOW.getTime());
@@ -398,7 +402,7 @@ test('preferences: reminder timing, a floor on how often agents run, and deletin
     const res = await app.request(path, { method, headers: { 'content-type': 'application/json', authorization: 'Bearer ok' }, body: body ? JSON.stringify(body) : undefined });
     return { status: res.status, body: (await res.json()) as any };
   };
-  assert.deepEqual((await call('GET', '/api/students/me/preferences')).body, { reminderDays: [7, 2, 0], scheduleSeconds: 0 });
+  assert.deepEqual((await call('GET', '/api/students/me/preferences')).body, { reminderDays: [7, 2, 0], scheduleSeconds: 0, matchThreshold: 30 });
 
   const s = made[0]!;
   await s.trigger('first');
@@ -407,7 +411,7 @@ test('preferences: reminder timing, a floor on how often agents run, and deletin
 
   // Reminders already set are redone with the new timing; an empty list turns them off.
   const changed = await call('PUT', '/api/students/me/preferences', { reminderDays: [3, 1], scheduleSeconds: 30 });
-  assert.deepEqual(changed.body, { reminderDays: [3, 1], scheduleSeconds: 300 });
+  assert.deepEqual(changed.body, { reminderDays: [3, 1], scheduleSeconds: 300, matchThreshold: 30 });
   assert.deepEqual(s.getApplication(o.id)!.reminders.map((r) => r.label), ['Due in 3 days', 'Due tomorrow']);
   await call('PUT', '/api/students/me/preferences', { reminderDays: [], scheduleSeconds: 0 });
   assert.deepEqual(s.getApplication(o.id)!.reminders, []);
@@ -451,7 +455,7 @@ test('profile page answers: ticked fields steer the search and restrictions beco
   // The note is the first preference and travels in the brief word for word.
   assert.ok(run.brief!.preferences[0]!.includes('real bench work'));
   assert.deepEqual(run.brief!.notes, ['What I want: A lab where I do real bench work.']);
-  // The rule is enforced: nothing in person reaches the feed.
+  // The rule is enforced: an in-person posting scores under the default minimum, so none reaches the feed.
   const feed = s.student().feed;
   assert.ok(feed.length > 0);
   assert.ok(feed.every((f) => f.opportunity.format === 'online'));
@@ -576,7 +580,7 @@ test('a small run budget still reads postings: searching cannot use the whole bu
   assert.ok(run.stats.candidates > 0 && s.student().feed.length > 0);
 });
 
-test('validation: every posting found is reviewed by both validation agents, and kept only if both keep it', async () => {
+test('validation: every posting is reviewed by both agents, and kept when it passes the hard checks and meets the minimum match', async () => {
   // Room to read every lead, so the closed and the upper-years postings below are both found.
   const s = system({ maxJobs: 40 });
   await s.trigger('first');
@@ -593,10 +597,13 @@ test('validation: every posting found is reviewed by both validation agents, and
   const closed = run.validations.find((v) => v.title === 'STEM Leadership Scholarship')!;
   assert.deepEqual(closed.reviews.map((r) => r.status), ['kept', 'rejected']);
   assert.match(closed.reason!, /^Status reviewer: Closed/);
-  // ...and one for upper years only is open, but fails the criteria review.
+  // ...and one for upper years only is open, but scores below the minimum match.
   const upperYears = run.validations.find((v) => v.title === 'Backend Engineering Intern')!;
   assert.deepEqual(upperYears.reviews.map((r) => r.status), ['rejected', 'kept']);
-  assert.match(upperYears.reason!, /^Criteria reviewer: Not open to freshmen/);
+  assert.equal(upperYears.belowThreshold, true);
+  assert.ok(upperYears.match!.score < 30);
+  assert.match(upperYears.reason!, /^Below your minimum match: \d+% \(minimum 30%\)/);
+  assert.equal(upperYears.match!.factors.find((f) => f.factor === 'year')?.score, 0);
   // The feed holds exactly the postings both kept.
   assert.deepEqual(s.student().feed.map((f) => f.opportunity.id).sort(), run.validations.filter((v) => v.status === 'kept').map((v) => v.id).sort());
 });

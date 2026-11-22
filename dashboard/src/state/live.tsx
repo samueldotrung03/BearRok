@@ -36,6 +36,8 @@ interface BackendOpportunity {
   foundAt: string;
   lastCheckedAt: string;
   baseScore: number;
+  /** The agents' match score with its breakdown; absent on postings from before match scores. */
+  match?: Opportunity['match'];
   application: { prompts: string[]; materials: string[] } | null;
   eligibility?: string | null;
   deadlineSource?: 'official' | 'listing' | null;
@@ -246,6 +248,7 @@ function toCard(entry: BackendFeedEntry, simulated: boolean): Opportunity {
     lastCheckedAt: o.lastCheckedAt,
     // Something the student's own notes asked for starts ahead of the rest.
     baseScore: Math.min(1, o.baseScore + (entry.fromNotes ? 0.15 : 0)),
+    match: o.match ?? null,
   };
 }
 

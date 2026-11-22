@@ -60,6 +60,21 @@ export interface Opportunity {
   lastCheckedAt: string;
   /** Agent's fit score before the student's history is applied, 0 to 1. */
   baseScore: number;
+  /**
+   * The agents' match score against the student's profile, with what it was judged on. Absent on
+   * sample cards and on postings found before match scores; those show baseScore instead.
+   */
+  match?: Match | null;
+}
+
+export type MatchFactor = 'notes' | 'interests' | 'roles' | 'category' | 'location' | 'year' | 'skills';
+
+/** Mirrors Match in backend/src/agents/match.ts. */
+export interface Match {
+  /** 0 to 100. */
+  score: number;
+  factors: { factor: MatchFactor; score: number; note: string }[];
+  reason: string;
 }
 
 export type StepKind = 'learn' | 'build' | 'join' | 'attend' | 'apply';

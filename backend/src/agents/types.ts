@@ -1,5 +1,7 @@
 // Shapes shared by the agent system, its API and the visualization.
 // Opportunity fields follow dashboard/src/types.ts so the dashboard can read them directly.
+import type { Match } from './match.ts';
+export type { Match, MatchPart, MatchFactor } from './match.ts';
 
 export type Category = 'internship' | 'event' | 'club' | 'program';
 export type OppType = 'internship' | 'event' | 'club' | 'hackathon' | 'research' | 'scholarship';
@@ -45,6 +47,12 @@ export interface Profile {
   eventTypes: string[];
   /** The profile page's three tabs: career interests, restrictions, and notes. */
   preferences: StudentPreferences | null;
+  /**
+   * Minimum match, a whole percent from 0 to 100: postings scoring below it are left out of the
+   * feed. Unset means the default (30). Set from the agent settings; kept beside `preferences`
+   * because the Profile page replaces that object whole on every save.
+   */
+  matchThreshold?: number;
 }
 
 export interface StudentPreferences {
@@ -158,8 +166,10 @@ export interface Opportunity extends Candidate {
   unknowns: Unknown[];
   foundAt: string;
   lastCheckedAt: string;
-  /** Validator's fit score before the student's history is applied, 0 to 1. */
+  /** Validator's fit score before the student's history is applied, 0 to 1: the match score / 100. */
   baseScore: number;
+  /** The criteria reviewer's match score, with its breakdown. Absent on records from before match scores. */
+  match?: Match;
   /** Search manager whose workers found it. */
   foundBy: string;
   alsoSeenAt: string[];
@@ -180,6 +190,12 @@ export interface Brief {
    * follows a note over any other line in it.
    */
   notes: string[];
+  /** Roles and careers the student is aiming at, from the profile. */
+  roles?: string[];
+  /** Skills the student has, from the profile. */
+  skills?: string[];
+  /** The kinds of opportunity this search is for. */
+  kinds?: OppType[];
 }
 
 /** The angle a search manager covers its category from. */
@@ -242,6 +258,8 @@ export interface Review {
   status: 'checking' | 'kept' | 'rejected';
   reason: string | null;
   fit: number | null;
+  /** The criteria reviewer's match score. */
+  match?: Match | null;
 }
 
 /** A posting under review: one entry per posting, with a review from every validation agent. */
@@ -249,10 +267,13 @@ export interface Validation {
   id: string;
   title: string;
   managerId: string;
-  /** kept only when every review kept it. */
+  /** kept when the hard checks pass and the match is at or above the student's minimum. */
   status: 'checking' | 'kept' | 'rejected';
   reason: string | null;
   fit: number | null;
+  match?: Match | null;
+  /** Rejected only because the match was below the student's minimum; it passed the hard checks. */
+  belowThreshold?: boolean;
   reviews: Review[];
 }
 
@@ -282,7 +303,11 @@ export interface RunSnapshot {
   jobs: Job[];
   validations: Validation[];
   log: LogEvent[];
-  stats: { jobs: number; skipped: number; candidates: number; merged: number; kept: number; rejected: number; added: number; funnel?: RunFunnel };
+  /**
+   * rejected: dropped by a hard check (fake, closed, expired, no link). belowThreshold: passed them
+   * but scored under the minimum match, which was `threshold` for this run.
+   */
+  stats: { jobs: number; skipped: number; candidates: number; merged: number; kept: number; rejected: number; added: number; belowThreshold?: number; threshold?: number; funnel?: RunFunnel };
   error: string | null;
 }
 
@@ -311,6 +336,11 @@ export interface RunFunnel {
   reviewed: number;
   rejected: number;
   rejectedReasons: ReasonCount[];
+  /** Passed the hard checks but scored below the student's minimum match (`threshold`, a percent). */
+  belowThreshold?: number;
+  threshold?: number;
+  /** Below the minimum in an earlier run and still below it now, so not reviewed again. */
+  alreadyBelowThreshold?: number;
   /** Reviews that could not run (the posting is reviewed again next time). */
   unfinishedReviews: number;
   kept: number;
@@ -448,9 +478,16 @@ export interface Lead {
 }
 
 export interface Verdict {
+  /**
+   * Status review: false when the posting is fake, closed or gone. Criteria review: the match
+   * score decides, so it is true unless an older reviewer turned the posting down outright.
+   */
   keep: boolean;
   reason: string;
+  /** 0 to 1. For a criteria review, the match score / 100. */
   fit: number;
+  /** The criteria review's match score and breakdown. */
+  match?: Match;
   record: Candidate;
 }
 
@@ -516,6 +553,11 @@ export interface LearnedMemory {
   /** Postings the validation agents turned down, so they are not checked again. */
   rejected: { url: string; reason: string }[];
   rejectedUrls: string[];
+  /**
+   * Postings that passed the hard checks but scored below the minimum match. One still below the
+   * minimum is not reviewed again; lowering the minimum lets it back in. Newest last.
+   */
+  lowMatch?: { url: string; title: string; score: number; at: string }[];
   /** Searches already run, newest last. */
   searches: SearchRecord[];
   /** Postings read but not yet decided by the validation agents when the memory was saved. */

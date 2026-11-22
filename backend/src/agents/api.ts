@@ -16,6 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { allCalendarsIn, consentUrl, exchangeCode, pkce, refreshAccess, revoke, servicesIn, type GoogleService, type OAuthClient } from '../googleOAuth.ts';
 import type { AgentSystem } from './system.ts';
 import { PORTAL_LIMITS } from './portal.ts';
+import { cleanThreshold } from './match.ts';
 import { AGENT_GROUPS, APPLICATION_STATUSES, CATEGORIES, CATEGORY_OF, type Action, type AgentGroup, type AgentSettings, type OppType, type Category, type ClassYear, type Profile, type StudentPreferences } from './types.ts';
 import { RoadmapRequest, type RoadmapWriter } from '../roadmap.ts';
 import { ownMatches, searchContext, SearchRequest, type SearchWriter } from '../search.ts';
@@ -399,17 +400,22 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   });
 
   // Settings that change how the agents behave for this student.
+  // matchThreshold is the minimum match, a whole percent from 0 to 100 (default 30), stored with the profile.
+  const preferencesOf = (system: AgentSystem) => ({ reminderDays: system.getReminderDays(), scheduleSeconds: system.student().scheduleSeconds, matchThreshold: system.getMatchThreshold() });
   app.get(`${base}/preferences`, async (c) => {
     const system = await systemOf(c);
-    return c.json({ reminderDays: system.getReminderDays(), scheduleSeconds: system.student().scheduleSeconds });
+    return c.json(preferencesOf(system));
   });
   app.put(`${base}/preferences`, async (c) => {
     const system = await systemOf(c);
     const body = await c.req.json().catch(() => ({}));
+    // Checked before anything is saved, so a bad value changes nothing.
+    if (body.matchThreshold !== undefined && cleanThreshold(body.matchThreshold) === null) return c.json({ error: 'matchThreshold must be a whole percent from 0 to 100' }, 400);
+    if (body.matchThreshold !== undefined) system.setMatchThreshold(body.matchThreshold);
     if (Array.isArray(body.reminderDays)) system.setReminderDays(body.reminderDays.filter((d: unknown): d is number => typeof d === 'number'));
     // Never more often than every five minutes, so a setting cannot drain the Grok allowance.
     if (typeof body.scheduleSeconds === 'number') system.setSchedule(body.scheduleSeconds <= 0 ? 0 : Math.max(300, Math.min(body.scheduleSeconds, 7 * 86_400)));
-    return c.json({ reminderDays: system.getReminderDays(), scheduleSeconds: system.student().scheduleSeconds });
+    return c.json(preferencesOf(system));
   });
 
   // A signed-in student removes everything the backend holds about them.

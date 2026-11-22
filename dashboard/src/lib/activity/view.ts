@@ -226,8 +226,10 @@ export function funnelSteps(f: RunFunnel): FunnelStep[] {
   const reviewed: string[] = [];
   if (f.noLink) reviewed.push(`${f.noLink} dropped with no usable link`);
   if (f.alreadyRejected) reviewed.push(`${f.alreadyRejected} turned down in an earlier run`);
+  if (f.alreadyBelowThreshold) reviewed.push(`${f.alreadyBelowThreshold} still below your minimum match from an earlier run`);
   const kept: string[] = [];
   if (f.rejected) kept.push(`${f.rejected} rejected${top(f.rejectedReasons)}`);
+  if (f.belowThreshold) kept.push(`${f.belowThreshold} below your minimum match${f.threshold !== undefined ? ` of ${f.threshold}%` : ''}`);
   if (f.unfinishedReviews) kept.push(`${plural(f.unfinishedReviews, 'review')} did not finish; reviewed again next time`);
   const saved = f.kept > f.saved ? [`${f.kept - f.saved} already in your feed`] : [];
   return [

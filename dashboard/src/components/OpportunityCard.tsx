@@ -8,6 +8,8 @@ import { buildOpportunityRoadmap } from '../lib/roadmap.ts';
 import { daysUntil, dueLabel, relativeTime, shortDate } from '../lib/time.ts';
 import { useStore } from '../state/StoreProvider.tsx';
 import type { Opportunity } from '../types.ts';
+import { FACTOR_LABEL, matchLevel, matchPercent } from '../lib/match.ts';
+import '../styles/match.css';
 import { AskBar } from './AskBar.tsx';
 import { formatLabel, typeMeta } from './meta.ts';
 import { PhotoLikeBurst, usePhotoLike } from './PhotoLike.tsx';
@@ -75,6 +77,43 @@ export function Cover({ opportunity: o, className = '', box = 'absolute inset-0'
         </span>
       )}
     </div>
+  );
+}
+
+/** "86% match" on a card, tinted by how strong it is. Only cards the agents scored have one. */
+export function MatchChip({ opportunity: o, className = '' }: { opportunity: Opportunity; className?: string }) {
+  if (!o.match) return null;
+  const score = matchPercent(o);
+  const level = matchLevel(score);
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap ${level.tint} ${className}`} title={`${level.label}: ${o.match.reason}`}>
+      {score}% match
+    </span>
+  );
+}
+
+/** What the match was judged on, one row per factor, behind a disclosure so the answer leads. */
+function MatchBreakdown({ opportunity: o }: { opportunity: Opportunity }) {
+  if (!o.match || o.match.factors.length === 0) return null;
+  return (
+    <details className="mt-4 rounded-2xl border border-line px-4 py-3">
+      <summary className="cursor-pointer text-sm font-medium text-ink">
+        {matchPercent(o)}% match: how it was scored
+      </summary>
+      <p className="mt-2 text-sm text-ink-2">{o.match.reason}</p>
+      <ul className="mm-factors mt-3">
+        {o.match.factors.map((f) => (
+          <li key={f.factor} className="mm-factor" title={f.note}>
+            <span className="truncate">{FACTOR_LABEL[f.factor]}</span>
+            <span className="mm-factor-bar" aria-hidden="true">
+              <i style={{ width: `${f.score}%` }} />
+            </span>
+            <span className="mm-factor-score">{f.score}%</span>
+            <span className="sr-only">{f.note}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -284,7 +323,7 @@ export function Details({ opportunity: o, onClose }: { opportunity: Opportunity;
   const ref = useRef<HTMLDialogElement>(null);
   const meta = typeMeta[o.type];
   const place = [o.format ? formatLabel[o.format] : null, o.location].filter(Boolean).join(' · ');
-  const fit = Math.round(o.baseScore * 100);
+  const fit = matchPercent(o);
 
   useEffect(() => {
     ref.current?.showModal();
@@ -331,11 +370,11 @@ export function Details({ opportunity: o, onClose }: { opportunity: Opportunity;
               ))}
             </div>
             <div className="mt-4 flex items-center gap-3">
-              <span className="text-sm font-semibold">Fit</span>
+              <span className="text-sm font-semibold">{o.match ? 'Match' : 'Fit'}</span>
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/25">
                 <div className="h-full rounded-full bg-white" style={{ width: `${fit}%` }} />
               </div>
-              <span className="text-sm text-white/80">{fit} of 100</span>
+              <span className="text-sm text-white/80">{o.match ? `${fit}%` : `${fit} of 100`}</span>
             </div>
           </div>
         </div>
@@ -349,6 +388,7 @@ export function Details({ opportunity: o, onClose }: { opportunity: Opportunity;
             </p>
           </div>
 
+          <MatchBreakdown opportunity={o} />
           <KeyDates opportunity={o} />
           <Needs opportunity={o} />
 
@@ -401,6 +441,7 @@ export function OpportunityCard({ opportunity: o, onDismiss }: { opportunity: Op
           <meta.icon className="size-3.5" aria-hidden="true" />
           {meta.label}
         </span>
+        <MatchChip opportunity={o} className="absolute top-3 right-14 shadow-card" />
         {when && (
           <span
             className={`absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium backdrop-blur ${
@@ -487,6 +528,7 @@ export function OpportunityRow({
             <meta.icon className="size-3.5" aria-hidden="true" />
             {meta.label}
           </span>
+          <MatchChip opportunity={o} />
           {when && (
             <span className={`flex items-center gap-1 ${urgent ? 'text-orange-700' : 'text-ink-3'}`}>
               <Clock className="size-3.5" aria-hidden="true" />
@@ -558,6 +600,7 @@ export function OpportunityTile({
           <meta.icon className="size-3.5" aria-hidden="true" />
           {meta.label}
         </span>
+        <MatchChip opportunity={o} />
       </div>
 
       <div className="absolute inset-x-0 bottom-0 p-3.5 text-white">

@@ -143,6 +143,11 @@ export interface RunFunnel {
   reviewed: number;
   rejected: number;
   rejectedReasons: ReasonCount[];
+  /** Passed the hard checks but scored below the student's minimum match (threshold, a percent). Absent on older runs. */
+  belowThreshold?: number;
+  threshold?: number;
+  /** Below the minimum in an earlier run and still below it, so not reviewed again. */
+  alreadyBelowThreshold?: number;
   unfinishedReviews: number;
   kept: number;
   saved: number;

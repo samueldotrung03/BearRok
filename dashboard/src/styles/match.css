@@ -1,0 +1,131 @@
+/* The minimum match setting (mm-) and the match chip on cards. */
+
+.mm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mm-range {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  appearance: none;
+  background: linear-gradient(to right, var(--color-brand) var(--mm-fill, 30%), var(--surface-3) var(--mm-fill, 30%));
+  cursor: pointer;
+}
+
+.mm-range::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  appearance: none;
+  background: var(--color-brand);
+  box-shadow: var(--shadow-card);
+  transition: transform 150ms ease;
+}
+
+.mm-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  background: var(--color-brand);
+  box-shadow: var(--shadow-card);
+}
+
+.mm-range:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+
+.mm-range:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mm-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 10px 0 4px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink-2);
+}
+
+.mm-box input {
+  width: 48px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  font-weight: 600;
+  text-align: right;
+  color: var(--color-ink);
+}
+
+.mm-line {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-ink-2);
+}
+
+.mm-reset {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--brand-text);
+}
+
+.mm-reset:hover {
+  text-decoration: underline;
+}
+
+/* The breakdown in the details window: one row per factor with a thin bar. */
+.mm-factors {
+  display: grid;
+  gap: 6px;
+}
+
+.mm-factor {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+
+.mm-factor-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.mm-factor-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-brand);
+}
+
+.mm-factor-score {
+  font-weight: 600;
+  text-align: right;
+  color: var(--color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mm-range::-webkit-slider-thumb {
+    transition: none;
+  }
+}
+
+/* ---------- Dark theme ---------- */
+:root[data-theme='dark'] .mm-box {
+  background: var(--surface-2);
+}

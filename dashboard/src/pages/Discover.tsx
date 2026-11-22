@@ -90,8 +90,11 @@ export function Discover() {
       return;
     }
     const saved = await auth.saveProfile({ careerInterests: next });
+    // The roadmap ranks a path first only when this career is one of its paths.
+    const path = pathByKey[careerKey(guide.title)] ?? pathByKey[careerKey(guide.slug)];
+    const roadmap = path ? ` Your roadmap lists ${titles[path]} first.` : '';
     if (!saved) setInterestNote(auth.user ? 'Kept on this device, but your profile could not be saved. Try again in a moment.' : 'Kept on this device. Sign in so your agents search for it too.');
-    else setInterestNote(added ? `${guide.title} is out of your career interests.` : `${guide.title} is in your career interests. Your agents search for it from their next run, and your roadmap lists it first.`);
+    else setInterestNote(added ? `${guide.title} is out of your career interests.` : `${guide.title} is in your career interests. Your agents search for it from their next run.${roadmap}`);
   };
 
   const history = useMemo(() => ({ saved: state.saved, liked: state.liked, dismissed: state.dismissed }), [state.saved, state.liked, state.dismissed]);

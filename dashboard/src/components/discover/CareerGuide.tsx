@@ -546,12 +546,15 @@ function Tabs({ guide, current, onPick }: { guide: Guide; current: SectionId; on
             <span className="min-w-0 flex-1 text-left">
               <span className="block">{SECTION_TITLES[id]}</span>
               {/* Where each part is, while the guide is being researched or when a part did not finish. */}
-              {(s.status !== 'done' || s.failure) && <span className={`dc-step-state ${s.status === 'failed' || s.failure ? 'is-bad' : ''}`}>{partLine(guide, id)}</span>}
+              {s.status !== 'done' || s.failure ? (
+                <span className={`dc-step-state ${s.status === 'failed' || s.failure ? 'is-bad' : ''}`}>{partLine(guide, id)}</span>
+              ) : (
+                <span className="sr-only">, ready</span>
+              )}
             </span>
             <kbd className="dc-kbd dc-step-key" aria-hidden="true">
               {i + 1}
             </kbd>
-            <span className="sr-only">{`, ${partLine(guide, id).toLowerCase()}`}</span>
           </button>
         );
       })}
@@ -595,7 +598,8 @@ export function CareerGuide({
   const line = stepLine(guide);
   const researching = isResearching(guide);
   const state = guideState(guide);
-  const missing = SECTION_IDS.filter((id) => !guide.sections[id].data || guide.sections[id].failure);
+  // Parts that did not finish; a part being searched again is not counted until it settles.
+  const missing = SECTION_IDS.filter((id) => guide.sections[id].status !== 'working' && (!guide.sections[id].data || guide.sections[id].failure));
   const s = guide.sections;
   const topRef = useRef<HTMLDivElement>(null);
 
@@ -651,6 +655,7 @@ export function CareerGuide({
               <>
                 <span className="live-dot size-2 rounded-full bg-[#34c759]" aria-hidden="true" />
                 {line}
+                {guide.provider === 'simulated' && !SAMPLE_FEED && <span className="text-ink-3">· simulated agents, not research</span>}
               </>
             ) : (
               <span className="text-ink-3">
@@ -667,7 +672,7 @@ export function CareerGuide({
               {`Grok's usage balance is used up (HTTP 402), so the agents stopped. ${missing.length ? 'Finished parts are kept. ' : ''}Top up the Grok balance, then search the missing parts again.`}
             </p>
           )}
-          {state === 'partial' && (
+          {state === 'partial' && missing.length > 0 && (
             <p className="dc-notice" role="status">
               {`${SECTION_IDS.length - missing.length} of ${SECTION_IDS.length} parts are ready. ${missing.map((id) => SECTION_TITLES[id]).join(', ')}: did not finish. Open it to see why and search it again.`}
             </p>
@@ -690,7 +695,7 @@ export function CareerGuide({
               className={`dc-soft ${interest.added ? 'is-on' : ''}`}
               onClick={interest.onToggle}
               aria-pressed={interest.added}
-              title={interest.added ? 'Take it out of your career interests' : 'Your agents search for this career, and your roadmap ranks it first'}
+              title={interest.added ? 'Take it out of your career interests' : 'Your agents search for the careers in your career interests'}
             >
               {interest.added ? <Check className="size-4" aria-hidden="true" /> : <Plus className="size-4" aria-hidden="true" />}
               {interest.added ? 'In your career interests' : 'Add to my career interests'}

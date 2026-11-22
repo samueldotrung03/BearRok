@@ -317,7 +317,7 @@ export function GoogleConnections() {
                 placeholder="Paste the sheet's address (docs.google.com/spreadsheets/d/…)"
                 aria-label="Address of your Google Sheet"
                 autoComplete="off"
-                className="h-10 min-w-0 flex-1 basis-64 rounded-xl border border-slate-300 bg-white px-3 text-[15px] outline-none focus:border-brand focus:ring-3 focus:ring-brand/15"
+                className="h-10 min-w-0 flex-1 basis-64 rounded-xl border border-line bg-white px-3 text-sm outline-none focus:border-brand focus:ring-3 focus:ring-brand/15"
               />
               <ActionButton type="submit" disabled={sheetBusy !== null || address.trim().length < 20}>
                 {sheetBusy === 'link' ? 'Linking…' : 'Link this sheet'}

@@ -209,9 +209,18 @@ test('pictures: a student whose stored cards have no pictures gets them when the
   });
   const before = await app.request('/api/students/me/state', { headers: { authorization: 'Bearer t' } });
   assert.equal(before.status, 200);
-  await new Promise((r) => setTimeout(r, 60));
+  // Pictures are filled in after the response, then saved on a short delay. A fixed sleep loses
+  // that race when the suite runs in parallel and the event loop is busy, so wait for the save.
+  const deadline = Date.now() + 2_000;
+  let saved = false;
+  while (Date.now() < deadline) {
+    const memory = await store.loadStudent('u1');
+    saved = Boolean(memory && memory.learned.opportunities.length > 0 && memory.learned.opportunities.every((o) => o.image === 'https://pictures.example.org/x.jpg'));
+    if (saved) break;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.equal(saved, true, 'and the pictures were saved');
   const feed = s.student().feed;
   assert.ok(feed.length > 0 && feed.every((f) => f.opportunity.imageKind === 'logo'));
   assert.equal(s.student().runCount, 1, 'no search was needed');
-  assert.ok((await store.loadStudent('u1'))!.learned.opportunities.every((o) => o.image === 'https://pictures.example.org/x.jpg'), 'and the pictures were saved');
 });

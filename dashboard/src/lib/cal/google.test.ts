@@ -1,39 +1,58 @@
+// The Calendar page's side of Google Calendar: every read and write goes to the backend (which
+// holds the connection), never to Google with a token, and Google's events become calendar items.
 import { describe, expect, it } from 'vitest';
-import { fetchGoogleEvents, googleItems } from './google.ts';
+import { deleteGoogleEvent, fetchGoogleEvents, googleItems, insertGoogleEvent, updateGoogleEvent, type Requester } from './google.ts';
 
-const page = (items: unknown[], next?: string) => new Response(JSON.stringify({ items, nextPageToken: next }), { status: 200 });
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-describe('Google Calendar', () => {
-  it('reads every page of the main calendar, leaves out cancelled events, and says when access ran out', async () => {
-    const asked: string[] = [];
-    const fake = (async (url: string | URL | Request) => {
-      const u = String(url);
-      asked.push(u);
-      // Without the permission to list calendars, the main calendar is read on its own.
-      if (u.includes('/users/me/calendarList')) return new Response('{}', { status: 403 });
-      if (u.includes('pageToken=p2'))
-        return page([{ id: 'b', summary: 'Shift', start: { dateTime: '2026-11-20T18:00:00-08:00' }, end: { dateTime: '2026-11-20T22:00:00-08:00' }, htmlLink: 'https://calendar.google.com/b' }]);
-      return page(
-        [
-          { id: 'a', summary: 'CS 61A midterm', start: { date: '2026-11-23' }, end: { date: '2026-11-24' }, location: 'Wheeler 150' },
-          { id: 'x', status: 'cancelled', start: { date: '2026-11-25' } },
-        ],
-        'p2',
-      );
-    }) as typeof fetch;
-    const events = await fetchGoogleEvents('tok', '2026-11-15', '2027-01-15', fake);
-    expect(events.map((e) => e.title)).toEqual(['CS 61A midterm', 'Shift']);
-    expect(asked[1]).toContain('/calendars/primary/events?');
-    expect(asked[1]).toContain('singleEvents=true');
-    expect(events.allCalendars).toBe(false);
-    expect(events[0]).toMatchObject({ allDay: true, location: 'Wheeler 150' });
+function fakeBackend(answer: (path: string, init?: RequestInit) => Response) {
+  const calls: { path: string; init?: RequestInit }[] = [];
+  const request: Requester = async (path, init) => {
+    calls.push({ path, init });
+    return answer(path, init);
+  };
+  return { request, calls };
+}
 
-    const expired = (async () => new Response('{}', { status: 401 })) as unknown as typeof fetch;
-    void expired;
-    await expect(fetchGoogleEvents('old', '2026-11-15', '2026-12-15', expired)).rejects.toMatchObject({ expired: true });
+describe('Google Calendar through the backend', () => {
+  it('asks the backend for the range as times, and passes on what was read', async () => {
+    const { request, calls } = fakeBackend(() =>
+      json({ events: [{ id: 'a', title: 'CS 61A midterm', start: '2026-11-23', end: '2026-11-24', allDay: true, link: null, location: 'Wheeler 150' }], account: 'me@example.com', calendars: 1, allCalendars: false }),
+    );
+    const events = await fetchGoogleEvents(request, '2026-11-15', '2027-01-15');
+    expect(events.map((e) => e.title)).toEqual(['CS 61A midterm']);
+    expect(events).toMatchObject({ account: 'me@example.com', calendars: 1, allCalendars: false });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.pathname).toBe('/google/calendar/events');
+    expect(new Date(url.searchParams.get('from')!).toISOString()).toBe(url.searchParams.get('from'));
+    expect(new Date(url.searchParams.get('to')!).getTime()).toBeGreaterThan(new Date(url.searchParams.get('from')!).getTime());
+    // No Google token is ever sent from the page.
+    expect(JSON.stringify(calls)).not.toMatch(/access-token|Bearer/i);
   });
 
-  it("turns events into calendar items: one per day of an all-day event, timed ones with their hours, and none for BearRok's own", () => {
+  it('says when Google access ran out or was taken back, so the page asks to reconnect', async () => {
+    const expired = fakeBackend(() => json({ error: 'Google access has run out', reason: 'expired' }, 401));
+    await expect(fetchGoogleEvents(expired.request, '2026-11-15', '2026-12-15')).rejects.toMatchObject({ expired: true });
+    const revoked = fakeBackend(() => json({ error: 'Google took back access', reason: 'revoked' }, 401));
+    await expect(insertGoogleEvent(revoked.request, { title: 'x', day: '2026-11-24' })).rejects.toMatchObject({ expired: true });
+    const failed = fakeBackend(() => json({ error: 'Google Calendar 500' }, 502));
+    await expect(fetchGoogleEvents(failed.request, '2026-11-15', '2026-12-15')).rejects.toThrow('Google Calendar 500');
+  });
+
+  it('adds, changes and removes an event with the student’s time zone', async () => {
+    const { request, calls } = fakeBackend((path, init) => (init?.method === 'POST' ? json({ eventId: 'ev1', link: 'https://calendar.google.com/ev1' }) : json({ ok: true })));
+    expect(await insertGoogleEvent(request, { title: 'Midterm', day: '2026-12-01', time: '10:00' })).toEqual({ eventId: 'ev1', link: 'https://calendar.google.com/ev1' });
+    await updateGoogleEvent(request, 'ev/1', { title: 'Midterm', day: '2026-12-02' });
+    await deleteGoogleEvent(request, 'ev1');
+    expect(calls.map((c) => `${c.init?.method} ${c.path}`)).toEqual(['POST /google/calendar/events', 'PATCH /google/calendar/events/ev%2F1', 'DELETE /google/calendar/events/ev1']);
+    const sent = JSON.parse(String(calls[0]!.init!.body)) as { title: string; time: string; timeZone: string };
+    expect(sent).toMatchObject({ title: 'Midterm', time: '10:00' });
+    expect(sent.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+});
+
+describe('Google events as calendar items', () => {
+  it("one per day of an all-day event, timed ones with their hours, and none for BearRok's own", () => {
     const items = googleItems(
       [
         { id: 'trip', title: 'Family trip', start: '2026-11-26', end: '2026-11-29', allDay: true, link: null, location: null },
@@ -48,62 +67,12 @@ describe('Google Calendar', () => {
     expect(shift.why).toBe('6:00 PM – 10:00 PM · Cafe');
     expect(items.some((i) => i.title === 'Due: Goldwater')).toBe(false);
   });
-});
 
-describe('adding to Google Calendar', () => {
-  it('builds all-day and timed events in the student’s time zone, with an hour when no end is given', async () => {
-    const { eventBody } = await import('./google.ts');
-    expect(eventBody({ title: 'Career fair', day: '2026-11-24' }, 'America/Los_Angeles')).toMatchObject({ summary: 'Career fair', start: { date: '2026-11-24' }, end: { date: '2026-11-25' } });
-    expect(eventBody({ title: 'Study', day: '2026-11-24', time: '14:30' }, 'America/Los_Angeles')).toMatchObject({
-      start: { dateTime: '2026-11-24T14:30:00', timeZone: 'America/Los_Angeles' },
-      end: { dateTime: '2026-11-24T15:30:00', timeZone: 'America/Los_Angeles' },
-    });
-    expect(eventBody({ title: 'Lab', day: '2026-11-24', time: '09:00', endTime: '12:00' }, 'UTC').end).toEqual({ dateTime: '2026-11-24T12:00:00', timeZone: 'UTC' });
-    // An end before the start is ignored rather than sent to Google.
-    expect(eventBody({ title: 'x', day: '2026-11-24', time: '18:00', endTime: '09:00' }, 'UTC').end).toEqual({ dateTime: '2026-11-24T19:00:00', timeZone: 'UTC' });
-  });
-
-  it('adds, changes and removes the event, and does not mind one that is already gone', async () => {
-    const { insertGoogleEvent, updateGoogleEvent, deleteGoogleEvent } = await import('./google.ts');
-    const calls: string[] = [];
-    const fake = (async (url: string | URL | Request, init?: RequestInit) => {
-      calls.push(`${init?.method} ${String(url).replace('https://www.googleapis.com/calendar/v3/calendars/primary/events', '')}`);
-      if (init?.method === 'POST') return new Response(JSON.stringify({ id: 'ev1', htmlLink: 'https://calendar.google.com/ev1' }));
-      if (init?.method === 'DELETE') return new Response('', { status: 410 });
-      return new Response('{}');
-    }) as typeof fetch;
-    expect(await insertGoogleEvent('tok', { title: 'Midterm', day: '2026-12-01', time: '10:00' }, fake)).toEqual({ eventId: 'ev1', link: 'https://calendar.google.com/ev1' });
-    await updateGoogleEvent('tok', 'ev1', { title: 'Midterm', day: '2026-12-02' }, fake);
-    await deleteGoogleEvent('tok', 'ev1', fake);
-    expect(calls).toEqual(['POST ', 'PATCH /ev1', 'DELETE /ev1']);
-  });
-});
-
-describe('every Google calendar', () => {
-  it('reads every calendar ticked in Google Calendar, names the ones besides the main calendar, and skips hidden ones', async () => {
-    const { fetchGoogleEvents, googleItems } = await import('./google.ts');
-    const fake = (async (url: string | URL | Request) => {
-      const u = String(url);
-      if (u.includes('/users/me/calendarList'))
-        return new Response(
-          JSON.stringify({
-            items: [
-              { id: 'school@berkeley.edu', summary: 'bCourses', selected: true },
-              { id: 'me@gmail.com', summary: 'me@gmail.com', primary: true, selected: true },
-              { id: 'hidden-cal', summary: 'Old', selected: false },
-            ],
-          }),
-        );
-      if (u.includes(encodeURIComponent('school@berkeley.edu')))
-        return new Response(JSON.stringify({ summary: 'bCourses', items: [{ id: 'm1', summary: 'CS 61A lecture', start: { dateTime: '2026-11-20T10:00:00-08:00' }, end: { dateTime: '2026-11-20T11:00:00-08:00' } }] }));
-      if (u.includes(encodeURIComponent('me@gmail.com'))) return new Response(JSON.stringify({ summary: 'me@gmail.com', items: [{ id: 'p1', summary: 'Dentist', start: { date: '2026-11-21' }, end: { date: '2026-11-22' } }] }));
-      throw new Error(`hidden calendar was read: ${u}`);
-    }) as typeof fetch;
-    const events = await fetchGoogleEvents('tok', '2026-11-15', '2026-12-15', fake);
-    expect(events.allCalendars).toBe(true);
-    expect(events.calendars).toBe(2);
-    expect(events.account).toBe('me@gmail.com');
-    const items = googleItems(events);
+  it('names the calendar an event is on when it is not the main one', () => {
+    const items = googleItems([
+      { id: 'm1', calendarId: 'school', calendarName: 'bCourses', title: 'CS 61A lecture', start: '2026-11-20T10:00:00', end: '2026-11-20T11:00:00', allDay: false, link: null, location: null },
+      { id: 'p1', calendarId: 'me', calendarName: null, title: 'Dentist', start: '2026-11-21', end: '2026-11-22', allDay: true, link: null, location: null },
+    ]);
     expect(items.find((i) => i.title === 'CS 61A lecture')!.why).toContain('bCourses');
     expect(items.find((i) => i.title === 'Dentist')!.why).toBe('All day');
   });

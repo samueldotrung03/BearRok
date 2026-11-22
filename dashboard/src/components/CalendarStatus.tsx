@@ -2,7 +2,6 @@
 // once Google Calendar is connected: there is no "add to calendar" link to follow by hand.
 import { CalendarCheck, CalendarClock, CalendarPlus, ExternalLink } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useAuth } from '../auth/AuthProvider.tsx';
 import { authMessage } from '../auth/errors.ts';
 import { useLive } from '../state/live.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
@@ -13,12 +12,13 @@ import { useStore } from '../state/StoreProvider.tsx';
  * finishing, clicking Connect again simply starts over (or Cancel stops waiting).
  */
 export function ConnectCalendar({ className = '' }: { className?: string }) {
-  const auth = useAuth();
+  const live = useLive();
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const attempt = useRef<AbortController | null>(null);
   useEffect(() => () => attempt.current?.abort(), []);
-  if (auth.status !== 'signedIn') return null;
+  // Only where this student can connect and the server is set up; Settings explains the rest.
+  if (!live.google.server?.enabled || !live.google.server.mayConnect) return null;
 
   const connect = async () => {
     attempt.current?.abort();
@@ -27,7 +27,7 @@ export function ConnectCalendar({ className = '' }: { className?: string }) {
     setWaiting(true);
     setError(null);
     try {
-      await auth.connectGoogle('calendar', controller.signal);
+      await live.connectGoogle(controller.signal);
     } catch (e) {
       if (attempt.current === controller) setError(authMessage(e));
     } finally {

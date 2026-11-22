@@ -1,12 +1,10 @@
-import { ArrowSquareOut, CalendarBlank, CursorClick, GoogleLogo, HardDrives, Lightning, Monitor, Table } from '@phosphor-icons/react';
+import { CursorClick, HardDrives, Lightning, Monitor } from '@phosphor-icons/react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActionButton, Note, Row, Status, Switch } from '../components/settingsParts.tsx';
+import { useLocation } from 'react-router';
+import { ActionButton, Row, Status, Switch } from '../components/settingsParts.tsx';
 import { MoreSettings } from './SettingsMore.tsx';
-import { useAuth } from '../auth/AuthProvider.tsx';
-import { isDesktop } from '../auth/desktop.ts';
-import { authMessage } from '../auth/errors.ts';
 import { API_URL } from '../auth/firebase.ts';
-import type { GoogleService } from '../auth/google.ts';
+import { GoogleConnections } from '../components/settings/GoogleConnections.tsx';
 import { ThemePicker } from '../components/ThemePicker.tsx';
 import { NotifySettings } from '../components/NotifySettings.tsx';
 import { ShortcutSettings } from '../components/ShortcutSettings.tsx';
@@ -19,12 +17,6 @@ interface GrokInfo {
   detail: string;
 }
 
-const googleRows: { service: GoogleService; title: string; icon: ReactNode; text: string }[] = [
-  { service: 'account', title: 'Google', icon: <GoogleLogo weight="bold" />, text: 'Lets BearRok use your Google account for the connections below.' },
-  { service: 'calendar', title: 'Google Calendar', icon: <CalendarBlank />, text: 'Puts application deadlines on your calendar with reminders a week before, two days before and on the day.' },
-  { service: 'sheets', title: 'Google Sheets', icon: <Table />, text: 'Writes your application tracker to a spreadsheet in your Drive: status, deadline, materials and prompts.' },
-];
-
 const permissionRows: { kind: PermissionKind; title: string; icon: ReactNode; text: string; pane: string }[] = [
   { kind: 'screen', title: 'Screen recording', icon: <Monitor />, text: 'Lets an agent see what is on your screen, for example an application form you have open.', pane: 'Screen & System Audio Recording' },
   { kind: 'disk', title: 'Full disk access', icon: <HardDrives />, text: 'Lets an agent read files anywhere on this Mac, such as a résumé or transcript in your documents.', pane: 'Full Disk Access' },
@@ -32,7 +24,12 @@ const permissionRows: { kind: PermissionKind; title: string; icon: ReactNode; te
 ];
 
 export function Settings() {
-  const auth = useAuth();
+  // Settings#connections (from Sheet view, the calendar) scrolls to the Connections card.
+  const { hash } = useLocation();
+  const connectionsRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (hash === '#connections') connectionsRef.current?.scrollIntoView({ block: 'start' });
+  }, [hash]);
 
   // ---- Grok ---------------------------------------------------------------
   const [grok, setGrok] = useState<GrokInfo | 'loading' | 'offline'>('loading');
@@ -66,55 +63,6 @@ export function Settings() {
     }
   };
   const ownGrok = connection?.managed ? connection : null;
-
-  // ---- Google -------------------------------------------------------------
-  const [pending, setPending] = useState<GoogleService | null>(null);
-  const [googleError, setGoogleError] = useState<{ service: GoogleService; text: string } | null>(null);
-  const attempt = useRef<AbortController | null>(null);
-  useEffect(() => () => attempt.current?.abort(), []);
-
-  const signedInWithGoogle = auth.user?.providerData.some((p) => p.providerId === 'google.com') ?? false;
-  const connected = (service: GoogleService) => (service === 'account' ? signedInWithGoogle || Object.values(auth.google).some(Boolean) : Boolean(auth.google[service]));
-
-  // Like sign-in, the button is never locked: clicking again starts over.
-  const connect = async (service: GoogleService) => {
-    attempt.current?.abort();
-    const controller = new AbortController();
-    attempt.current = controller;
-    setPending(service);
-    setGoogleError(null);
-    try {
-      await auth.connectGoogle(service, controller.signal);
-    } catch (e) {
-      const text = authMessage(e);
-      if (attempt.current === controller && text) setGoogleError({ service, text: text === 'Sign-in did not work. Try again.' ? 'Google did not connect. Try again.' : text });
-    } finally {
-      if (attempt.current === controller) {
-        attempt.current = null;
-        setPending(null);
-      }
-    }
-  };
-
-  const [exporting, setExporting] = useState(false);
-  const [sheet, setSheet] = useState<{ url: string } | { error: string } | null>(null);
-  const exportSheet = async () => {
-    setExporting(true);
-    setSheet(null);
-    try {
-      const token = await auth.getToken();
-      const res = await fetch(`${API_URL}/api/students/${token ? 'me' : 'demo'}/applications/export`, {
-        method: 'POST',
-        headers: { 'x-google-access-token': auth.google.sheets ?? '', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
-      const body = (await res.json()) as { url?: string; error?: string };
-      setSheet(res.ok && body.url ? { url: body.url } : { error: 'The spreadsheet could not be created. Connect Google Sheets again and retry.' });
-    } catch {
-      setSheet({ error: 'The agent backend is not reachable right now.' });
-    } finally {
-      setExporting(false);
-    }
-  };
 
   // ---- Desktop permissions -----------------------------------------------
   const onMac = desktopBridge?.platform === 'darwin';
@@ -151,8 +99,10 @@ export function Settings() {
           </div>
         </Card>
 
-        <Card className="p-7">
-          <h2 className="text-lg font-semibold tracking-tight">Connections</h2>
+        <Card className="scroll-mt-6 p-7">
+          <h2 id="connections" ref={connectionsRef} className="scroll-mt-6 text-lg font-semibold tracking-tight">
+            Connections
+          </h2>
           <p className="mt-1 text-sm text-ink-2">Services your agents use. You can disconnect any of them at any time.</p>
           <ul className="mt-6 divide-y divide-line">
             <Row
@@ -247,56 +197,7 @@ export function Settings() {
               )}
             </Row>
 
-            {googleRows.map(({ service, title, icon, text }) => {
-              const on = connected(service);
-              const viaSignIn = service === 'account' && signedInWithGoogle;
-              return (
-                <Row
-                  key={service}
-                  icon={icon}
-                  title={title}
-                  text={text}
-                  status={
-                    pending === service ? <Status tone="wait">Waiting for Google</Status> : on ? <Status tone="on">{viaSignIn ? 'Signed in with Google' : 'Connected'}</Status> : <Status tone="off">Not connected</Status>
-                  }
-                  action={
-                    <>
-                      {service === 'sheets' && on && (
-                        <ActionButton primary disabled={exporting} onClick={() => void exportSheet()}>
-                          {exporting ? 'Creating…' : 'Export applications'}
-                        </ActionButton>
-                      )}
-                      {on && !viaSignIn ? (
-                        <ActionButton onClick={() => auth.disconnectGoogle(service)}>Disconnect</ActionButton>
-                      ) : !on ? (
-                        <ActionButton primary onClick={() => void connect(service)}>
-                          Connect
-                        </ActionButton>
-                      ) : null}
-                    </>
-                  }
-                >
-                  <div className="space-y-2" aria-live="polite">
-                    {pending === service && (
-                      <p className="text-sm text-ink-2">
-                        {isDesktop ? 'Finish in your browser, then come back here.' : 'Finish in the Google window that opened.'} Closed it? Click Connect again.
-                      </p>
-                    )}
-                    {googleError?.service === service && <Note kind="error">{googleError.text}</Note>}
-                    {on && service !== 'account' && pending !== service && <p className="text-[13px] text-ink-3">Connected until you close the app. Google asks again after that.</p>}
-                    {service === 'sheets' && sheet && 'url' in sheet && (
-                      <Note kind="ok">
-                        Spreadsheet created.{' '}
-                        <a href={sheet.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
-                          Open it <ArrowSquareOut className="size-3.5" aria-hidden="true" />
-                        </a>
-                      </Note>
-                    )}
-                    {service === 'sheets' && sheet && 'error' in sheet && <Note kind="error">{sheet.error}</Note>}
-                  </div>
-                </Row>
-              );
-            })}
+            <GoogleConnections />
           </ul>
         </Card>
 

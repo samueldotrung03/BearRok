@@ -12,6 +12,7 @@ import type { AgentEvent, AgentNode, ApplicationStatus, Opportunity, Opportunity
 import { dataBadgeText, isOutOfCredit } from './dataBadge.ts';
 import { type FeedOutcome } from './feedCopy.ts';
 import { reactionSends } from './reactions.ts';
+import { googleInfo, type CalendarSync, type GoogleInfo, type GoogleServer, type GoogleService, type StreamGoogle } from '../lib/google/connection.ts';
 import { sampleRequest } from './sampleBackend.ts';
 import { useStore } from './StoreProvider.tsx';
 
@@ -56,11 +57,24 @@ export interface TrackedApplication {
   calendar: { state: 'none' | 'link' | 'synced'; eventId: string | null; htmlLink: string | null; addUrl: string | null; error: string | null };
 }
 
-/** The Google Sheet the saved list is written to. */
+/** The Google Sheet the applications are written to. */
 export interface LinkedSheet {
   spreadsheetId: string;
   url: string;
+  /** Empty only for a moment while a picked sheet is first written. */
   syncedAt: string;
+  /** Its name in Drive, when known. */
+  title?: string | null;
+  /** The tab BearRok writes. */
+  tab?: string;
+}
+
+/** The outcome of a Google action, in words for the page. */
+export interface GoogleResult {
+  ok: boolean;
+  error?: string;
+  /** Why it failed, from the backend: not_configured, not_connected, not_granted, revoked, expired, failed. */
+  reason?: string;
 }
 
 interface BackendFeedEntry {
@@ -82,6 +96,9 @@ interface BackendStudent {
   savedItems?: BackendFeedEntry[];
   applications?: TrackedApplication[];
   sheet?: LinkedSheet | null;
+  /** The Google connection, never with a token. Older backends leave it out. */
+  google?: StreamGoogle | null;
+  calendarSync?: CalendarSync | null;
   /** The search managers the next search will have, from the kinds chosen in Agent settings. */
   nextManagers?: { name: string; role: string }[];
   /** Automode: on or off, the next scheduled time, and searches waiting to run. */
@@ -140,6 +157,25 @@ interface LiveValue {
    * it by itself and keeps the events in step. `errors` holds what Google refused last time.
    */
   calendar: { connected: boolean; syncing: boolean; errors: string[] };
+  /**
+   * The student's Google connection: whether the server is set up, who is connected and with which
+   * permissions. Tokens stay on the backend; nothing here can call Google by itself.
+   */
+  google: GoogleInfo;
+  /** Open Google's consent screen and wait for its answer. Rejects with a code the page can explain. */
+  connectGoogle: (signal: AbortSignal, options?: { switchAccount?: boolean }) => Promise<void>;
+  /** Forget the connection here and at Google. The linked sheet stays linked. */
+  disconnectGoogle: () => Promise<GoogleResult>;
+  /** Put every To apply and Applying deadline on Google Calendar now. */
+  syncCalendar: () => Promise<GoogleResult>;
+  /** Write the applications to the linked sheet now, or to a new one (`create`, or none linked). */
+  syncSheet: (options?: { create?: boolean }) => Promise<GoogleResult>;
+  /** Use a sheet the student already has, from its address. */
+  linkSheet: (address: string) => Promise<GoogleResult>;
+  /** Stop writing to the linked sheet. The file stays in Drive. */
+  unlinkSheet: () => Promise<GoogleResult>;
+  /** Ask the backend again where Google stands (after a server restart, say). */
+  refreshGoogle: () => Promise<void>;
   /**
    * Set where the student stands on a posting, or stop tracking it (null). To apply and Applying
    * put the deadline on Google Calendar when it is connected.
@@ -377,9 +413,61 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers as Record<string, string> | undefined) },
     });
   };
-  // With Google Calendar connected, the backend puts the deadline on it.
-  const calendarHeader = (): Record<string, string> => (auth.google.calendar ? { 'x-google-access-token': auth.google.calendar } : {});
-  const putStatus = (id: string, status: ApplicationStatus) => request(`/applications/${encodeURIComponent(id)}`, { method: 'PUT', headers: calendarHeader(), body: JSON.stringify({ status }) }).catch(() => null);
+  // With Google Calendar connected on the backend, it puts the deadline there by itself.
+  const putStatus = (id: string, status: ApplicationStatus) => request(`/applications/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ status }) }).catch(() => null);
+
+  // ---- Google: where it stands, and what the student can ask for -------------------------------
+  // The backend holds every token. The page learns only whether the server is set up (GET /google)
+  // and, from the live stream, who is connected with which permissions.
+  const [googleServer, setGoogleServer] = useState<(GoogleServer & { connected?: boolean; connectedAt?: string | null }) | null>(null);
+  const googleNow = useRef<string | null>(null);
+  const refreshGoogle = async () => {
+    const res = await request('/google').catch(() => null);
+    if (!res?.ok) return;
+    const body = (await res.json()) as GoogleServer & { connected: boolean; connectedAt: string | null; email: string | null; services: GoogleService[]; allCalendars: boolean };
+    googleNow.current = body.connectedAt;
+    setGoogleServer(body);
+  };
+  useEffect(() => {
+    setGoogleServer(null);
+    if (status === 'connected') void refreshGoogle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, who, uid]);
+  const google = useMemo(() => googleInfo(googleServer, student?.google, student?.calendarSync), [googleServer, student?.google, student?.calendarSync]);
+  const result = async (res: Response | null): Promise<GoogleResult> => {
+    if (!res) return { ok: false, error: 'The backend cannot be reached. Start it, then try again.' };
+    const body = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+    return res.ok ? { ok: true } : { ok: false, error: body.error ?? `The backend answered ${res.status}.`, reason: body.reason };
+  };
+  const connectGoogle = async (signal: AbortSignal, options?: { switchAccount?: boolean }) => {
+    const res = await request('/google/connect', { method: 'POST', body: JSON.stringify({ services: ['calendar', 'sheets'], switchAccount: options?.switchAccount === true }) });
+    const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string; reason?: string };
+    if (!res.ok || !body.url) throw Object.assign(new Error(body.error ?? 'Google connection could not be started.'), { code: body.reason === 'not_configured' ? 'google/not-configured' : 'google/not-started' });
+    const before = googleNow.current;
+    // Google's consent screen opens in the browser; the backend keeps what Google gives it.
+    window.open(body.url, '_blank', 'noopener');
+    const until = Date.now() + 5 * 60_000;
+    while (Date.now() < until) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 2000);
+        signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new DOMException('cancelled', 'AbortError'));
+        });
+      });
+      const check = await request('/google').catch(() => null);
+      if (!check?.ok) continue;
+      const now = (await check.json()) as { connectedAt: string | null; services: GoogleService[] };
+      // Done once Google has answered this request: a connection already there does not count.
+      if (!now.connectedAt || now.connectedAt === before) continue;
+      googleNow.current = now.connectedAt;
+      setGoogleServer((s) => (s ? { ...s, ...now, connected: true } : s));
+      // Google answered, but a box on its screen was left unticked.
+      if (!(['calendar', 'sheets'] as const).every((s) => now.services.includes(s))) throw Object.assign(new Error('not granted'), { code: 'google/not-granted' });
+      return;
+    }
+    throw Object.assign(new Error('timed out'), { code: 'desktop/timed-out' });
+  };
 
   // Every status change made anywhere in the app (Saved, Applications, a card's details) goes to the
   // account from here, so no page has to remember to send it. Taking the account's statuses on
@@ -398,40 +486,40 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const known = new Set([...liveCards, ...savedCards].map((o) => o.id));
     for (const [id, next] of Object.entries(now)) if (before[id] !== next && known.has(id)) void putStatus(id, next);
     for (const id of Object.keys(before))
-      if (!(id in now) && known.has(id)) void request(`/applications/${encodeURIComponent(id)}`, { method: 'DELETE', headers: calendarHeader() }).catch(() => null);
+      if (!(id in now) && known.has(id)) void request(`/applications/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.applications]);
 
   // Google Calendar is kept in step on its own: whenever it is connected and an application's
   // status or deadline changes, the backend adds, moves or removes the events. Nobody adds them by hand.
   const [calendarSync, setCalendarSync] = useState<{ syncing: boolean; errors: string[] }>({ syncing: false, errors: [] });
+  const calendarOn = google.services.includes('calendar');
+  const syncCalendar = async (): Promise<GoogleResult> => {
+    setCalendarSync((s) => ({ ...s, syncing: true }));
+    const res = await request('/calendar/sync', { method: 'POST' }).catch(() => null);
+    const out = await result(res?.clone() ?? null);
+    const body = res?.ok ? ((await res.json().catch(() => ({}))) as { errors?: string[] }) : null;
+    setCalendarSync({ syncing: false, errors: out.ok ? (body?.errors ?? []) : [out.error ?? 'Google Calendar could not be reached.'] });
+    return out;
+  };
   const calendarKey = JSON.stringify((student?.applications ?? []).map((a) => [a.opportunityId, a.status, a.deadline, a.calendar.state]));
   useEffect(() => {
-    const token = auth.google.calendar;
-    if (!token || status !== 'connected' || !student) return;
-    const timer = window.setTimeout(() => {
-      setCalendarSync((s) => ({ ...s, syncing: true }));
-      void request('/calendar/sync', { method: 'POST', headers: { 'x-google-access-token': token } })
-        .then(async (res) => {
-          const body = (await res.json().catch(() => ({}))) as { errors?: string[]; error?: string };
-          setCalendarSync({ syncing: false, errors: res.ok ? (body.errors ?? []) : [body.error ?? `Google Calendar ${res.status}`] });
-        })
-        .catch(() => setCalendarSync({ syncing: false, errors: ['The backend cannot be reached.'] }));
-    }, 1200);
+    if (!calendarOn || status !== 'connected' || !student) return;
+    const timer = window.setTimeout(() => void syncCalendar(), 1200);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calendarKey, auth.google.calendar, status]);
+  }, [calendarKey, calendarOn, status]);
 
   // The linked Google Sheet is rewritten a moment after the saved list or a status changes, while
-  // the student has Google Sheets connected in this session.
+  // Google is connected with Sheets.
+  const sheetsOn = google.services.includes('sheets');
   const sheetKey = JSON.stringify([student?.saved ?? [], (student?.applications ?? []).map((a) => [a.opportunityId, a.status, a.deadline, a.calendar.state])]);
   useEffect(() => {
-    const token = auth.google.sheets;
-    if (!token || !student?.sheet) return;
-    const timer = window.setTimeout(() => void request('/sheet/sync', { method: 'POST', headers: { 'x-google-access-token': token } }).catch(() => {}), 2500);
+    if (!sheetsOn || !student?.sheet) return;
+    const timer = window.setTimeout(() => void request('/sheet/sync', { method: 'POST' }).catch(() => {}), 2500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetKey, auth.google.sheets, student?.sheet?.spreadsheetId]);
+  }, [sheetKey, sheetsOn, student?.sheet?.spreadsheetId]);
 
   const simulated = student?.mode !== 'live';
   const liveCards = useMemo(() => (student?.feed ?? []).map((entry) => toCard(entry, simulated)), [student, simulated]);
@@ -509,13 +597,25 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       savedCards,
       applications: sample ? sampleApplications : Object.fromEntries((status === 'connected' ? (student?.applications ?? []) : []).map((a) => [a.opportunityId, a])),
       sheet: status === 'connected' ? (student?.sheet ?? null) : null,
-      calendar: { connected: Boolean(auth.google.calendar), ...calendarSync },
+      calendar: { connected: calendarOn, ...calendarSync },
+      google,
+      connectGoogle,
+      disconnectGoogle: async () => {
+        const out = await result(await request('/google', { method: 'DELETE' }).catch(() => null));
+        if (out.ok) await refreshGoogle();
+        return out;
+      },
+      syncCalendar,
+      syncSheet: async (options) => result(await request('/sheet/sync', { method: 'POST', body: JSON.stringify({ create: options?.create === true }) }).catch(() => null)),
+      linkSheet: async (address) => result(await request('/sheet/link', { method: 'POST', body: JSON.stringify({ sheet: address }) }).catch(() => null)),
+      unlinkSheet: async () => result(await request('/sheet', { method: 'DELETE' }).catch(() => null)),
+      refreshGoogle,
       setStatus: async (id, next) => {
         if (next) await putStatus(id, next);
-        else await request(`/applications/${encodeURIComponent(id)}`, { method: 'DELETE', headers: calendarHeader() }).catch(() => null);
+        else await request(`/applications/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => null);
       },
       setDeadline: async (id, deadline) => {
-        await request(`/applications/${encodeURIComponent(id)}`, { method: 'PUT', headers: calendarHeader(), body: JSON.stringify({ deadline }) }).catch(() => null);
+        await request(`/applications/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ deadline }) }).catch(() => null);
       },
       request,
       agents: status === 'connected' && run ? toAgents(run) : null,
@@ -532,7 +632,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       memoryCounts,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [status, sample, sampleApplications, state.saved, usingLive, student, liveCards, savedCards, run, who, auth.google.calendar, calendarSync, memoryCounts],
+    [status, sample, sampleApplications, state.saved, usingLive, student, liveCards, savedCards, run, who, google, calendarOn, calendarSync, memoryCounts],
   );
   return <LiveContext value={value}>{children}</LiveContext>;
 }

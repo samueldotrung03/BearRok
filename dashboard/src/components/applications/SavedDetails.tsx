@@ -6,6 +6,7 @@ import { ArrowUpRight, CalendarCheck, CalendarPlus, Clock, ExternalLink, FileTex
 import { useState, type ReactNode } from 'react';
 import { CalendarStatus } from '../CalendarStatus.tsx';
 import { formatLabel, typeMeta } from '../meta.ts';
+import { matchPercent } from '../../lib/match.ts';
 import { daysUntil, relativeTime, shortDate } from '../../lib/time.ts';
 import { useLive, type TrackedApplication } from '../../state/live.tsx';
 import { useStore } from '../../state/StoreProvider.tsx';
@@ -167,7 +168,7 @@ export function SavedDetails({ opportunity: o, application }: { opportunity: Opp
           <FileText className="size-4" aria-hidden="true" /> Official page
         </a>
         <span className="ml-auto text-xs text-ink-3">
-          Found {relativeTime(o.foundAt)}, checked {relativeTime(o.lastCheckedAt)} · fit {Math.round(o.baseScore * 100)}%
+          Found {relativeTime(o.foundAt)}, checked {relativeTime(o.lastCheckedAt)} · {matchPercent(o)}% match
         </span>
       </div>
     </div>

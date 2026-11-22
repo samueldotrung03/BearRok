@@ -2,6 +2,7 @@
 // already read an application page for, best fit first. One click starts tracking either.
 import { Plus, Sparkles } from 'lucide-react';
 import { applicationInfo, opportunities } from '../../data/sample.ts';
+import { matchPercent } from '../../lib/match.ts';
 import { dueLabel } from '../../lib/time.ts';
 import { useStore } from '../../state/StoreProvider.tsx';
 import type { Opportunity } from '../../types.ts';
@@ -62,7 +63,7 @@ function Suggestion({ opportunity: o, showFit = false }: { opportunity: Opportun
           <p className="truncate font-medium">{o.title}</p>
           <p className="truncate text-sm text-ink-3">
             {o.deadline ? dueLabel(o.deadline) : o.organizer}
-            {showFit && ` · ${Math.round(o.baseScore * 100)}% fit`}
+            {showFit && ` · ${matchPercent(o)}% match`}
             {info && ` · ${info.prompts.length} ${info.prompts.length === 1 ? 'question' : 'questions'}, ${info.materials.length} to gather`}
           </p>
         </div>

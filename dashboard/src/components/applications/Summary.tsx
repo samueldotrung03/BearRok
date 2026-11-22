@@ -1,6 +1,7 @@
 // The top of an application, shared by the list row and the board's detail sheet: what it is,
 // when it is due, its status, readiness and next step, and the reminders and calendar links.
 import { ArrowRight, Bell, CalendarPlus, Check, Download } from 'lucide-react';
+import { matchPercent } from '../../lib/match.ts';
 import { typeMeta } from '../meta.ts';
 import { Cover } from '../OpportunityCard.tsx';
 import { STATUSES, progressOf, remindersFor, statusLabel } from '../../lib/applications.ts';
@@ -26,7 +27,7 @@ export function Summary({ item, goTo, compact = false }: { item: Item; goTo: GoT
         <div className="flex items-start gap-4">
           <div className="min-w-0 flex-1">
             <p className="text-sm text-ink-3">
-              {typeMeta[o.type].label} · {o.organizer} · {Math.round(o.baseScore * 100)}% fit
+              {typeMeta[o.type].label} · {o.organizer} · {matchPercent(o)}% match
             </p>
             {!compact && <h2 className="mt-0.5 text-lg leading-snug font-semibold tracking-tight">{o.title}</h2>}
             <p className={`mt-1 text-sm ${urgent ? 'font-semibold text-orange-700' : 'text-ink-2'}`}>

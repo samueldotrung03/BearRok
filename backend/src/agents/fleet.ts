@@ -105,13 +105,15 @@ export class Fleet {
             this.opts.onUpdate(job);
             return null;
           }
-          if (isStopped()) continue;
+          // The second failure is why the job failed. A stop in the same moment must not
+          // replace that error with "Stopped", or run stats and the Agents page lose the reason.
           if (job.attempts >= 2) {
             job.status = 'failed';
             job.result = e instanceof Error ? e.message : String(e);
             this.opts.onUpdate(job);
             return null;
           }
+          if (isStopped()) continue;
         }
       }
     } finally {

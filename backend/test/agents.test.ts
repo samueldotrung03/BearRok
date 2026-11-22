@@ -4,6 +4,7 @@ import { SimBrain } from '../src/agents/simBrain.ts';
 import { allocateSlots, buildMemory, categoryWeights, rankFeed } from '../src/agents/scoring.ts';
 import { AgentSystem } from '../src/agents/system.ts';
 import { Fleet } from '../src/agents/fleet.ts';
+import { withSignal } from '../src/agents/stop.ts';
 import type { Category, Interaction, Opportunity } from '../src/agents/types.ts';
 import { createApp } from '../src/app.ts';
 import type { AuthUser } from '../src/auth.ts';
@@ -73,6 +74,49 @@ test('fleet: budget, dedupe and one retry', async () => {
   await fleet.run({ kind: 'scout', managerId: 'm', label: 'third' }, async () => ({ value: 1, summary: '' }));
   assert.equal(await fleet.run({ kind: 'scout', managerId: 'm', label: 'over budget' }, async () => ({ value: 1, summary: '' })), null);
   assert.deepEqual(fleet.jobs.map((j) => j.status), ['done', 'failed', 'done', 'skipped']);
+  assert.equal(fleet.jobs[1]!.result, 'down');
+});
+
+test('fleet: a job that fails twice keeps the last error', async () => {
+  const fleet = new Fleet({ concurrency: 1, maxJobs: 4, onUpdate: () => {} });
+  let n = 0;
+  const plain = await fleet.run({ kind: 'scout', managerId: 'm', label: 'two reasons' }, async () => {
+    n++;
+    throw new Error(n === 1 ? 'first' : 'second reason');
+  });
+  assert.equal(plain, null);
+  assert.equal(fleet.jobs[0]!.attempts, 2);
+  assert.equal(fleet.jobs[0]!.status, 'failed');
+  assert.equal(fleet.jobs[0]!.result, 'second reason');
+
+  // The run can stop in the same moment as the second throw. That error is still why the job failed.
+  // Run stats list `kind: result` for failed jobs, and the Agents page shows `Failed. ${result}`.
+  const controller = new AbortController();
+  let m = 0;
+  const stopped = await withSignal(controller.signal, () =>
+    fleet.run({ kind: 'extract', managerId: 'm', label: 'dies while stopping' }, async () => {
+      m++;
+      if (m >= 2) controller.abort();
+      throw new Error(m === 1 ? 'first' : 'last reason');
+    }),
+  );
+  assert.equal(stopped, null);
+  const job = fleet.jobs[1]!;
+  assert.equal(job.attempts, 2);
+  assert.equal(job.status, 'failed');
+  assert.equal(job.result, 'last reason');
+
+  // A stop on the first try never becomes a second failure, so the job stays stopped.
+  const early = new AbortController();
+  const once = await withSignal(early.signal, () =>
+    fleet.run({ kind: 'scout', managerId: 'm', label: 'stopped on the first try' }, async () => {
+      early.abort();
+      throw new Error('only try');
+    }),
+  );
+  assert.equal(once, null);
+  assert.equal(fleet.jobs[2]!.status, 'skipped');
+  assert.equal(fleet.jobs[2]!.result, 'Stopped');
 });
 
 test('run: master, four search managers, fleet, validators and presentation manager produce a checked feed', async () => {

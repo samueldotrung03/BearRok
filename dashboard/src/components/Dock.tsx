@@ -2,7 +2,6 @@
 // reaches the left edge of the window, the way the macOS Dock hides. Pinned, it stays open and
 // the page moves over to make room.
 import {
-  BookmarkSimple,
   CalendarDots,
   ClipboardText,
   Compass,
@@ -43,7 +42,6 @@ export const dockItems: DockItem[] = [
   { to: '/discover', label: 'Career discovery', icon: Compass },
   { to: '/applications', label: 'Applications', icon: ClipboardText },
   { to: '/calendar', label: 'Calendar', icon: CalendarDots },
-  { to: '/saved', label: 'Saved', icon: BookmarkSimple },
   { to: '/agents', label: 'Agents', icon: Robot },
   { to: '/search', label: 'Search', icon: MagnifyingGlass },
   { to: '/settings', label: 'Settings', icon: GearSix, bottom: true },

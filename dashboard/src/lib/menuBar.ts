@@ -38,7 +38,7 @@ export function menuBarData(input: {
     if (!o?.deadline || input.applications[id]) continue;
     const at = Date.parse(o.deadline);
     if (!Number.isFinite(at) || at < now) continue;
-    due.push({ at, title: o.title, path: "/saved", tracked: false });
+    due.push({ at, title: o.title, path: '/applications?stage=saved', tracked: false });
   }
   // What the student is applying to comes first, soonest first; saved postings fill up to five.
   due.sort((a, b) => Number(b.tracked) - Number(a.tracked) || a.at - b.at);

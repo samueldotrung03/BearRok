@@ -20,12 +20,18 @@ import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Profile } from './pages/Profile.tsx';
 import { Roadmap } from './pages/Roadmap.tsx';
 import { RoadmapList } from './pages/RoadmapList.tsx';
-import { Saved } from './pages/Saved.tsx';
 import { Search } from './pages/Search.tsx';
 import { Settings } from './pages/Settings.tsx';
 import { SignIn } from './pages/SignIn.tsx';
 import { SignUp } from './pages/SignUp.tsx';
 import { Today } from './pages/Today.tsx';
+
+/** The old Saved page's address, sent to the Saved stage of Applications (or its Sheet view). */
+export function SavedRedirect() {
+  const { search } = useLocation();
+  const sheet = new URLSearchParams(search).get('view') === 'sheet';
+  return <Navigate to={sheet ? '/applications?view=sheet' : '/applications?stage=saved'} replace />;
+}
 
 /** Pages for getting into an account. They have no sidebar and need no sign-in. */
 const accountPages = ['/signin', '/signup', '/forgot-password'];
@@ -75,7 +81,8 @@ export function App() {
         <Route path="/applications/:id" element={<ApplicationPortal />} />
         <Route path="/applications/:id/view" element={<ApplicationView />} />
         <Route path="/calendar" element={<Calendar />} />
-        <Route path="/saved" element={<Saved />} />
+        {/* Saved is the first stage of Applications now; the old address lands there. */}
+        <Route path="/saved" element={<SavedRedirect />} />
         <Route path="/agents" element={<Agents />} />
         <Route path="/search" element={<Search />} />
         <Route path="/profile" element={<Profile />} />

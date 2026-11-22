@@ -7,8 +7,16 @@ Object.assign(globalThis, {
   localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {}, key: () => null, length: 0 },
 });
 
+/** A row inside the providers it reads (the saved list, the account, the live data). */
+async function inProviders(child: ReturnType<typeof createElement>) {
+  const { StoreProvider } = await import('../../../state/StoreProvider.tsx');
+  const { AuthProvider } = await import('../../../auth/AuthProvider.tsx');
+  const { LiveProvider } = await import('../../../state/live.tsx');
+  return renderToString(createElement(MemoryRouter, null, createElement(AuthProvider, null, createElement(StoreProvider, null, createElement(LiveProvider, null, child))))).replace(/<!-- -->/g, '');
+}
+
 describe('Applications page', () => {
-  it('with nothing tracked, explains the link to Saved and offers New application, with no sample data', async () => {
+  it('with nothing tracked, says saving a card puts it here and offers New application, with no sample data', async () => {
     const { Applications } = await import('../../../pages/Applications.tsx');
     const { StoreProvider } = await import('../../../state/StoreProvider.tsx');
     const { AuthProvider } = await import('../../../auth/AuthProvider.tsx');
@@ -17,11 +25,13 @@ describe('Applications page', () => {
       createElement(MemoryRouter, null, createElement(AuthProvider, null, createElement(StoreProvider, null, createElement(LiveProvider, null, createElement(Applications))))),
     );
     expect(html).toContain('New application');
-    expect(html).toContain('Postings you set to To apply or Applying on the Saved page appear here');
-    expect(html).toContain('href="/saved"');
+    expect(html).toContain('Save a card in the feed and it is kept here as Saved');
+    expect(html).toContain('saving also tells the agents to look for more like it');
+    // Saved is a stage here now, so nothing links to the old page.
+    expect(html).not.toContain('href="/saved"');
+    expect(html).toContain('Go to the feed');
     // The old page's sample-driven parts are gone.
     expect(html).not.toContain('Export all deadlines');
-    expect(html).not.toContain('Go to the feed');
   });
 });
 
@@ -29,11 +39,8 @@ describe('application row', () => {
   it('links into the portal and shows status, days left, progress and the custom label', async () => {
     const { ApplicationListRow } = await import('./ApplicationListRow.tsx');
     const now = Date.parse('2026-11-19T12:00:00Z');
-    const html = renderToString(
-      createElement(
-        MemoryRouter,
-        null,
-        createElement(ApplicationListRow, {
+    const html = await inProviders(
+      createElement(ApplicationListRow, {
           now,
           application: {
             opportunityId: 'custom-abc 1',
@@ -48,7 +55,6 @@ describe('application row', () => {
             kind: 'custom',
           },
         }),
-      ),
     );
     expect(html).toContain('href="/applications/custom-abc%201"');
     expect(html).toContain('Summer research');
@@ -88,5 +94,29 @@ describe('application row', () => {
     expect(html).toContain('2 questions, resume');
     expect(html).toContain('10 days left');
     expect(html).not.toContain('DESCRIPTION TEXT');
+    // An application under way opens its portal, and has none of a Saved row's buttons.
+    expect(html).not.toContain('Start application');
+  });
+
+  it('a Saved row is the first stage: it starts the application, opens its details in place, or is removed', async () => {
+    const { ApplicationListRow } = await import('./ApplicationListRow.tsx');
+    const { opportunities } = await import('../../../data/sample.ts');
+    const now = Date.parse('2026-11-19T12:00:00Z');
+    const posting = { ...opportunities[0]!, id: 'kept-1' };
+    const html = await inProviders(
+      createElement(ApplicationListRow, {
+        now,
+        posting,
+        application: { opportunityId: 'kept-1', title: posting.title, organizer: posting.organizer, status: 'interested', deadline: null, actionUrl: null, custom: false, updatedAt: '', progress: { done: 0, total: 0 }, kind: posting.type },
+      }),
+    );
+    expect(html).toContain('data-status="interested"');
+    expect(html).toContain('>Saved<');
+    expect(html).toContain('Start application');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('Details');
+    expect(html).toContain(`aria-label="Remove ${posting.title.replace(/&/g, '&amp;')} from Saved"`);
+    // Only one primary action on the row.
+    expect(html.match(/btn-primary/g)?.length ?? 0).toBeLessThanOrEqual(1);
   });
 });

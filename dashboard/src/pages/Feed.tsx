@@ -316,7 +316,7 @@ export function EmptyKind({ type, searching, onSearch, saved = false }: { type: 
 
 export function Feed() {
   const { state, dispatch } = useStore();
-  // The Saved page links here with ?view=feed&type=… to show one kind in the feed list.
+  // Saved links here with ?view=feed&type=… to show one kind in the feed list.
   const [params] = useSearchParams();
   const askedType = params.get('type');
   const [tab, setTab] = useState<Tab>(params.get('view') === 'feed' ? 'feed' : 'foryou');

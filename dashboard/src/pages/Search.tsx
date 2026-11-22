@@ -55,8 +55,8 @@ export function restoredRun(run: Run): Run {
   return { ...run, phase: 'done', note: 'The web search stopped when you left this page. Search again to finish it.' };
 }
 
-const statusLabel: Record<string, string> = { interested: 'Interested', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
-const goTo: Record<Exclude<Origin, 'web'>, [string, string]> = { feed: ['/', 'See in feed'], saved: ['/saved', 'Go to Saved'], application: ['/applications', 'Go to Applications'] };
+const statusLabel: Record<string, string> = { interested: 'Saved', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
+const goTo: Record<Exclude<Origin, 'web'>, [string, string]> = { feed: ['/', 'See in feed'], saved: ['/applications?stage=saved', 'Go to Saved'], application: ['/applications', 'Go to Applications'] };
 
 export function Search() {
   const auth = useAuth();

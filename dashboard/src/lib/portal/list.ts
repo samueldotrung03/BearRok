@@ -39,15 +39,26 @@ export const sortLabel: Record<ListSort, string> = {
   progress: 'Least progress',
 };
 
-/** active: To apply and Applying together, the ones still to send. */
-export type StatusFilter = 'active' | 'to_apply' | 'applying' | 'applied';
-export const STATUS_FILTERS: StatusFilter[] = ['active', 'to_apply', 'applying', 'applied'];
+/**
+ * The pipeline, first stage first: Saved (status "interested", what the student kept from the feed),
+ * then To apply, Applying and Applied. active: To apply and Applying together, the ones still to
+ * send. all: every stage.
+ */
+export type StatusFilter = 'saved' | 'active' | 'to_apply' | 'applying' | 'applied' | 'all';
+export const STATUS_FILTERS: StatusFilter[] = ['saved', 'active', 'to_apply', 'applying', 'applied', 'all'];
 export const statusFilterLabel: Record<StatusFilter, string> = {
+  saved: 'Saved',
   active: 'All active',
   to_apply: 'To apply',
   applying: 'Applying',
   applied: 'Applied',
+  all: 'Everything',
 };
+
+/** The stage a Saved page link (or an old /saved address) asks for, from ?stage=. */
+export function stageFromQuery(value: string | null): StatusFilter | null {
+  return STATUS_FILTERS.includes(value as StatusFilter) ? (value as StatusFilter) : null;
+}
 
 export interface ListPrefs {
   sort: ListSort;
@@ -98,22 +109,23 @@ export function progressLabel(p: { done: number; total: number }): string {
 }
 
 /**
- * One row per application. The live stream's statuses are the freshest (a change on Saved arrives
- * there first), the GET /applications records carry the title, the custom flag and the portal, and
- * the postings fill in the kind and anything a record leaves out. Interested postings are only
- * saved, not applications, so they are left out.
+ * One row per application, Saved ones included. The live stream's statuses are the freshest, the
+ * GET /applications records carry the title, the custom flag and the portal, and the postings fill
+ * in the kind and anything a record leaves out. A posting saved a moment ago that the account has
+ * not echoed yet (`saved`, with its card in `postings`) is shown as Saved straight away, so a
+ * save never seems to vanish.
  */
-export function mergeApplications(live: Record<string, TrackedApplication>, records: ApplicationRecord[] | null, postings: Opportunity[]): ListApplication[] {
+export function mergeApplications(live: Record<string, TrackedApplication>, records: ApplicationRecord[] | null, postings: Opportunity[], saved: string[] = []): ListApplication[] {
   const byRecord = new Map((records ?? []).map((r) => [r.opportunityId, r]));
   const byPosting = new Map(postings.map((o) => [o.id, o]));
-  const ids = [...new Set([...Object.keys(live), ...byRecord.keys()])];
+  const ids = [...new Set([...Object.keys(live), ...byRecord.keys(), ...saved.filter((id) => byPosting.has(id))])];
   const rows: ListApplication[] = [];
   for (const id of ids) {
     const tracked = live[id];
     const record = byRecord.get(id);
     const posting = byPosting.get(id);
-    const status = tracked?.status ?? record?.status;
-    if (!status || status === 'interested') continue;
+    const status = tracked?.status ?? record?.status ?? (saved.includes(id) ? 'interested' : undefined);
+    if (!status) continue;
     const custom = record?.custom ?? id.startsWith('custom-');
     rows.push({
       opportunityId: id,
@@ -163,6 +175,8 @@ export function sortApplications(list: ListApplication[], sort: ListSort): ListA
 }
 
 export function matchesStatus(a: ListApplication, status: StatusFilter): boolean {
+  if (status === 'all') return true;
+  if (status === 'saved') return a.status === 'interested';
   return status === 'active' ? a.status === 'to_apply' || a.status === 'applying' : a.status === status;
 }
 
@@ -221,7 +235,7 @@ export function matchesPosting(o: Opportunity, query: string): boolean {
   return words.every((w) => text.includes(w));
 }
 
-/** A date from a date field ("2026-12-01") as the end of that day in the student's time, the way Saved sends deadlines. */
+/** A date from a date field ("2026-12-01") as the end of that day in the student's time, the way a saved row's details send deadlines. */
 export function dateInputToIso(value: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const d = new Date(`${value}T23:59:00`);

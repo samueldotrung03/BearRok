@@ -3,7 +3,7 @@ import { useStore } from '../state/StoreProvider.tsx';
 import type { ApplicationStatus } from '../types.ts';
 
 /**
- * Sets where the student stands on one opportunity: Interested (the default), To apply, Applying
+ * Sets where the student stands on one opportunity: Saved (the default), To apply, Applying
  * or Applied. The status is kept with the student's account; To apply and Applying put the
  * deadline on Google Calendar when it is connected.
  */

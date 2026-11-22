@@ -26,7 +26,7 @@ import '../styles/journey.css';
 /** Puts the cursor in a search box without the browser scrolling the page to it. */
 const focusQuietly = (input: HTMLInputElement | null) => input?.focus({ preventScroll: true });
 
-const statusWords: Record<ApplicationStatus, string> = { interested: 'Interested', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
+const statusWords: Record<ApplicationStatus, string> = { interested: 'Saved', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
 
 export function Roadmap() {
   const { state, dispatch } = useStore();
@@ -262,7 +262,7 @@ export function Roadmap() {
               <Link to="/" className="rm3-noapps-go">
                 Explore the feed
               </Link>
-              <Link to="/saved" className="rm3-noapps-go">
+              <Link to="/applications?stage=saved" className="rm3-noapps-go">
                 Go to Saved
               </Link>
             </div>

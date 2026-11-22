@@ -60,6 +60,11 @@ export function stageFromQuery(value: string | null): StatusFilter | null {
   return STATUS_FILTERS.includes(value as StatusFilter) ? (value as StatusFilter) : null;
 }
 
+/** Where the old /saved address goes: Sheet view when that was open, otherwise the Saved stage. */
+export function savedPageTarget(search: string): string {
+  return new URLSearchParams(search).get('view') === 'sheet' ? '/applications?view=sheet' : '/applications?stage=saved';
+}
+
 export interface ListPrefs {
   sort: ListSort;
   status: StatusFilter;

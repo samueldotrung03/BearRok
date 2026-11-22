@@ -10,6 +10,7 @@ import { Spotlight } from './components/Spotlight.tsx';
 import './styles/assistant.css';
 import './styles/spotlight.css';
 import { Agents } from './pages/Agents.tsx';
+import { savedPageTarget } from './lib/portal/list.ts';
 import { Applications } from './pages/Applications.tsx';
 import { ApplicationPortal } from './pages/ApplicationPortal.tsx';
 import { ApplicationView } from './pages/ApplicationView.tsx';
@@ -29,8 +30,7 @@ import { Today } from './pages/Today.tsx';
 /** The old Saved page's address, sent to the Saved stage of Applications (or its Sheet view). */
 export function SavedRedirect() {
   const { search } = useLocation();
-  const sheet = new URLSearchParams(search).get('view') === 'sheet';
-  return <Navigate to={sheet ? '/applications?view=sheet' : '/applications?stage=saved'} replace />;
+  return <Navigate to={savedPageTarget(search)} replace />;
 }
 
 /** Pages for getting into an account. They have no sidebar and need no sign-in. */

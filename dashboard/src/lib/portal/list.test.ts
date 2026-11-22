@@ -9,6 +9,8 @@ import {
   filterExceptStatus,
   mergeApplications,
   normalizePrefs,
+  savedPageTarget,
+  stageFromQuery,
   progressLabel,
   progressOf,
   sortApplications,
@@ -169,6 +171,14 @@ describe('filterApplications', () => {
     expect(ids(filterApplications(list, { ...base, status: 'applied' }, NOW))).toEqual(['c']);
     expect(ids(filterApplications(list, { ...base, status: 'applying' }, NOW))).toEqual(['b']);
   });
+  it('Saved is the first stage and Everything includes it; active does not', () => {
+    const withSaved = [...list, row('s', { status: 'interested', title: 'Kept card' })];
+    expect(ids(filterApplications(withSaved, { ...base, status: 'saved' }, NOW))).toEqual(['s']);
+    expect(ids(filterApplications(withSaved, { ...base, status: 'all' }, NOW))).toEqual(['a', 'b', 'c', 'd', 's']);
+    expect(ids(filterApplications(withSaved, base, NOW))).toEqual(['a', 'b', 'd']);
+    expect(statusCounts(withSaved).saved).toBe(1);
+    expect(statusCounts(withSaved).all).toBe(5);
+  });
   it('narrows by kind, including the student’s own', () => {
     expect(ids(filterApplications(list, { ...base, kind: 'custom' }, NOW))).toEqual(['d']);
     expect(ids(filterApplications(list, { ...base, kind: 'club' }, NOW))).toEqual(['b']);
@@ -183,6 +193,21 @@ describe('filterApplications', () => {
   it('counts each status chip over the other filters', () => {
     expect(statusCounts(filterExceptStatus(list, { kind: 'all', query: '', dueSoon: false }, NOW))).toEqual({ saved: 0, active: 3, to_apply: 2, applying: 1, applied: 1, all: 4 });
     expect(statusCounts(filterExceptStatus(list, { kind: 'all', query: '', dueSoon: true }, NOW))).toEqual({ saved: 0, active: 1, to_apply: 1, applying: 0, applied: 1, all: 2 });
+  });
+});
+
+describe('stage links', () => {
+  it('reads a pipeline stage from the address and sends the old Saved page to that stage', () => {
+    expect(stageFromQuery('saved')).toBe('saved');
+    expect(stageFromQuery('all')).toBe('all');
+    expect(stageFromQuery('applying')).toBe('applying');
+    expect(stageFromQuery('sheet')).toBeNull();
+    expect(stageFromQuery(null)).toBeNull();
+    expect(stageFromQuery('')).toBeNull();
+    expect(savedPageTarget('')).toBe('/applications?stage=saved');
+    expect(savedPageTarget('?stage=saved')).toBe('/applications?stage=saved');
+    expect(savedPageTarget('?view=sheet')).toBe('/applications?view=sheet');
+    expect(savedPageTarget('?view=sheet&stage=saved')).toBe('/applications?view=sheet');
   });
 });
 

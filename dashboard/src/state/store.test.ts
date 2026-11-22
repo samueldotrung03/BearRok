@@ -10,7 +10,7 @@ import { evidenceFor, orderByEvidence } from '../lib/pathways.ts';
 import { buildOpportunityRoadmap, planFor } from '../lib/roadmap.ts';
 import { applicationInfo } from '../data/sample.ts';
 import type { PathProfile, Roadmap } from '../types.ts';
-import { clearDemoStorage, fromBackendProfile, isSampleStudent, loadState, reducer, saveState, startingState, storageKey, type AppState } from './store.ts';
+import { clearDemoStorage, fromBackendProfile, isSampleStudent, loadState, migrateSavedState, reducer, saveState, startingState, storageKey, type AppState } from './store.ts';
 
 // One clock for every call: the score includes recency, so two calls a millisecond apart would
 // otherwise differ in the last digits and break exact comparisons.
@@ -94,6 +94,61 @@ describe('reducer', () => {
     expect(state.dismissed).toEqual([]);
     expect(state.doneSteps).toEqual(['step-ds', 'step-sql']);
     expect(state.profile).toEqual(initialState.profile);
+  });
+});
+
+describe('saved migration', () => {
+  const legacy = (): AppState => ({
+    ...initialState,
+    saved: ['keep', 'already', 'gone'],
+    dismissed: ['gone'],
+    applications: {
+      already: { status: 'applying', drafts: { 0: 'My draft' }, materialsDone: ['Resume'] },
+    },
+  });
+
+  it('adds a Saved application for each save that has none, and changes nothing else', () => {
+    const before = legacy();
+    const next = migrateSavedState(before);
+    expect(next).not.toBe(before);
+    expect(next.saved).toEqual(['keep', 'already', 'gone']);
+    expect(next.dismissed).toEqual(['gone']);
+    expect(next.applications.keep).toEqual({ status: 'interested', drafts: {}, materialsDone: [] });
+    expect(next.applications.already).toEqual(before.applications.already);
+    expect(next.applications.gone).toBeUndefined();
+    expect(next.profile).toEqual(before.profile);
+    // A second pass finds nothing to add, so the same object comes back.
+    expect(migrateSavedState(next)).toBe(next);
+  });
+
+  it('loadState migrates a saved list that was stored before applications tracked it', () => {
+    const box = new Map<string, string>();
+    const previous = globalThis.localStorage;
+    Object.assign(globalThis, {
+      localStorage: {
+        getItem: (key: string) => box.get(key) ?? null,
+        setItem: (key: string, value: string) => void box.set(key, value),
+        removeItem: (key: string) => void box.delete(key),
+        clear: () => box.clear(),
+        key: () => null,
+        length: 0,
+      },
+    });
+    box.set(
+      storageKey(null),
+      JSON.stringify({
+        saved: ['legacy-save', 'tracked'],
+        dismissed: [],
+        applications: { tracked: { status: 'to_apply', drafts: { 0: 'keep me' }, materialsDone: [] } },
+        profile: { name: 'Ada Lovelace' },
+      }),
+    );
+    const loaded = loadState({ ...initialState, saved: [], dismissed: [], applications: {} });
+    expect(loaded.applications['legacy-save']).toEqual({ status: 'interested', drafts: {}, materialsDone: [] });
+    expect(loaded.applications.tracked).toMatchObject({ status: 'to_apply', drafts: { 0: 'keep me' } });
+    expect(loaded.saved).toEqual(['legacy-save', 'tracked']);
+    expect(loaded.profile.name).toBe('Ada Lovelace');
+    Object.assign(globalThis, { localStorage: previous });
   });
 });
 

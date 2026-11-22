@@ -2,14 +2,19 @@
 // basics, what people in the job say, what the interviews ask, and how to start. Each part fills in
 // when the agents finish it. "Add more" opens a window where the student tells the agents what they
 // want more of. Each interview format links to the steps of how to start that prepare for it. While
-// the agents work, one line says what they are doing.
-import { ArrowRight, ExternalLink, Map as MapIcon, Plus, RotateCw, Target } from 'lucide-react';
+// the agents work, one line says what they are doing and each tab says where its part is. A part
+// that failed says why and can be searched again on its own. The header says plainly when the guide
+// is partial, simulated, stopped by an empty Grok balance, or shown from the last copy while the
+// agents cannot be reached, and lets the student keep the career in their career interests.
+import { ArrowRight, Check, ExternalLink, Map as MapIcon, Plus, RotateCw, Target } from 'lucide-react';
 import { useInRouterContext, useNavigate } from 'react-router';
 import { GUIDES_KEY, type GuideStart } from '../../lib/roadmapx/journey.ts';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
+  guideState,
   isBusy,
   isResearching,
+  partLine,
   providerLabel,
   SECTION_IDS,
   SECTION_TITLES,
@@ -395,13 +400,14 @@ function Skeleton({ label }: { label: string }) {
   );
 }
 
-/** The line under a part's title: how much it holds and what the last "Add more" did. */
+/** The line under a part's title: how much it holds and what the last "Add more" or search did. */
 function partMeta(id: SectionId, s: SectionState<unknown>): string | null {
   if (!s.data) return null;
   const n = itemCount(id, s.data);
   const base = `${n} ${n === 1 ? 'item' : 'items'}`;
-  if (s.status === 'working') return `${base} · finding more`;
+  if (s.status === 'working') return `${base} · ${s.mode === 'more' ? 'finding more' : s.stage === 'validating' ? 'checking the new search' : 'searching again'}`;
   if (s.error) return `${base} · ${s.error}`;
+  if (s.unchecked) return `${base} · ${s.unchecked}`;
   if (s.added) return `${base} · ${s.added.count ? `added ${s.added.count} new` : 'nothing new found'} ${timeAgo(s.added.at)}`;
   return base;
 }
@@ -409,29 +415,49 @@ function partMeta(id: SectionId, s: SectionState<unknown>): string | null {
 function Part({
   id,
   index,
-  state,
+  guide,
   guideBusy,
   onAddMore,
+  onRetry,
   onNext,
   children,
 }: {
   id: SectionId;
   index: number;
-  state: SectionState<unknown>;
+  guide: Guide;
   guideBusy: boolean;
   onAddMore: () => void;
+  /** Searches this part again on its own. Resolves to an error line, or null once the agents have started. */
+  onRetry?: (id: SectionId) => Promise<string | null>;
   onNext?: () => void;
   children: ReactNode;
 }) {
+  const state = guide.sections[id] as SectionState<unknown>;
   const working = state.status === 'working';
   const meta = partMeta(id, state);
+  const [retryNote, setRetryNote] = useState<string | null>(null);
+  // A part can be searched again when it is not running and not still waiting its turn in the first search.
+  const canRetry = Boolean(onRetry) && !working && !(state.status === 'waiting' && isResearching(guide)) && guide.status !== 'planning';
+  const retry = async () => {
+    setRetryNote(null);
+    setRetryNote((await onRetry?.(id)) ?? null);
+  };
   const body =
     state.data !== null ? (
       children
     ) : state.status === 'failed' ? (
-      <p className="dc-empty">This part could not be researched this time. Search again to try once more.</p>
+      <div className="dc-failed" role="status">
+        <p className="font-semibold text-ink">{partLine(guide, id)}</p>
+        <p className="mt-1 text-ink-2">{state.error ?? 'This part could not be researched this time.'}</p>
+        {onRetry && (
+          <button type="button" className="dc-soft mt-3" onClick={retry} disabled={!canRetry}>
+            <RotateCw className="size-4" aria-hidden="true" />
+            Search this part again
+          </button>
+        )}
+      </div>
     ) : (
-      <Skeleton label={working ? 'Researching' : 'Waiting to start'} />
+      <Skeleton label={partLine(guide, id)} />
     );
   return (
     <section id={`guide-panel-${id}`} role="tabpanel" aria-labelledby={`guide-tab-${id}`} className="dc-panel dc-sec" aria-busy={working}>
@@ -450,12 +476,24 @@ function Part({
           )}
         </div>
         {state.data !== null && (
-          <button type="button" className="dc-soft" onClick={onAddMore} disabled={guideBusy} aria-haspopup="dialog">
-            <Plus className="size-4" aria-hidden="true" />
-            {working ? 'Finding more' : 'Add more'}
-          </button>
+          <div className="dc-sec-actions">
+            {onRetry && (
+              <button type="button" className="dc-soft dc-icon" onClick={retry} disabled={!canRetry || guideBusy} aria-label="Search this part again" title="Search this part again">
+                <RotateCw className="size-4" aria-hidden="true" />
+              </button>
+            )}
+            <button type="button" className="dc-soft" onClick={onAddMore} disabled={guideBusy || working} aria-haspopup="dialog">
+              <Plus className="size-4" aria-hidden="true" />
+              {working && state.mode === 'more' ? 'Finding more' : 'Add more'}
+            </button>
+          </div>
         )}
       </header>
+      {retryNote && (
+        <p className="dc-notice is-warn mb-4" role="alert">
+          {retryNote}
+        </p>
+      )}
       {body}
       {onNext && (
         <footer className="dc-sec-foot">
@@ -502,14 +540,18 @@ function Tabs({ guide, current, onPick }: { guide: Guide; current: SectionId; on
             onKeyDown={(e) => move(e, i)}
             title={`Press ${i + 1}`}
           >
-            <span className={`dc-step-mark ${s.status === 'working' ? 'is-working' : s.data ? 'is-done' : ''}`} aria-hidden="true">
+            <span className={`dc-step-mark ${s.status === 'working' ? 'is-working' : s.data ? 'is-done' : s.status === 'failed' ? 'is-failed' : ''}`} aria-hidden="true">
               <PartIcon id={id} />
             </span>
-            <span className="min-w-0 flex-1 text-left">{SECTION_TITLES[id]}</span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block">{SECTION_TITLES[id]}</span>
+              {/* Where each part is, while the guide is being researched or when a part did not finish. */}
+              {(s.status !== 'done' || s.failure) && <span className={`dc-step-state ${s.status === 'failed' || s.failure ? 'is-bad' : ''}`}>{partLine(guide, id)}</span>}
+            </span>
             <kbd className="dc-kbd dc-step-key" aria-hidden="true">
               {i + 1}
             </kbd>
-            <span className="sr-only">{s.status === 'working' ? ', researching' : s.data ? ', ready' : s.status === 'failed' ? ', not found' : ', waiting'}</span>
+            <span className="sr-only">{`, ${partLine(guide, id).toLowerCase()}`}</span>
           </button>
         );
       })}
@@ -520,19 +562,28 @@ function Tabs({ guide, current, onPick }: { guide: Guide; current: SectionId; on
 export function CareerGuide({
   guide,
   onSearchAgain,
+  onRetryPart,
   onAddMore,
   onSuggest = async () => [],
   goalAction,
+  interest,
+  offline = false,
   firstPart = 'basics',
 }: {
   guide: Guide;
   onSearchAgain: () => void;
+  /** "Search again" on one part only. */
+  onRetryPart?: (section: SectionId) => Promise<string | null>;
   /** Sends what the student asked for one part. Resolves to an error line, or null once the agents have started. */
   onAddMore: (section: SectionId, prompt: string) => Promise<string | null>;
   /** Requests the agents suggest for one part. */
   onSuggest?: (section: SectionId) => Promise<string[]>;
   /** Shown when this career is one of the roadmap paths and not already the goal. */
   goalAction?: () => void;
+  /** Whether the career is in the student's career interests, and how to add or take it out. */
+  interest?: { added: boolean; onToggle: () => void; note: string | null };
+  /** The backend could not be reached on the last refresh; the guide shown is the last copy. */
+  offline?: boolean;
   /** The part shown when the guide opens. */
   firstPart?: SectionId;
 }) {
@@ -543,6 +594,8 @@ export function CareerGuide({
   const [target, setTarget] = useState<number[]>([]);
   const line = stepLine(guide);
   const researching = isResearching(guide);
+  const state = guideState(guide);
+  const missing = SECTION_IDS.filter((id) => !guide.sections[id].data || guide.sections[id].failure);
   const s = guide.sections;
   const topRef = useRef<HTMLDivElement>(null);
 
@@ -601,12 +654,48 @@ export function CareerGuide({
               </>
             ) : (
               <span className="text-ink-3">
-                {SAMPLE_FEED && guide.provider === 'simulated' ? 'Sample guide, written for this public copy. No agents researched it.' : `Researched ${dateLabel(guide.startedAt)} by ${providerLabel(guide.provider)}`}
+                {SAMPLE_FEED && guide.provider === 'simulated'
+                  ? 'Sample guide, written for this public copy. No agents researched it.'
+                  : guide.provider === 'simulated'
+                    ? `Simulated example, written ${dateLabel(guide.startedAt)} by simulated agents, not researched. Connect Grok in Settings for a real guide.`
+                    : `Researched ${dateLabel(guide.startedAt)} by ${providerLabel(guide.provider)}`}
               </span>
             )}
           </p>
+          {state === 'out-of-balance' && (
+            <p className="dc-notice is-warn" role="alert">
+              {`Grok's usage balance is used up (HTTP 402), so the agents stopped. ${missing.length ? 'Finished parts are kept. ' : ''}Top up the Grok balance, then search the missing parts again.`}
+            </p>
+          )}
+          {state === 'partial' && (
+            <p className="dc-notice" role="status">
+              {`${SECTION_IDS.length - missing.length} of ${SECTION_IDS.length} parts are ready. ${missing.map((id) => SECTION_TITLES[id]).join(', ')}: did not finish. Open it to see why and search it again.`}
+            </p>
+          )}
+          {offline && (
+            <p className="dc-notice" role="status">
+              Your agents cannot be reached right now. This is the last copy they sent; it updates when they are back.
+            </p>
+          )}
+          {interest?.note && (
+            <p className="dc-notice" role="status">
+              {interest.note}
+            </p>
+          )}
         </div>
         <div className="dc-guide-actions">
+          {interest && (
+            <button
+              type="button"
+              className={`dc-soft ${interest.added ? 'is-on' : ''}`}
+              onClick={interest.onToggle}
+              aria-pressed={interest.added}
+              title={interest.added ? 'Take it out of your career interests' : 'Your agents search for this career, and your roadmap ranks it first'}
+            >
+              {interest.added ? <Check className="size-4" aria-hidden="true" /> : <Plus className="size-4" aria-hidden="true" />}
+              {interest.added ? 'In your career interests' : 'Add to my career interests'}
+            </button>
+          )}
           {goalAction && (
             <button type="button" className="dc-soft" onClick={goalAction}>
               <Target className="size-4" aria-hidden="true" />
@@ -629,9 +718,10 @@ export function CareerGuide({
             key={current}
             id={current}
             index={index}
-            state={s[current] as SectionState<unknown>}
+            guide={guide}
             guideBusy={researching}
             onAddMore={() => setAsking(current)}
+            onRetry={onRetryPart}
             onNext={index < SECTION_IDS.length - 1 ? () => pick(SECTION_IDS[index + 1]!) : undefined}
           >
             {bodies[current]}

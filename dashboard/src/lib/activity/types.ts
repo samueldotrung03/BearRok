@@ -43,6 +43,14 @@ export interface ActivityAgent {
   queuedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** The last few distinct action lines, newest first. */
+  recent: ActivityAction[];
+}
+
+/** One line of what an agent just did. */
+export interface ActivityAction {
+  at: string;
+  text: string;
 }
 
 /** Work handed from one level to the next. active: the receiving level has work queued or running. */

@@ -19,6 +19,7 @@ export function agent(id: string, over: Partial<ActivityAgent> = {}): ActivityAg
     queuedAt: at(0),
     startedAt: at(1),
     finishedAt: null,
+    recent: [],
     ...over,
   };
 }

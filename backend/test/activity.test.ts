@@ -110,6 +110,30 @@ test('activity: timing is stamped when an agent is first seen in each status', (
   assert.ok(ended.flows.every((f) => !f.active));
 });
 
+test('activity: recent keeps the last 4 distinct action lines, newest first', () => {
+  let now = NOW.getTime();
+  const observer = new RunObserver(() => new Date(now));
+  const run = snapshot();
+  const reader = () => observer.update(run).live.agents.find((a) => a.id === 'job:job-2')!;
+  assert.deepEqual(reader().recent, []);
+
+  const lines = ['Reading posting at mlh.com', 'Found the form', 'Reading posting at mlh.com', 'Checking dates', 'Saved the draft', 'Done reading'];
+  for (const text of lines) {
+    now += 1000;
+    run.jobs[1] = { ...run.jobs[1]!, result: text };
+    observer.update(run);
+  }
+  const recent = reader().recent;
+  assert.deepEqual(recent.map((r) => r.text), ['Done reading', 'Saved the draft', 'Checking dates', 'Reading posting at mlh.com']);
+  assert.equal(recent[0]!.at, new Date(now).toISOString());
+
+  // The same line, while it is still the latest, is not stored again.
+  now += 1000;
+  observer.update(run);
+  assert.equal(reader().recent.length, 4);
+  assert.equal(reader().recent[0]!.at, recent[0]!.at);
+});
+
 test('history: newest first, at most 10 runs per student', () => {
   const history = new MemoryRunHistory();
   for (let i = 1; i <= 12; i++) history.add('s', outlineReport({ number: i, trigger: 'fill', status: 'complete', startedAt: new Date(NOW.getTime() + i * 60_000).toISOString(), finishedAt: null, stats: { jobs: 1, skipped: 0, candidates: 0, merged: 0, kept: 0, rejected: 0, added: 0 } }));

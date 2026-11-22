@@ -2,7 +2,7 @@
 // timing is stamped here, the first time each agent is seen in each status.
 import { plainError } from '../plainError.ts';
 import { REVIEWERS, type Job, type RunRecord, type RunSnapshot, type Trigger } from '../agents/types.ts';
-import { LEVELS, type ActivityAgent, type ActivityFlow, type ActivityLevel, type ActivityRun, type ActivityStatus, type AgentKind, type AgentOutcome, type LiveActivity, type RunOutcome, type RunReport } from './types.ts';
+import { LEVELS, type ActivityAction, type ActivityAgent, type ActivityFlow, type ActivityLevel, type ActivityRun, type ActivityStatus, type AgentKind, type AgentOutcome, type LiveActivity, type RunOutcome, type RunReport } from './types.ts';
 
 const TIMEOUT = /timed? ?out|timeout|deadline exceeded|ETIMEDOUT/i;
 const NOT_REVIEWED = /^Could not be reviewed:?\s*/;
@@ -32,8 +32,8 @@ const JOB_KIND: Record<Job['kind'], { kind: AgentKind; name: string }> = {
   'guide-review': { kind: 'guide-review', name: 'Guide reviewer' },
 };
 
-/** An agent before timing is added. */
-type Shape = Omit<ActivityAgent, 'queuedAt' | 'startedAt' | 'finishedAt'>;
+/** An agent before timing and its action history are added. */
+type Shape = Omit<ActivityAgent, 'queuedAt' | 'startedAt' | 'finishedAt' | 'recent'>;
 
 /** Every agent in a run snapshot, by level, without timing. Pure. */
 export function shapesOf(run: RunSnapshot): Shape[] {
@@ -203,9 +203,13 @@ type Timing = { status: ActivityStatus; queuedAt: string; startedAt: string | nu
  * Follows one run at a time. update() takes each snapshot the system sends and returns the
  * activity with timing, plus the ids whose status changed since the previous snapshot.
  */
+const RECENT_LIMIT = 4;
+
 export class RunObserver {
   private runId: string | null = null;
   private times = new Map<string, Timing>();
+  /** Distinct action lines per agent, newest first, at most four. */
+  private recent = new Map<string, ActivityAction[]>();
   private now: () => Date;
   /** True until the first update: a run already over then (restored after a restart) was not watched. */
   private first = true;
@@ -217,6 +221,17 @@ export class RunObserver {
   private reset(run: RunSnapshot | null) {
     this.runId = run?.id ?? null;
     this.times.clear();
+    this.recent.clear();
+  }
+
+  /** Remember a new action line. The same line again, while it is still the latest, is not stored twice. */
+  private note(id: string, detail: string | null, at: string): ActivityAction[] {
+    const text = detail?.trim() ?? '';
+    const prev = this.recent.get(id) ?? [];
+    if (!text || prev[0]?.text === text) return prev;
+    const next = [{ at, text }, ...prev.filter((line) => line.text !== text)].slice(0, RECENT_LIMIT);
+    this.recent.set(id, next);
+    return next;
   }
 
   update(run: RunSnapshot | null): { live: LiveActivity; agents: ActivityAgent[] } {
@@ -239,7 +254,7 @@ export class RunObserver {
         t = { status: s.status, queuedAt, startedAt, finishedAt };
         this.times.set(s.id, t);
       }
-      return { ...s, queuedAt: t.queuedAt, startedAt: t.startedAt, finishedAt: t.finishedAt };
+      return { ...s, queuedAt: t.queuedAt, startedAt: t.startedAt, finishedAt: t.finishedAt, recent: this.note(s.id, s.detail, stamp) };
     });
     return {
       live: { run: runOf(run, agents), agents, flows: flowsOf(run, shapes), counts: countsOf(agents), changed: changed.reverse(), serverTime: stamp },

@@ -1,0 +1,74 @@
+{
+  "_about": "Answers shaped like the Grok agents' replies for a 'Data Engineering' career guide, written for offline tests. No real people: the posts use role descriptions, not names or handles.",
+  "career_plan": {
+    "title": "Data Engineer",
+    "oneLine": "Builds the pipelines and storage that move raw data to analysts and models.",
+    "field": "data",
+    "angles": {
+      "basics": "Batch and streaming pipelines, SQL and Python, warehouses such as Snowflake or BigQuery, orchestration with Airflow, and data modelling.",
+      "voices": "Junior and senior data engineers, analytics engineers, and people who moved in from analyst or software roles.",
+      "interview": "SQL screens, Python coding rounds, data modelling and pipeline design interviews, and behavioural rounds.",
+      "start": "SQL first, then Python, one end-to-end pipeline project, and a cloud fundamentals course, ready for the SQL and design rounds."
+    }
+  },
+  "career_basics": {
+    "summary": "Data engineers design, build and run the pipelines that collect, clean and store data so analysts and machine learning teams can use it.",
+    "dayInLife": ["Check overnight pipeline runs and fix a failed job", "Write a SQL model for a new dashboard", "Review a teammate's pull request", "Meet analysts about a new data source"],
+    "whatTheyDo": ["Build batch and streaming pipelines", "Model data in a warehouse", "Monitor data quality and freshness", "Keep storage and compute costs down"],
+    "whereTheyWork": ["Technology companies", "Banks and insurers", "Retail and e-commerce", "Health systems", "Consultancies"],
+    "specialties": [
+      { "name": "Analytics engineering", "what": "SQL models and tests that analysts build on" },
+      { "name": "Streaming", "what": "Real-time pipelines on Kafka or Kinesis" },
+      { "name": "Platform engineering", "what": "The shared tools other data engineers use" }
+    ],
+    "skills": [
+      { "name": "SQL", "kind": "tool" },
+      { "name": "Python", "kind": "tool" },
+      { "name": "Apache Airflow", "kind": "tool" },
+      { "name": "Dimensional modelling", "kind": "method" },
+      { "name": "Distributed systems", "kind": "knowledge" },
+      { "name": "AWS Certified Data Engineer", "kind": "credential" }
+    ],
+    "education": "Usually a bachelor's degree in computer science, information systems or a related field.",
+    "pay": { "figure": "Median about $135,000 a year in the US (2025)", "url": "https://www.bls.gov/ooh/computer-and-information-technology/database-administrators.htm" },
+    "outlook": "Faster than average growth as more companies move data to the cloud.",
+    "sources": [
+      { "title": "BLS Occupational Outlook Handbook", "url": "https://www.bls.gov/ooh/computer-and-information-technology/database-administrators.htm" },
+      { "title": "Apache Airflow documentation", "url": "https://airflow.apache.org/docs/" }
+    ]
+  },
+  "career_voices": {
+    "posts": [
+      { "author": "A senior data engineer", "role": "Senior data engineer at a payments company", "handle": null, "text": "Most of my week is not writing new pipelines. It is making old ones reliable and cheaper.", "takeaway": "Learn monitoring and testing, not only building.", "topic": "the work", "url": null, "date": "2026-09-14" },
+      { "author": "A junior data engineer", "role": "Data engineer, first year", "handle": null, "text": "I got the job because my portfolio had one pipeline that ran every day, with tests and a README.", "takeaway": "One working, scheduled project beats five notebooks.", "topic": "getting in", "url": null, "date": "2026-10-02" },
+      { "author": "An analytics engineer", "role": "Analytics engineer at a retailer", "handle": null, "text": "SQL is still 80% of the job. Get really good at window functions.", "takeaway": "Practise advanced SQL early.", "topic": "advice", "url": null, "date": "2026-08-21" }
+    ]
+  },
+  "career_voices_summary": { "summary": "People say the work is mostly keeping pipelines reliable and cheap. They advise strong SQL and one scheduled, tested project." },
+  "career_interview": {
+    "formats": [
+      { "name": "SQL screen", "tests": "Joins, aggregations and window functions under time", "howToPractice": "Timed problems on a practice site, then explain each query aloud", "url": null },
+      { "name": "Pipeline design interview", "tests": "How you would move and model data for a product", "howToPractice": "Sketch three pipelines end to end and talk through failure cases", "url": null },
+      { "name": "Behavioural interview", "tests": "Ownership and how you handle broken data", "howToPractice": "Write four short stories about problems you fixed", "url": null }
+    ],
+    "questions": [
+      { "kind": "SQL screen", "question": "Find each customer's second most recent order.", "tip": "Use ROW_NUMBER over a partition and say why not a self-join." },
+      { "kind": "Pipeline design interview", "question": "Design a pipeline for click events that analysts can query within an hour.", "tip": "Start from the consumers and the freshness they need." },
+      { "kind": "Behavioural interview", "question": "Tell me about a time data you owned was wrong.", "tip": "Say how you found it, fixed it, and stopped it happening again." }
+    ],
+    "sources": [{ "title": "Airflow best practices", "url": "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html" }]
+  },
+  "career_start": {
+    "steps": [
+      { "title": "Learn SQL to window functions", "detail": "Work through joins, grouping and window functions on a real dataset.", "when": "First semester", "resource": { "title": "SQLBolt", "url": "https://sqlbolt.com/" }, "prepares": ["SQL screen"] },
+      { "title": "Build one scheduled pipeline", "detail": "Load a public dataset daily with Airflow, test it, and write a README.", "when": "Sophomore summer", "resource": null, "prepares": ["Pipeline design interview"] },
+      { "title": "Write four problem stories", "detail": "One per project: what broke, what you did, what changed.", "when": "Before applying", "resource": null, "prepares": ["Behavioural interview"] }
+    ],
+    "resources": [
+      { "title": "Data Engineering Zoomcamp", "url": "https://github.com/DataTalksClub/data-engineering-zoomcamp", "kind": "course", "free": true },
+      { "title": "Designing Data-Intensive Applications", "url": "https://dataintensive.net/", "kind": "book", "free": false }
+    ]
+  },
+  "career_ask": { "route": "career-discovery", "focus": "Entry-level pay for data engineers in Canada.", "reply": "Looking for entry-level pay figures in Canada." },
+  "career_suggest": { "prompts": ["Pay for new graduates in Canada", "Projects a sophomore can finish in a summer", "Which certifications employers ask for"] }
+}

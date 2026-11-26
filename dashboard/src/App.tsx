@@ -10,7 +10,6 @@ import { Spotlight } from './components/Spotlight.tsx';
 import './styles/assistant.css';
 import './styles/spotlight.css';
 import { Agents } from './pages/Agents.tsx';
-import { savedPageTarget } from './lib/portal/list.ts';
 import { Applications } from './pages/Applications.tsx';
 import { ApplicationPortal } from './pages/ApplicationPortal.tsx';
 import { ApplicationView } from './pages/ApplicationView.tsx';
@@ -21,17 +20,12 @@ import { ForgotPassword } from './pages/ForgotPassword.tsx';
 import { Profile } from './pages/Profile.tsx';
 import { Roadmap } from './pages/Roadmap.tsx';
 import { RoadmapList } from './pages/RoadmapList.tsx';
+import { Saved } from './pages/Saved.tsx';
 import { Search } from './pages/Search.tsx';
 import { Settings } from './pages/Settings.tsx';
 import { SignIn } from './pages/SignIn.tsx';
 import { SignUp } from './pages/SignUp.tsx';
 import { Today } from './pages/Today.tsx';
-
-/** The old Saved page's address, sent to the Saved stage of Applications (or its Sheet view). */
-export function SavedRedirect() {
-  const { search } = useLocation();
-  return <Navigate to={savedPageTarget(search)} replace />;
-}
 
 /** Pages for getting into an account. They have no sidebar and need no sign-in. */
 const accountPages = ['/signin', '/signup', '/forgot-password'];
@@ -81,8 +75,7 @@ export function App() {
         <Route path="/applications/:id" element={<ApplicationPortal />} />
         <Route path="/applications/:id/view" element={<ApplicationView />} />
         <Route path="/calendar" element={<Calendar />} />
-        {/* Saved is the first stage of Applications now; the old address lands there. */}
-        <Route path="/saved" element={<SavedRedirect />} />
+        <Route path="/saved" element={<Saved />} />
         <Route path="/agents" element={<Agents />} />
         <Route path="/search" element={<Search />} />
         <Route path="/profile" element={<Profile />} />

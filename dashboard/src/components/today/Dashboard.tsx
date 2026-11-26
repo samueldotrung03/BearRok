@@ -92,7 +92,7 @@ export function StatTiles({ headline, week, roadmap, saved, fresh }: { headline:
         </span>
       </Link>
 
-      <Link to="/applications?stage=saved" className="db-stat">
+      <Link to="/saved" className="db-stat">
         <span className="db-stat-label">
           <Bookmark aria-hidden="true" /> Saved
         </span>

@@ -1,12 +1,11 @@
-// Every posting the student saved and every application they are working on, from their account,
-// as one pipeline: Saved (kept from the feed) → To apply → Applying → Applied. Saving a card puts it
-// here at Saved; starting it moves it on. The student can also start one from a saved posting or a
-// blank one. Each row opens the application's portal, where its parts are written and uploaded; a
-// Saved row opens its details in place. Sheet view shows the same list as a spreadsheet. The old
-// Saved page's address lands here (?stage=saved, ?view=sheet). The rules live in src/lib/portal/list.ts.
+// Applications the student is working on: To apply, Applying and Applied. Saving a card does not
+// put it here; it stays on Saved as Interested until the status moves on. The student can also
+// start one from a saved posting or a blank one. Each row opens the application's portal. Sheet
+// view shows the same list as a spreadsheet. An old ?stage=saved link goes to /saved. The rules
+// live in src/lib/portal/list.ts.
 import { X as XSmall } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApplicationListRow } from '../components/applications/list/ApplicationListRow.tsx';
 import { ListToolbar } from '../components/applications/list/ListToolbar.tsx';
 import { NewApplicationButton } from '../components/applications/list/NewApplication.tsx';
@@ -41,8 +40,14 @@ export function Applications() {
   const [query, setQuery] = useState('');
   // A link to a stage (the dock's old Saved entry, a Saved count elsewhere) or to Sheet view.
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const [view, setView] = useState<View>(params.get('view') === 'sheet' ? 'sheet' : 'list');
   useEffect(() => {
+    // Saved is its own page. Read this before the query is cleared below.
+    if (params.get('stage') === 'saved') {
+      navigate('/saved', { replace: true });
+      return;
+    }
     const stage = stageFromQuery(params.get('stage'));
     if (stage) setPrefs({ status: stage });
     if (params.get('view') === 'sheet') setView('sheet');
@@ -81,8 +86,8 @@ export function Applications() {
   const unreachable = live.status === 'offline';
   const offline = unreachable && !live.sample;
   const all = useMemo(
-    () => (offline ? [] : mergeApplications(live.applications, records, [...live.savedCards, ...live.opportunities], state.saved)),
-    [offline, live.applications, records, live.savedCards, live.opportunities, state.saved],
+    () => (offline ? [] : mergeApplications(live.applications, records, [...live.savedCards, ...live.opportunities])),
+    [offline, live.applications, records, live.savedCards, live.opportunities],
   );
   // The posting behind each application, for its picture and who can apply.
   const postingsById = useMemo(() => new Map([...live.opportunities, ...live.savedCards].map((o) => [o.id, o])), [live.opportunities, live.savedCards]);
@@ -96,12 +101,11 @@ export function Applications() {
   const shown = sortApplications(filterApplications(all, { ...others, status: prefs.status }, now), prefs.sort);
 
   const active = all.filter((a) => a.status === 'to_apply' || a.status === 'applying');
-  const savedCount = all.filter((a) => a.status === 'interested').length;
   const dueThisWeek = active.filter((a) => dueWithinWeek(a, now)).length;
   const subtitle =
     all.length === 0
-      ? 'What you save and everything you apply to, in one place.'
-      : `${savedCount} saved, ${active.length} in progress${dueThisWeek ? `, ${dueThisWeek} due this week` : ''}. Start a saved one when you are ready to apply.`;
+      ? 'The ones you are ready to apply to. Anything you only saved stays on Saved.'
+      : `${active.length} in progress${dueThisWeek ? `, ${dueThisWeek} due this week` : ''}.`;
 
   const clearFilters = () => {
     setQuery('');
@@ -141,11 +145,13 @@ export function Applications() {
         <Card className="p-10 text-center">
           <p className="text-lg font-semibold">{loading ? 'Loading your applications…' : 'No applications yet'}</p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-2">
-            Save a card in the feed and it is kept here as Saved; saving also tells the agents to look for more like it. You can also start a blank application for
-            anything else.
+            Save a card and it stays on Saved until you are ready to apply. Set it to To apply and it shows here. You can also start a blank application for anything else.
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
             <NewApplicationButton variant="solid" />
+            <Link to="/saved" className="inline-flex h-10 items-center rounded-xl border border-line bg-white px-4 text-sm font-semibold text-ink">
+              Go to Saved
+            </Link>
             <Link to="/" className="inline-flex h-10 items-center rounded-xl border border-line bg-white px-4 text-sm font-semibold text-ink">
               Go to the feed
             </Link>
@@ -163,7 +169,7 @@ export function Applications() {
             <Card className="mt-4 p-8 text-center">
               <p className="font-semibold">Nothing matches</p>
               <p className="mx-auto mt-1 max-w-sm text-sm text-ink-2">
-                {prefs.status === 'saved' && !query && prefs.kind === 'all' && !prefs.dueSoon ? 'Nothing saved yet. Save a card in the feed and it shows here.' : 'Try fewer words, another kind or another stage.'}
+                Try fewer words, another kind or another stage. Anything you only saved is on Saved.
               </p>
               <button type="button" onClick={clearFilters} className="mt-4 inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-white px-4 text-sm font-semibold">
                 <XSmall className="size-4" aria-hidden="true" /> Show everything

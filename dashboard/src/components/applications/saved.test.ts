@@ -1,5 +1,4 @@
-// Applications with Saved as its first stage, the expanded details of a Saved row, and Sheet view,
-// rendered to HTML.
+// The Saved page, the expanded details of a saved row, and the Applications sheet view, rendered to HTML.
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
@@ -75,13 +74,28 @@ describe('saved details', { timeout: 120_000 }, () => {
   });
 });
 
+describe('saved page', { timeout: 120_000 }, () => {
+  it('is the Saved list, with no sheet tab, even when an old sheet address is opened', async () => {
+    const { Saved } = await import('../../pages/Saved.tsx');
+    const html = renderToString(
+      createElement(MemoryRouter, { initialEntries: ['/saved?view=sheet'] }, createElement((await import('../../auth/AuthProvider.tsx')).AuthProvider, null,
+        createElement((await import('../../state/StoreProvider.tsx')).StoreProvider, null, createElement((await import('../../state/live.tsx')).LiveProvider, null, createElement(Saved))))),
+    );
+    expect(html).toContain('Saved');
+    expect(html).toContain('Search what you saved');
+    expect(html).not.toContain('Sheet view');
+    expect(html).not.toContain('aria-label="Applications spreadsheet"');
+  });
+});
+
 describe('applications page', { timeout: 120_000 }, () => {
-  it('has the List and Sheet view tabs, and Saved as the first stage', async () => {
+  it('has the List and Sheet view tabs, and no Saved stage', async () => {
     const { Applications } = await import('../../pages/Applications.tsx');
     const html = await wrap(createElement(Applications));
     expect(html).toContain('aria-label="Applications views"');
     expect(html).toContain('>List<');
     expect(html).toContain('>Sheet view<');
+    expect(html).not.toContain('>Saved<');
   });
 
   it('opens Sheet view from the old Saved page address', async () => {
@@ -125,18 +139,23 @@ describe('empty kinds', { timeout: 120_000 }, () => {
 });
 
 describe('status and sheet updates', { timeout: 120_000 }, () => {
-  it('saving a card puts it at Saved, and the status menu has no "not tracking"', async () => {
+  it('saving a card does not create an application, and the status menu defaults to Interested', async () => {
     const { reducer } = await import('../../state/store.ts');
     const { initialState } = await import('../../data/sample.ts');
     const fresh = { ...initialState, saved: [], applications: {} };
     const saved = reducer(fresh, { type: 'toggleSaved', id: 'x' });
-    expect(saved.applications.x?.status).toBe('interested');
-    expect(reducer(saved, { type: 'toggleSaved', id: 'x' }).applications.x).toBeUndefined();
+    expect(saved.saved).toEqual(['x']);
+    expect(saved.applications.x).toBeUndefined();
+    const interested = reducer(saved, { type: 'setApplication', id: 'x', status: 'interested' });
+    expect(reducer(interested, { type: 'toggleSaved', id: 'x' }).applications.x).toBeUndefined();
 
     const { StatusSelect } = await import('../StatusSelect.tsx');
     const html = await wrap(createElement(StatusSelect, { id: 'not-saved' }));
     expect(html).not.toMatch(/not tracking/i);
-    expect(html).toContain('<option value="interested" selected="">Saved</option>');
+    expect(html).toContain('<option value="interested" selected="">Interested</option>');
+    expect(html).toContain('To apply');
+    expect(html).toContain('Applying');
+    expect(html).toContain('Applied');
   });
 
   it('the sheet has no update button: a created Google Sheet updates on its own', async () => {

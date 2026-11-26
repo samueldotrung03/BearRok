@@ -1,12 +1,8 @@
 // One application on the Applications list, with the posting's picture on the left and what
 // matters for applying: the deadline, who can apply, what the application asks for, and how much
-// of it is written. The title opens its portal. A Saved row (the first stage) is a posting the
-// student kept from the feed: it opens its details in place, starts the application, or is removed.
-import { ArrowRight, ChevronDown, Clock, FileText, ListChecks, PenLine, Users, X } from 'lucide-react';
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { useStore } from '../../../state/StoreProvider.tsx';
-import { SavedDetails } from '../SavedDetails.tsx';
+// of it is written. The title opens its portal.
+import { ArrowRight, Clock, FileText, ListChecks, PenLine, Users } from 'lucide-react';
+import { Link } from 'react-router';
 import { statusLabel } from '../../../lib/applications.ts';
 import { daysLeft, deadlineLabel, progressLabel, type ListApplication } from '../../../lib/portal/list.ts';
 import type { TrackedApplication } from '../../../state/live.tsx';
@@ -44,23 +40,9 @@ export function ApplicationListRow({
   const share = a.progress.total === 0 ? 0 : Math.round((a.progress.done / a.progress.total) * 100);
   const needs = needsLabel(tracked?.prompts ?? [], tracked?.materials ?? []);
   const who = posting?.eligibility ?? null;
-  const saved = a.status === 'interested';
-  const [open, setOpen] = useState(false);
-  const { state, dispatch } = useStore();
-  const navigate = useNavigate();
-  // Starting moves it on to To apply (sent to the account by the live layer) and opens its portal.
-  const start = () => {
-    dispatch({ type: 'setApplication', id: a.opportunityId, status: 'to_apply' });
-    navigate(portalPath(a.opportunityId));
-  };
-  // Removing a Saved row unsaves it: the agents hear it, and an application with nothing written goes.
-  const remove = () => {
-    if (state.saved.includes(a.opportunityId)) dispatch({ type: 'toggleSaved', id: a.opportunityId });
-    else dispatch({ type: 'setApplication', id: a.opportunityId, status: null });
-  };
 
   return (
-    <li className="saved-item" data-open={open}>
+    <li className="saved-item">
       <article className="feed-row apl-card" aria-labelledby={`apl-${a.opportunityId}`} data-status={a.status}>
         <div className="feed-row-layout">
         <div className="feed-row-media">
@@ -123,42 +105,14 @@ export function ApplicationListRow({
             <span className="ml-auto flex flex-wrap items-center gap-2 text-sm text-ink-2">
               {/* Status is changed here; one made by the student is changed in its portal. */}
               {!a.custom && <StatusSelect id={a.opportunityId} />}
-              {saved && posting && (
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  aria-controls={`${a.opportunityId}-details`}
-                  onClick={() => setOpen((v) => !v)}
-                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink"
-                >
-                  Details
-                  <ChevronDown className={`size-4 transition ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
-                </button>
-              )}
-              {saved && (
-                <button type="button" onClick={remove} aria-label={`Remove ${a.title} from Saved`} title="Remove from Saved" className="inline-flex size-9 items-center justify-center rounded-lg border border-line bg-white text-ink-2">
-                  <X className="size-4" aria-hidden="true" />
-                </button>
-              )}
-              {saved ? (
-                <button type="button" onClick={start} className="btn-primary inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-white">
-                  Start application <ArrowRight className="size-4" aria-hidden="true" />
-                </button>
-              ) : (
-                <Link to={portalPath(a.opportunityId)} className="btn-primary inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-white">
-                  Open application <ArrowRight className="size-4" aria-hidden="true" />
-                </Link>
-              )}
+              <Link to={portalPath(a.opportunityId)} className="btn-primary inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-white">
+                Open application <ArrowRight className="size-4" aria-hidden="true" />
+              </Link>
             </span>
           </div>
         </div>
         </div>
       </article>
-      {saved && open && posting && (
-        <div id={`${a.opportunityId}-details`}>
-          <SavedDetails opportunity={posting} application={tracked} />
-        </div>
-      )}
     </li>
   );
 }

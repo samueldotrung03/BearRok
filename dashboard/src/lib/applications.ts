@@ -6,8 +6,8 @@ import type { Application, ApplicationInfo, ApplicationStatus, Opportunity } fro
 export const STATUSES: ApplicationStatus[] = ['interested', 'to_apply', 'applying', 'applied'];
 
 export const statusLabel: Record<ApplicationStatus, string> = {
-  // The first stage. Everything saved starts here; the stored value stays "interested".
-  interested: 'Saved',
+  // The default for anything saved. The stored value stays "interested". Applications starts at To apply.
+  interested: 'Interested',
   to_apply: 'To apply',
   applying: 'Applying',
   applied: 'Applied',

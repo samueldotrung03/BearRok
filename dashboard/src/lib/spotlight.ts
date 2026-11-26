@@ -32,7 +32,7 @@ const PAGES: { to: string; title: string; subtitle: string; words: string }[] = 
   { to: '/applications', title: 'Applications', subtitle: 'Statuses, drafts and reminders', words: 'applications apply status tracker drafts' },
   { to: '/today', title: 'Dashboard', subtitle: 'Everything in one place: today, this week, applications and roadmap', words: 'dashboard today home brief overview track everything' },
   { to: '/calendar', title: 'Calendar', subtitle: 'What you have to do and should do', words: 'calendar deadlines dates schedule week' },
-  { to: '/applications?stage=saved', title: 'Saved', subtitle: 'What you saved, the first stage in Applications', words: 'saved bookmarks later kept' },
+  { to: '/saved', title: 'Saved', subtitle: 'Cards you kept for later', words: 'saved bookmarks later kept' },
   { to: '/agents', title: 'Agents', subtitle: 'What your agents are doing', words: 'agents grok ai activity usage' },
   { to: '/search', title: 'Search', subtitle: 'Search the web and your postings, ranked for you', words: 'search find look up internship web ai' },
   { to: '/profile', title: 'Profile', subtitle: 'Year, interests, skills and location', words: 'profile settings interests skills account' },

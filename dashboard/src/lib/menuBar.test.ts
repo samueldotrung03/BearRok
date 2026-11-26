@@ -31,7 +31,7 @@ describe('menu bar menu', () => {
     });
     expect(data.deadlines).toEqual([
       { label: 'Beta · tomorrow', path: '/applications/b' },
-      { label: 'Saved one · in 2 days', path: '/applications?stage=saved' },
+      { label: 'Saved one · in 2 days', path: '/saved' },
       { label: 'My own · in 3 days', path: '/applications/custom-1' },
       { label: 'Alpha · in 5 days', path: '/applications/a' },
     ]);

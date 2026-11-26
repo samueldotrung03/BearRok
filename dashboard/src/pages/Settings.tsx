@@ -2,6 +2,7 @@ import { ArrowSquareOut, CalendarBlank, CursorClick, GoogleLogo, HardDrives, Lig
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActionButton, Note, Row, Status, Switch } from '../components/settingsParts.tsx';
 import { MoreSettings } from './SettingsMore.tsx';
+import { ModelConnections } from '../components/ModelConnections.tsx';
 import { useAuth } from '../auth/AuthProvider.tsx';
 import { isDesktop } from '../auth/desktop.ts';
 import { authMessage } from '../auth/errors.ts';
@@ -12,12 +13,6 @@ import { NotifySettings } from '../components/NotifySettings.tsx';
 import { ShortcutSettings } from '../components/ShortcutSettings.tsx';
 import { Card, Page } from '../components/Page.tsx';
 import { desktopBridge, loadAllowed, saveAllowed, type GrokConnection, type PermissionKind, type PermissionState } from '../lib/desktopBridge.ts';
-
-interface GrokInfo {
-  connected: boolean;
-  mode: 'api' | 'cli' | 'simulated';
-  detail: string;
-}
 
 const googleRows: { service: GoogleService; title: string; icon: ReactNode; text: string }[] = [
   { service: 'account', title: 'Google', icon: <GoogleLogo weight="bold" />, text: 'Lets BearRok use your Google account for the connections below.' },
@@ -34,20 +29,8 @@ const permissionRows: { kind: PermissionKind; title: string; icon: ReactNode; te
 export function Settings() {
   const auth = useAuth();
 
-  // ---- Grok ---------------------------------------------------------------
-  const [grok, setGrok] = useState<GrokInfo | 'loading' | 'offline'>('loading');
-  const checkGrok = useCallback(async () => {
-    setGrok('loading');
-    try {
-      const res = await fetch(`${API_URL}/api/connections`);
-      setGrok(res.ok ? ((await res.json()) as { grok: GrokInfo }).grok : 'offline');
-    } catch {
-      setGrok('offline');
-    }
-  }, []);
-  useEffect(() => void checkGrok(), [checkGrok]);
-
-  // In the desktop app the student connects their own Grok here; the app keeps the choice on this computer.
+  // ---- models -------------------------------------------------------------
+  // In the desktop app an xAI API key can be kept, encrypted, on this computer.
   const [connection, setConnection] = useState<GrokConnection | null>(null);
   const [grokKey, setGrokKey] = useState('');
   const [grokBusy, setGrokBusy] = useState(false);
@@ -62,10 +45,13 @@ export function Settings() {
       if (!next.error) setGrokKey('');
     } finally {
       setGrokBusy(false);
-      await checkGrok();
     }
   };
   const ownGrok = connection?.managed ? connection : null;
+  // Arriving from "Connect a model first" on the Agents page.
+  useEffect(() => {
+    if (window.location.hash === '#models') document.getElementById('models')?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
 
   // ---- Google -------------------------------------------------------------
   const [pending, setPending] = useState<GoogleService | null>(null);
@@ -152,100 +138,50 @@ export function Settings() {
         </Card>
 
         <Card className="p-7">
-          <h2 className="text-lg font-semibold tracking-tight">Connections</h2>
-          <p className="mt-1 text-sm text-ink-2">Services your agents use. You can disconnect any of them at any time.</p>
+          <h2 id="models" className="scroll-mt-6 text-lg font-semibold tracking-tight">Connections</h2>
+          <p className="mt-1 text-sm text-ink-2">
+            Services your agents use. Connect Claude, ChatGPT or Grok first: your agents run on one of them. You can disconnect any of them at any time.
+          </p>
           <ul className="mt-6 divide-y divide-line">
-            <Row
-              icon={<Lightning weight="fill" />}
-              title="Grok"
-              text="The model behind every agent: the master, the search managers, the worker fleet and the validators."
-              status={
-                grok === 'loading' ? (
-                  <Status tone="wait">Checking</Status>
-                ) : grok === 'offline' ? (
-                  <Status tone="warn">Backend not reachable</Status>
-                ) : grok.connected ? (
-                  <Status tone="on">Connected</Status>
-                ) : (
-                  <Status tone="off">Not connected</Status>
-                )
-              }
-              action={
-                <ActionButton
-                  onClick={() => {
-                    void desktopBridge?.grok?.status().then(setConnection, () => {});
-                    void checkGrok();
-                  }}
-                >
-                  Check again
-                </ActionButton>
-              }
-            >
-              {grok !== 'loading' && grok !== 'offline' && <p className="text-sm text-ink-2">{grok.detail}</p>}
-              {grok === 'offline' && <p className="text-sm text-ink-2">Start the agent backend, then check again.</p>}
-              {ownGrok && (
-                <div className="mt-3 space-y-3">
-                  {ownGrok.mode ? (
-                    <div className="flex flex-wrap items-center gap-3">
-                      <p className="text-sm text-ink-2">
-                        {ownGrok.mode === 'cli'
-                          ? 'Using the Grok app on this computer, on your Grok subscription.'
-                          : 'Using your xAI API key. It is stored encrypted on this computer and nowhere else.'}
-                      </p>
-                      <ActionButton disabled={grokBusy} onClick={() => void changeGrok(() => desktopBridge!.grok!.disconnect())}>
-                        Disconnect
-                      </ActionButton>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-sm text-ink-2">Connect your own Grok. Until you do, the agents are simulated and nothing they show is real.</p>
+            <ModelConnections
+              extra={(id) =>
+                // In the desktop app a student without a subscription can use an xAI API key instead, kept encrypted on this computer.
+                id === 'grok' && ownGrok?.canStoreKey ? (
+                  <div className="mt-3 space-y-2">
+                    {ownGrok.mode === 'api' ? (
                       <div className="flex flex-wrap items-center gap-3">
-                        <ActionButton primary disabled={grokBusy || !ownGrok.cliFound} onClick={() => void changeGrok(() => desktopBridge!.grok!.connect({ mode: 'cli' }))}>
-                          Use my Grok subscription
+                        <p className="text-sm text-ink-2">An xAI API key is stored encrypted on this computer. It is used only while no model above is connected.</p>
+                        <ActionButton disabled={grokBusy} onClick={() => void changeGrok(() => desktopBridge!.grok!.disconnect())}>
+                          Remove key
                         </ActionButton>
-                        <p className="min-w-0 flex-1 text-sm text-ink-3">
-                          {ownGrok.cliFound
-                            ? 'The Grok app for the command line was found on this computer.'
-                            : 'Needs the Grok app for the command line: install it, sign in with your Grok subscription, then press Check again.'}
-                        </p>
                       </div>
-                      {ownGrok.canStoreKey && (
-                        <form
-                          className="flex flex-wrap items-center gap-3"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            void changeGrok(() => desktopBridge!.grok!.connect({ mode: 'api', key: grokKey }));
-                          }}
-                        >
-                          <input
-                            type="password"
-                            value={grokKey}
-                            onChange={(event) => setGrokKey(event.target.value)}
-                            placeholder="Or paste an xAI API key"
-                            aria-label="xAI API key"
-                            autoComplete="off"
-                            className="h-10 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-[15px] outline-none focus:border-brand focus:ring-3 focus:ring-brand/15"
-                          />
-                          <ActionButton type="submit" disabled={grokBusy || grokKey.trim().length < 20}>
-                            Connect
-                          </ActionButton>
-                        </form>
-                      )}
-                    </>
-                  )}
-                  {ownGrok.error && <p className="text-sm text-amber-800">{ownGrok.error}</p>}
-                </div>
-              )}
-              {!ownGrok && grok !== 'loading' && grok !== 'offline' && !grok.connected && (
-                <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-ink-2">
-                  <li>Install the Grok app for the command line and sign in to it with your Grok subscription.</li>
-                  <li>
-                    Set <code className="rounded bg-slate-100 px-1 py-0.5 text-[13px]">GROK_TRANSPORT=cli</code> in the backend settings, or add an xAI API key there.
-                  </li>
-                  <li>Restart the backend and check again.</li>
-                </ol>
-              )}
-            </Row>
+                    ) : (
+                      <form
+                        className="flex flex-wrap items-center gap-3"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void changeGrok(() => desktopBridge!.grok!.connect({ mode: 'api', key: grokKey }));
+                        }}
+                      >
+                        <input
+                          type="password"
+                          value={grokKey}
+                          onChange={(event) => setGrokKey(event.target.value)}
+                          placeholder="Or paste an xAI API key"
+                          aria-label="xAI API key"
+                          autoComplete="off"
+                          className="h-10 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-[15px] outline-none focus:border-brand focus:ring-3 focus:ring-brand/15"
+                        />
+                        <ActionButton type="submit" disabled={grokBusy || grokKey.trim().length < 20}>
+                          Save key
+                        </ActionButton>
+                      </form>
+                    )}
+                    {ownGrok.error && <p className="text-sm text-amber-800">{ownGrok.error}</p>}
+                  </div>
+                ) : null
+              }
+            />
 
             {googleRows.map(({ service, title, icon, text }) => {
               const on = connected(service);

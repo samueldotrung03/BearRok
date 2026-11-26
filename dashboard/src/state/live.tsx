@@ -11,6 +11,7 @@ import { grokFinds } from '../data/grokFinds.ts';
 import type { AgentEvent, AgentNode, ApplicationStatus, Opportunity, OpportunityType } from '../types.ts';
 import { sampleRequest } from './sampleBackend.ts';
 import { useStore } from './StoreProvider.tsx';
+import { modelName } from '../lib/modelName.ts';
 
 // ---- what the backend sends ------------------------------------------------------------------
 interface BackendOpportunity {
@@ -68,7 +69,7 @@ interface BackendFeedEntry {
 interface BackendStudent {
   feed: BackendFeedEntry[];
   mode: 'simulated' | 'live';
-  provider: 'grok' | 'simulated';
+  provider: 'grok' | 'claude' | 'gpt' | 'simulated';
   runCount: number;
   /** Cards the feed should hold; the agents keep searching while it has fewer. */
   feedTarget?: number;
@@ -123,8 +124,8 @@ interface LiveValue {
   usingLive: boolean;
   /** Cards the feed should hold; the agents keep searching on their own while it has fewer. */
   feedTarget: number;
-  /** Which model the agents are on. */
-  provider: 'grok' | 'simulated';
+  /** Which model the agents are on. "claude" is a temporary test set-up. */
+  provider: 'grok' | 'claude' | 'gpt' | 'simulated';
   opportunities: Opportunity[];
   /** Saved postings the account holds, including ones the feed no longer shows. */
   savedCards: Opportunity[];
@@ -538,8 +539,8 @@ export function DataBadge() {
         ? ['Connecting…', 'Connecting']
         : !live.usingLive
           ? ['No results yet', 'Empty']
-      : live.provider === 'grok'
-        ? ['Live · Grok', 'Live']
+      : modelName(live.provider)
+        ? [`Live · ${modelName(live.provider)}`, 'Live']
         : ['Simulated agents', 'Simulated'];
   return (
     <span className="flex items-center gap-1.5">

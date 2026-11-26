@@ -1,4 +1,4 @@
-// Career guides on a fake model: no network, no Grok.
+// Career guides on a fake model: no network, no Grok, no Claude.
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -55,7 +55,7 @@ function fakeAsk(calls: Call[], fail: string[] = [], reply: (name: string, n: nu
   }) as Ask;
 }
 
-const env = (canSearchX: boolean) => ({ live: () => true, provider: () => 'grok' as const, canSearchX: () => canSearchX });
+const env = (canSearchX: boolean) => ({ live: () => true, provider: () => (canSearchX ? 'grok' : 'claude') as 'grok' | 'claude', canSearchX: () => canSearchX });
 const names = (calls: Call[]) => calls.map((c) => c.name);
 
 test('the master routes guides and asks to career discovery, and postings to the opportunity search', () => {
@@ -339,7 +339,7 @@ test('guides are kept on disk and reloaded; older guides are upgraded and cut-of
 
 test('simulated agents cannot research, and bad input is refused', () => {
   const guides = new CareerGuides(null, fakeAsk([]), { live: () => false, provider: () => 'simulated', canSearchX: () => false });
-  assert.throws(() => guides.start('Pilot'), /Connect Grok/);
+  assert.throws(() => guides.start('Pilot'), /Connect Claude, ChatGPT or Grok/);
   assert.throws(() => guides.start('x'), /between 2 and 60/);
   assert.equal(slugFor('  Data Science / AI  '), 'data-science-ai');
 });

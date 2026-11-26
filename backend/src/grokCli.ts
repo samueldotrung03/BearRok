@@ -1,7 +1,6 @@
 // Grok through the Grok Build CLI (`grok -p ...`), signed in with a Grok subscription.
 // Same job as the API client in grok.ts: send one prompt, get one JSON answer back.
 // Usage is counted against the subscription of whoever ran `grok login` on this machine.
-import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +8,7 @@ import { z } from 'zod';
 import { currentSignal, StoppedError } from './agents/stop.ts';
 import { config } from './config.ts';
 import type { GrokResult, GrokTool } from './grok.ts';
+import { runCli } from './harness.ts';
 
 /** An empty folder for the CLI to run in, so a coding agent has no project files in reach. */
 function sandboxDir(): string {
@@ -17,38 +17,8 @@ function sandboxDir(): string {
   return dir;
 }
 
-function run(args: string[], timeoutMs: number): Promise<string> {
-  const stop = currentSignal();
-  if (stop?.aborted) return Promise.reject(new StoppedError());
-  return new Promise((resolve, reject) => {
-    const child = spawn(config.grokCli.bin, args, { cwd: sandboxDir(), stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    let err = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error(`grok CLI timed out after ${Math.round(timeoutMs / 1000)}s`));
-    }, timeoutMs);
-    // The student stopped the search: end this call now rather than when it finishes.
-    const onStop = () => {
-      clearTimeout(timer);
-      child.kill('SIGKILL');
-      reject(new StoppedError());
-    };
-    stop?.addEventListener('abort', onStop, { once: true });
-    child.on('close', () => stop?.removeEventListener('abort', onStop));
-    child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', (d) => (err += d));
-    child.on('error', (e: NodeJS.ErrnoException) => {
-      clearTimeout(timer);
-      reject(new Error(e.code === 'ENOENT' ? `grok CLI not found at "${config.grokCli.bin}". Install it and run "grok login".` : e.message));
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(`grok CLI exited ${code}: ${(err || out).trim().slice(0, 400)}`));
-    });
-  });
-}
+const run = (args: string[], timeoutMs: number) =>
+  runCli('grok', args, { cwd: sandboxDir(), timeoutMs, signal: currentSignal(), onStopError: () => new StoppedError() });
 
 /** The CLI's `json` output wraps the answer in an object; its field names are not documented, so look in the likely places. */
 export function answerText(stdout: string): string {

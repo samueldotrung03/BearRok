@@ -6,9 +6,10 @@ import { applicationInfo, careerPaths } from '../../data/sample.ts';
 import type { AppState } from '../../state/store.ts';
 import type { StepKind } from '../../types.ts';
 import { asOptions, finish, pathMatch, type Destination, type Draft, type Journey, type StepSource, type Story } from './journey.ts';
+import { modelName } from '../modelName.ts';
 
 /** How the roadmap on screen was made. */
-export type Writer = 'api' | 'cli';
+export type Writer = 'api' | 'cli' | 'claude' | 'codex' | 'grok';
 
 export interface AiRoadmap {
   summary: string;
@@ -104,7 +105,7 @@ export const chosenFrom = (plan: Journey) => plan.phases.flatMap((phase) => plan
  * and what else to add in each category.
  */
 export function aiPlan(plan: Journey, answer: AiAnswer): Journey {
-  const { roadmap, citations } = answer;
+  const { roadmap, citations, writer } = answer;
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
   const written = roadmap.phases.flatMap((phase) => phase.steps);
   const steps = plan.steps.map((step) => {
@@ -119,7 +120,7 @@ export function aiPlan(plan: Journey, answer: AiAnswer): Journey {
     // A recommendation the board also holds keeps its id, so it can be added with one press.
     return more.length ? { ...phase, more: more.map((m) => ({ id: phase.more?.find((own) => same(own.title, m.title))?.id ?? null, title: m.title, why: m.why })) } : phase;
   });
-  const name = 'Grok';
+  const name = modelName(writer) ?? 'Grok';
   return { ...plan, steps, phases, summary: roadmap.summary.trim() || plan.summary, analysis: { ...plan.analysis, basis: `${name} wrote what to do for each option you chose and what else to add, from your profile.`, sources: citations.filter(isLink) } };
 }
 
@@ -146,7 +147,7 @@ const isLink = (url: string) => /^https?:\/\//.test(url);
  * the things that are not the writer's to decide (the color, the mode, the linked posting).
  */
 export function aiJourney(state: AppState, base: Journey, answer: AiAnswer, skip: string[] = []): Journey {
-  const { roadmap, citations } = answer;
+  const { roadmap, citations, writer } = answer;
   const done = new Set(state.doneSteps);
   const have = new Set(roadmap.fit.met.map((s) => s.toLowerCase()));
   const posting = base.steps.find((s) => s.opportunity)?.opportunity ?? null;
@@ -187,7 +188,7 @@ export function aiJourney(state: AppState, base: Journey, answer: AiAnswer, skip
   const labels = [...new Set(groups.flatMap((g) => g.steps.flatMap((s) => s.skills.map((skill) => skill.label))))];
   const stories: Story[] = roadmap.howPeopleGotIn.map((story, i) => ({ id: `${prefix}:story-${i}`, outcome: story.outcome, year: '', timeline: story.timeline }));
   const sources = citations.filter(isLink);
-  const name = 'Grok';
+  const name = modelName(writer) ?? 'Grok';
   const { score, met, missing } = roadmap.fit;
   // A path the writer names is linked to the app's own when it holds one, so it can be opened.
   const related = (roadmap.relatedPaths ?? []).slice(0, 5).map((r) => {

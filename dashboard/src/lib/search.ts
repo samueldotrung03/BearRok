@@ -64,7 +64,7 @@ export interface SearchAnswer {
   results: SearchResult[];
   related: string[];
   contextUsed: string[];
-  /** Which connection searched: 'api' or 'cli'. */
+  /** How the backend reached the model that searched (see lib/modelName.ts). */
   writer: string;
 }
 

@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { z } from 'zod';
 import { config, liveAvailable, provider } from '../config.ts';
+import { tierModels as harnessTiers } from '../harness.ts';
 import { grokJson, type GrokTool } from '../grok.ts';
 import { Fleet } from '../agents/fleet.ts';
 import type { Job } from '../agents/types.ts';
@@ -31,7 +32,7 @@ import {
 
 export { mergeSection, SECTION_IDS, type Guide, type SectionId } from './schemas.ts';
 
-/** One model call. The default goes through grok.ts (xAI API or Grok CLI). */
+/** One model call. The default goes through grok.ts (xAI API, Grok CLI, or Claude while testing). */
 export type Ask = <S extends z.ZodType>(opts: { name: string; system: string; user: string; schema: S; tools?: GrokTool[]; model?: string }) => Promise<{ data: z.infer<S> }>;
 
 export class CareerError extends Error {
@@ -56,15 +57,12 @@ export function slugFor(query: string): string {
 const emptySection = <T>(): SectionState<T> => ({ status: 'waiting', data: null, sample: false, error: null, added: null });
 
 /** The models behind each tier, for the transport in use. */
-function tierModels(): { normal?: string; low?: string } {
-  if (config.grokTransport === 'cli') return config.grokCli.models;
-  return config.xaiModels;
-}
+const tierModels = () => harnessTiers();
 
 const MAX_ACTIVITY = 80;
 /** Two sentences of at most 25 words each, with a little room. */
 const MAX_SUMMARY_WORDS = 60;
-const SIMULATED = 'Your agents are simulated right now, so they cannot research careers. Connect Grok in Settings.';
+const SIMULATED = 'Your agents are simulated right now, so they cannot research careers. Connect Claude, ChatGPT or Grok in Settings.';
 /** What an "Add more" with no words of its own asks for. */
 const DEFAULT_PROMPT = 'Find more of what this part covers.';
 
@@ -85,8 +83,8 @@ export class CareerGuides {
     env: Env = {
       live: liveAvailable,
       provider,
-      // Grok reads X. Without X search the stories are written as labelled samples.
-      canSearchX: () => true,
+      // Only Grok can read X. On Claude or ChatGPT the stories are written as labelled samples.
+      canSearchX: () => provider() === 'grok',
     },
   ) {
     this.file = file;

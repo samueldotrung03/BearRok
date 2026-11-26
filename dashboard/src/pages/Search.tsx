@@ -31,6 +31,7 @@ import {
   type SearchResult,
 } from '../lib/search.ts';
 import '../styles/search.css';
+import { modelName } from '../lib/modelName.ts';
 
 type Phase = 'idle' | 'own' | 'web' | 'done';
 interface Run {
@@ -281,7 +282,7 @@ export function Search() {
               <div className="srch-answer-head">
                 <Sparkles aria-hidden="true" />
                 <span>Overview</span>
-                <span className="srch-writer">Searched by Grok</span>
+                <span className="srch-writer">{`Searched by ${modelName(run.answer.writer) ?? 'Grok'}`}</span>
               </div>
               {run.answer.intent && <p className="srch-intent">{run.answer.intent}</p>}
               <Answer text={run.answer.answer} count={run.answer.results.length} />

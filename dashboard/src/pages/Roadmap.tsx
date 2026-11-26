@@ -22,6 +22,7 @@ import { SAMPLE_FEED, useLive } from '../state/live.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import type { ApplicationStatus, Opportunity } from '../types.ts';
 import '../styles/journey.css';
+import { modelName } from '../lib/modelName.ts';
 
 /** Puts the cursor in a search box without the browser scrolling the page to it. */
 const focusQuietly = (input: HTMLInputElement | null) => input?.focus({ preventScroll: true });
@@ -94,6 +95,7 @@ export function Roadmap() {
   const planWritten = useAiRoadmap(planRequest, planning);
   const journey = useMemo(() => (planDraft ? (planWritten.answer ? aiPlan(planDraft, planWritten.answer) : planDraft) : board), [planDraft, planWritten.answer, board]);
   const written = planning ? planWritten : boardWritten;
+  const writer = written.answer?.writer;
   const build = (on: boolean) => {
     setPlans(on ? [...new Set([...plans, careerId])] : plans.filter((id) => id !== careerId));
     setView('journey');
@@ -306,9 +308,9 @@ export function Roadmap() {
             {journey.guide
               ? guide?.sample || guide?.provider === 'simulated'
                 ? 'Sample steps from the career guide. No model is connected.'
-                : 'From the career guide, researched by Grok'
+                : `From the career guide, researched by ${modelName(guide?.provider) ?? 'Grok'}`
               : written.status === 'ready'
-              ? 'Written by Grok for you'
+              ? `Written by ${modelName(writer) ?? 'Grok'} for you`
               : written.status === 'writing'
                 ? 'Your roadmap is being written. This is a first draft by fixed rules.'
                 : written.status === 'failed'

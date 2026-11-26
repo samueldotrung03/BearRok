@@ -72,7 +72,7 @@ export interface SystemOptions {
   /** Stored postings without a picture that one run looks for pictures for, on top of its own finds. */
   imageBackfill?: number;
   /** Which model family a live brain talks to, for labelling. */
-  provider?: 'grok';
+  provider?: 'grok' | 'claude' | 'gpt';
   now: () => Date;
 }
 
@@ -129,8 +129,8 @@ export interface StudentState {
   sheet: LinkedSheet | null;
   runCount: number;
   mode: 'simulated' | 'live';
-  /** Which model family the agents are on. */
-  provider: 'grok' | 'simulated';
+  /** Which model family the agents are on. "claude" is a temporary test set-up. */
+  provider: 'grok' | 'claude' | 'gpt' | 'simulated';
   applications: Application[];
   /** The uploaded résumé, without the file itself. */
   resume: ResumeInfo | null;
@@ -1024,6 +1024,18 @@ export class AgentSystem {
     this.focus = null;
     this.abort.abort();
     return true;
+  }
+
+  /**
+   * Move the agents to another engine: a newly connected harness, or simulated agents when none is
+   * left. A search under way is stopped, since its remaining calls would go to the old one.
+   */
+  useEngine(brain: Brain, opts: Partial<SystemOptions>) {
+    this.stop();
+    brain.setModels?.(this.agentSettings.models);
+    this.brain = brain;
+    this.opts = { ...this.opts, provider: undefined, ...opts };
+    this.emitStudent();
   }
 
   // ---- one run -------------------------------------------------------------

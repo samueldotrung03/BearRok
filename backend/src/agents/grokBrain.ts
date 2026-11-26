@@ -3,6 +3,7 @@
 // Not yet run against a real key; `npm run grok:check` tests the account first.
 import { z } from 'zod';
 import { config } from '../config.ts';
+import { fitsTransport, tierModels } from '../harness.ts';
 import { grokJson, type GrokTool } from '../grok.ts';
 import { cleanDraft, sortByRules, type CalendarEventInput, type EventAsk, type EventVerdict } from './eventSorter.ts';
 import type { Brain, DraftedApplication, DraftInput, MasterInput } from './brain.ts';
@@ -13,8 +14,15 @@ import { CATEGORY_LABEL, type AgentGroup, type ReviewFocus, type Assignment, typ
  * run on the normal tier. Workers are many and each does one small job, so they get the cheapest.
  * The high tier (XAI_MODEL_HIGH) is configured but not assigned to any level at the moment.
  */
-const TIER: { high?: string; normal?: string; low?: string } =
-  config.grokTransport === 'cli' ? config.grokCli.models : config.xaiModels;
+// Read on every call, so the agents follow a harness change at once.
+const TIER = {
+  get normal() {
+    return tierModels().normal;
+  },
+  get low() {
+    return tierModels().low;
+  },
+};
 export const AGENT_TIERS = {
   master: 'normal',
   searchManager: 'normal',
@@ -73,9 +81,14 @@ export class GrokBrain implements Brain {
     this.models = { ...models };
   }
 
-  /** The model for one agent group: the student's choice, or the tier's default. */
+  /**
+   * The model for one agent group: the student's choice when it belongs to the harness the agents
+   * run on (a Claude model on Claude, a GPT model on ChatGPT, a Grok model on Grok), the tier's
+   * default otherwise.
+   */
   private model(group: AgentGroup, tier: string | undefined): string | undefined {
-    return this.models[group] ?? tier;
+    const choice = this.models[group];
+    return choice && fitsTransport(choice) ? choice : tier;
   }
 
   async master(input: MasterInput) {

@@ -1,11 +1,18 @@
 // Agent settings, from the top of the Agents page: start or stop a search, choose the kinds a
-// search covers, how many of a kind it must find before it stops, and which Grok model each group
-// of agents runs on. Everything here is saved with the student's account.
+// search covers, how many of a kind it must find before it stops, and which model the agents run
+// on: first the harness (Claude, ChatGPT or Grok, one connected in Settings), then a model within
+// it for each group of agents. The harness belongs to the computer; the rest is saved with the
+// student's account.
 import { Play, Settings2, Square, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { useLive } from '../../state/live.tsx';
 
 type Group = { id: string; label: string; tier: string };
+type HarnessId = 'claude' | 'codex' | 'grok';
+type HarnessChoice = { id: HarnessId; name: string; cli: string; connected: boolean; models: { id: string; label: string }[]; defaults: { normal: string; low: string } };
+/** Groups on the low tier; the rest are on the normal tier. */
+const LOW_TIER = new Set(['workers', 'helpers']);
 type Kind = 'internship' | 'event' | 'club' | 'hackathon' | 'research' | 'scholarship';
 
 interface Auto {
@@ -96,7 +103,8 @@ function AgentSettingsDialog({ onClose }: { onClose: () => void }) {
   const live = useLive();
   const ref = useRef<HTMLDialogElement>(null);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [models, setModels] = useState<string[]>([]);
+  const [harnesses, setHarnesses] = useState<HarnessChoice[]>([]);
+  const [harness, setHarness] = useState<HarnessId | null>(null);
   const [applied, setApplied] = useState(false);
   const [profileKinds, setProfileKinds] = useState<Kind[]>([]);
   const [settings, setSettings] = useState<Settings>({ auto: { on: false, times: defaultTimes(1) }, models: {}, minimums: {}, kinds: [] });
@@ -111,11 +119,12 @@ function AgentSettingsDialog({ onClose }: { onClose: () => void }) {
       .request('/agent-settings')
       .then(async (res) => {
         if (!res.ok) throw new Error();
-        const body = (await res.json()) as { settings: Partial<Settings>; groups: Group[]; models: string[]; applied: boolean; profileKinds?: Kind[]; auto?: AutoStatus };
+        const body = (await res.json()) as { settings: Partial<Settings>; groups: Group[]; harnesses?: HarnessChoice[]; harness?: HarnessId | null; applied: boolean; profileKinds?: Kind[]; auto?: AutoStatus };
         setAutoStatus(body.auto ?? null);
         setProfileKinds(body.profileKinds ?? []);
         setGroups(body.groups);
-        setModels(body.models);
+        setHarnesses(body.harnesses ?? []);
+        setHarness(body.harness ?? null);
         setApplied(body.applied);
         setSettings({
           auto: { on: body.settings.auto?.on === true, times: body.settings.auto?.times?.length ? body.settings.auto.times : defaultTimes(1) },
@@ -134,12 +143,16 @@ function AgentSettingsDialog({ onClose }: { onClose: () => void }) {
   const save = async () => {
     if (!loaded) return false;
     setState('saving');
-    const body = { ...settings, auto: { ...settings.auto, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } };
+    // Only the chosen harness's models are sent; choices kept for another harness stay on the server.
+    const models = Object.fromEntries(Object.entries(settings.models).filter(([, m]) => current?.models.some((x) => x.id === m)));
+    const body = { ...settings, models, ...(harness ? { harness } : {}), auto: { ...settings.auto, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } };
     const res = await live.request('/agent-settings', { method: 'PUT', body: JSON.stringify(body) }).catch(() => null);
     setState(res?.ok ? 'saved' : 'error');
     if (res?.ok) ref.current?.close();
     return Boolean(res?.ok);
   };
+  const current = harnesses.find((h) => h.id === harness) ?? null;
+  const connectedList = harnesses.filter((h) => h.connected);
   const toggleKind = (id: Kind | 'all') => setSettings((s) => toggleKinds(s, id));
   const searched = searchedKinds(settings.kinds, profileKinds);
   const allTicked = settings.kinds.length === KINDS.length;
@@ -315,27 +328,57 @@ function AgentSettingsDialog({ onClose }: { onClose: () => void }) {
         </section>
 
         <section className="ags-section">
-          <h3>Models</h3>
-          <p className="ags-note">
-            {applied
-              ? 'The Grok model each group of agents runs on.'
-              : 'The Grok model each group of agents will run on. These take effect once Grok is connected.'}
-          </p>
-          <div className="mt-3 grid gap-2">
-            {groups.map((g) => (
-              <label key={g.id} className="ags-model">
-                <span>{g.label}</span>
-                <select value={settings.models[g.id] ?? ''} onChange={(e) => setSettings((s) => ({ ...s, models: { ...s.models, [g.id]: e.target.value } }))}>
-                  <option value="">Default ({g.tier})</option>
-                  {models.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
+          <h3>Model</h3>
+          {connectedList.length === 0 ? (
+            <p className="ags-note">
+              No model is connected on this computer.{' '}
+              <Link to="/settings#models" className="font-semibold text-brand underline" onClick={() => ref.current?.close()}>
+                Connect Claude, ChatGPT or Grok in Settings
+              </Link>
+              .
+            </p>
+          ) : (
+            <>
+              <p className="ags-note">
+                First the model your agents run on, then the model each group uses within it. Only models connected in{' '}
+                <Link to="/settings#models" className="font-semibold text-brand underline" onClick={() => ref.current?.close()}>
+                  Settings
+                </Link>{' '}
+                can be chosen.
+              </p>
+              <label className="ags-model mt-3">
+                <span>Run my agents on</span>
+                <select value={harness ?? ''} onChange={(e) => setHarness(e.target.value as HarnessId)}>
+                  {harnesses.map((h) => (
+                    <option key={h.id} value={h.id} disabled={!h.connected}>
+                      {h.name} ({h.cli}){h.connected ? '' : ', not connected'}
                     </option>
                   ))}
                 </select>
               </label>
-            ))}
-          </div>
+              {current && (
+                <div className="mt-3 grid gap-2">
+                  {groups.map((g) => {
+                    const chosen = settings.models[g.id];
+                    const value = chosen && current.models.some((m) => m.id === chosen) ? chosen : '';
+                    return (
+                      <label key={g.id} className="ags-model">
+                        <span>{g.label}</span>
+                        <select value={value} onChange={(e) => setSettings((s) => ({ ...s, models: { ...s.models, [g.id]: e.target.value } }))}>
+                          <option value="">Default ({LOW_TIER.has(g.id) ? current.defaults.low : current.defaults.normal})</option>
+                          {current.models.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
         </section>
       </div>
 

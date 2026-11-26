@@ -6,10 +6,11 @@ import { mountCareers } from './careers/api.ts';
 import type { CareerGuides } from './careers/guide.ts';
 import { config, liveAvailable } from './config.ts';
 import { mountDesktopAuth } from './desktopAuth.ts';
+import { mountHarnesses, type Checker } from './harnessApi.ts';
 import { Engine, UserError, type Deps, type Mode } from './pipeline.ts';
 import type { Store } from './store/index.ts';
 
-export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: AgentsOptions, careers?: CareerGuides) {
+export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: AgentsOptions, careers?: CareerGuides, checkHarness?: Checker) {
   const engine = new Engine(store, deps);
   const app = new Hono();
   app.use('/api/*', cors());
@@ -44,6 +45,7 @@ export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: Agent
   if (agents) mountAgents(app, { memory: store, ...agents });
   if (careers) mountCareers(app, careers);
   mountDesktopAuth(app);
+  mountHarnesses(app, checkHarness);
 
   app.onError((err, c) => {
     if (err instanceof UserError) return c.json({ error: err.message }, err.status as 400);

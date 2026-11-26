@@ -17,19 +17,22 @@ export const config = {
     normal: env.XAI_MODEL_NORMAL ?? 'grok-4.5',
     low: env.XAI_MODEL_LOW ?? 'grok-4.3',
   },
-  /**
-   * How the agents reach Grok. "api": the xAI API with XAI_API_KEY, billed per call.
-   * "cli": the Grok Build CLI on this machine, signed in with a Grok subscription.
-   */
-  grokTransport: (env.GROK_TRANSPORT === 'cli' ? 'cli' : 'api') as 'api' | 'cli',
+  /** The Claude harness (claudeCli.ts). Its models are in harness.ts. */
+  claudeCli: {
+    timeoutMs: Number(env.CLAUDE_CLI_TIMEOUT_MS ?? 240_000),
+    /** low, medium, high, xhigh or max, passed to the CLI as --effort. Unset leaves the CLI's own default. */
+    effort: env.CLAUDE_EFFORT || undefined,
+  },
   /** With a CLI each call is a whole program, so a live run is kept small enough to finish in a few minutes. */
   liveCli: { maxJobs: Number(env.LIVE_MAX_JOBS ?? 12) },
   /** The feed should hold at least `target` cards; the agents search again, up to `maxFillRuns` times in a row, until it does. */
   feed: { target: Number(env.FEED_MIN ?? 12), maxFillRuns: Number(env.FEED_FILL_MAX_RUNS ?? 4) },
+  /** The ChatGPT harness (codexCli.ts). Its models are in harness.ts. */
+  codexCli: {
+    timeoutMs: Number(env.CODEX_CLI_TIMEOUT_MS ?? 240_000),
+  },
+  /** The Grok harness (grokCli.ts). Its models are in harness.ts. */
   grokCli: {
-    bin: env.GROK_CLI_BIN ?? 'grok',
-    /** Model names for the CLI, if it should not use its default. */
-    models: { high: env.GROK_CLI_MODEL_HIGH || undefined, normal: env.GROK_CLI_MODEL_NORMAL || undefined, low: env.GROK_CLI_MODEL_LOW || undefined },
     /** Let the CLI use its tools without asking. Needed for web search if the CLI asks for approval. */
     alwaysApprove: env.GROK_CLI_ALWAYS_APPROVE === '1',
     timeoutMs: Number(env.GROK_CLI_TIMEOUT_MS ?? 240_000),
@@ -65,8 +68,5 @@ export const config = {
   careerGuidesFile: env.CAREER_GUIDES_FILE ?? fileURLToPath(new URL('../.data/career-guides.json', import.meta.url)),
 };
 
-/** Live Grok is available with an API key, or when the subscription CLI is chosen. */
-export const liveAvailable = () => config.grokTransport !== 'api' || config.xaiApiKey !== null;
-
-/** Which model family the agents are on right now. */
-export const provider = (): 'grok' | 'simulated' => (!liveAvailable() ? 'simulated' : 'grok');
+// Which harness the agents run on is decided at run time (harness.ts), not at start-up.
+export { liveAvailable, provider, tierModels, modelLabel } from './harness.ts';

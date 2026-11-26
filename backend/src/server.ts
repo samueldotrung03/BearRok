@@ -7,7 +7,8 @@ import type { StudentMemory } from './agents/types.ts';
 import { createApp } from './app.ts';
 import { CareerGuides } from './careers/guide.ts';
 import { firebaseVerifier, webConfig } from './auth.ts';
-import { config, liveAvailable } from './config.ts';
+import { config, liveAvailable, provider } from './config.ts';
+import { HARNESSES, modelLabel, onHarnessChange, tierModels, transport } from './harness.ts';
 import { oauthClientFrom } from './googleOAuth.ts';
 import { openStore } from './store/index.ts';
 import { cached, writeRoadmap } from './roadmap.ts';
@@ -15,18 +16,47 @@ import { cachedSearch, writeSearch } from './search.ts';
 import { UserFirestore } from './store/userFirestore.ts';
 
 const store = await openStore();
-// Live agents need a key; without one the same system runs on simulated agents and sample data.
+// The agents run on the harness connected in Settings (harness.ts); with none they are simulated on
+// sample data. A harness connected or changed later moves every student's agents over at once.
 const feed = { feedTarget: config.feed.target, maxFillRuns: config.feed.maxFillRuns, images: new ImageFinder() };
-const newSystem = (profile = {}) =>
-  liveAvailable()
-    ? new AgentSystem(
-        new GrokBrain(),
-        config.grokTransport === 'api'
-          ? { provider: 'grok', ...feed }
-          : { provider: 'grok', concurrency: config.grokCli.concurrency, maxJobs: config.liveCli.maxJobs, managerStaggerMs: 600, ...feed },
-        profile,
-      )
-    : new AgentSystem(new SimBrain({ speed: Number(process.env.SIM_SPEED ?? 0.6) }), { managerStaggerMs: 900, ...feed }, profile);
+function engine() {
+  const via = transport();
+  if (via === null) return { brain: new SimBrain({ speed: Number(process.env.SIM_SPEED ?? 0.6) }), opts: { managerStaggerMs: 900, concurrency: 8, maxJobs: 30, ...feed } };
+  const p = provider();
+  const live = { provider: p === 'simulated' ? undefined : p, ...feed } as const;
+  return via === 'api'
+    ? { brain: new GrokBrain(), opts: { ...live, concurrency: 8, maxJobs: 30, managerStaggerMs: 0 } }
+    : // Each command-line call is a whole program, so far fewer run at once and a run is kept small.
+      { brain: new GrokBrain(), opts: { ...live, concurrency: config.grokCli.concurrency, maxJobs: config.liveCli.maxJobs, managerStaggerMs: 600 } };
+}
+const systems = new Set<AgentSystem>();
+const newSystem = (profile = {}) => {
+  const { brain, opts } = engine();
+  const system = new AgentSystem(brain, opts, profile);
+  systems.add(system);
+  return system;
+};
+onHarnessChange(() => {
+  for (const system of systems) {
+    const { brain, opts } = engine();
+    system.useEngine(brain, opts);
+  }
+  console.log(`  agents: ${agentsLine()}`);
+});
+const connection = () => {
+  const via = transport();
+  if (via === null) return { connected: false, mode: 'simulated' as const, detail: 'No model is connected. Connect Claude, ChatGPT or Grok in Settings.' };
+  if (via === 'api') return { connected: true, mode: 'api' as const, detail: `Through the xAI API (${config.xaiModels.normal} and ${config.xaiModels.low}).` };
+  const h = HARNESSES[via];
+  return { connected: true, mode: via, detail: `Through ${h.cli}, the ${h.name} app for the command line, on the ${h.name} account signed in on this computer.` };
+};
+const agentsLine = () => {
+  const via = transport();
+  if (via === null) return 'simulated on sample data (no model connected; connect one in Settings)';
+  if (via === 'api') return `live Grok API: ${config.xaiModels.normal} and ${config.xaiModels.low}`;
+  const t = tierModels();
+  return `live on ${HARNESSES[via].name} through ${HARNESSES[via].cli} (${modelLabel(t.normal)} and ${modelLabel(t.low)})`;
+};
 const verify = firebaseVerifier();
 // On a student's own laptop there is no service account, so their memory goes to Firestore under
 // their own sign-in. The guest student has no account and stays in the local file.
@@ -56,20 +86,17 @@ const { app } = createApp(store, {}, {
   },
   verify,
   webConfig: webConfig(),
-  roadmap: liveAvailable() ? cached(writeRoadmap) : null,
-  search: liveAvailable() ? cachedSearch(writeSearch) : null,
-  grok: !liveAvailable()
-    ? { connected: false, mode: 'simulated', detail: 'No Grok connection is configured, so the agents are simulated on sample data.' }
-    : config.grokTransport === 'cli'
-      ? { connected: true, mode: 'cli', detail: 'Through the Grok app on this computer, on its Grok subscription.' }
-      : { connected: true, mode: 'api', detail: `Through the xAI API (${config.xaiModels.normal} and ${config.xaiModels.low}).` },
+  // Both writers check for a connected model on every request.
+  roadmap: cached(writeRoadmap),
+  search: cachedSearch(writeSearch),
+  live: liveAvailable,
+  grok: connection,
 }, careers);
 
 serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
   console.log(`backend listening on http://localhost:${port}`);
   console.log(`  store:  ${store.kind === 'firestore' ? 'Firestore' : account ? `Firestore under each student's own sign-in; guests in a local file (${config.localDataFile})` : `local file (${config.localDataFile})`}`);
-  const m = config.xaiModels;
-  console.log(`  agents: ${!liveAvailable() ? 'simulated on sample data (no XAI_API_KEY)' : config.grokTransport === 'cli' ? `live Grok through the CLI on this machine's subscription (${config.grokCli.bin})` : `live Grok API: master/managers/validation/presentation ${m.normal}, workers ${m.low}`}`);
+  console.log(`  agents: ${agentsLine()}`);
   console.log(`  google: ${oauthClient ? 'lasting connection for Calendar and Sheets (OAuth client set)' : 'one session at a time (no GOOGLE_OAUTH_CLIENT_FILE)'}`);
   console.log(`  sign-in: ${verify ? `Google and email, Firebase project ${config.firebaseWeb.projectId}` : 'off (set FIREBASE_WEB_API_KEY and FIREBASE_PROJECT_ID)'}`);
   console.log(`  watch:  http://localhost:${port}/`);

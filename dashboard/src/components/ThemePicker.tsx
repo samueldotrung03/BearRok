@@ -1,8 +1,8 @@
-// The light / dark / match-system choice, shown on the sign-in pages and in Settings.
-import { Desktop, Moon, Sun } from '@phosphor-icons/react';
+// The light / dark choice, shown on the sign-in pages and in Settings.
+import { Moon, Sun } from '@phosphor-icons/react';
 import { themeChoices, useTheme, type ThemeChoice } from '../lib/theme.ts';
 
-const icons: Record<ThemeChoice, typeof Sun> = { light: Sun, dark: Moon, system: Desktop };
+const icons: Record<ThemeChoice, typeof Sun> = { light: Sun, dark: Moon };
 
 export function ThemePicker({ compact = false }: { compact?: boolean }) {
   const { choice, set } = useTheme();

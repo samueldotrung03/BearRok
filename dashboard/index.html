@@ -9,7 +9,7 @@
       // Apply the saved appearance before the first paint, so a dark page never flashes white.
       try {
         var c = localStorage.getItem('bearrok.theme');
-        var d = c === 'dark' || (c === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        var d = c === 'dark';
         document.documentElement.dataset.theme = d ? 'dark' : 'light';
         document.documentElement.style.colorScheme = d ? 'dark' : 'light';
       } catch (e) {}

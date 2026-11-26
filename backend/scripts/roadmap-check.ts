@@ -2,6 +2,7 @@
 // dashboard draws: an open-ended career, one built from a student's picks, and a posting already applied to. Uses an invented
 // student, so nothing personal is sent.
 // Run: npm run roadmap:check      (after npm run grok:check passes)
+import { transport } from '../src/harness.ts';
 import { config, liveAvailable } from '../src/config.ts';
 import { RoadmapRequest, writeRoadmap, type Roadmap } from '../src/roadmap.ts';
 
@@ -9,7 +10,7 @@ if (!liveAvailable()) {
   console.error('No model is connected. Set XAI_API_KEY, or GROK_TRANSPORT=cli, in backend/.env first.');
   process.exit(1);
 }
-console.log(`transport: ${config.grokTransport}\n`);
+console.log(`transport: ${transport()}\n`);
 
 const profile = {
   major: 'Computer Science',

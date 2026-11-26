@@ -2,8 +2,11 @@
 //
 // A student who downloads the app has nothing else installed, so the app carries the backend and
 // starts it on this computer. Their data is kept in the cloud under their own sign-in; the one
-// thing they bring is Grok, either the Grok app for the command line signed in to their
-// subscription, or an xAI API key. That choice is kept here, on this computer only.
+// thing they bring is a model: the Claude, ChatGPT (Codex) or Grok app for the command line,
+// signed in to their own subscription. The backend finds those apps and keeps the choice itself,
+// in this app's own folder on this computer (harness.json beside store.json), so every computer
+// the app is copied to starts with nothing connected and uses its own apps. An xAI API key can be
+// kept here too, encrypted, for a student without a subscription.
 const { app, ipcMain, safeStorage } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -45,18 +48,10 @@ function storedKey(settings) {
   }
 }
 
-/** Where the Grok app for the command line is installed, or null. */
-function findGrokCli() {
-  const home = os.homedir();
-  const places = [path.join(home, '.grok', 'bin', 'grok'), path.join(home, '.local', 'bin', 'grok'), '/opt/homebrew/bin/grok', '/usr/local/bin/grok'];
-  return places.find((p) => fs.existsSync(p)) ?? null;
-}
-
 function grokStatus() {
   const settings = readSettings();
-  const cli = findGrokCli();
-  const mode = settings.grokMode === 'cli' && cli ? 'cli' : settings.grokMode === 'api' && storedKey(settings) ? 'api' : null;
-  return { managed, mode, cliFound: cli !== null, canStoreKey: safeStorage.isEncryptionAvailable() };
+  const mode = settings.grokMode === 'api' && storedKey(settings) ? 'api' : null;
+  return { managed, mode, canStoreKey: safeStorage.isEncryptionAvailable() };
 }
 
 // ---- running the backend --------------------------------------------------------------------
@@ -81,7 +76,6 @@ async function waitUntilHealthy(ms) {
 
 function backendEnv() {
   const settings = readSettings();
-  const cli = findGrokCli();
   let firebase = {};
   try {
     firebase = JSON.parse(fs.readFileSync(path.join(__dirname, 'app-config.json'), 'utf8'));
@@ -89,8 +83,8 @@ function backendEnv() {
     // Without it sign-in is off and the app can only be looked around as a guest.
   }
   const env = {
-    // An app opened from the Finder gets a short PATH; the Grok app may need the usual places.
-    PATH: [process.env.PATH, path.join(os.homedir(), '.grok', 'bin'), path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'].filter(Boolean).join(path.delimiter),
+    // An app opened from the Finder gets a short PATH; the backend also searches the usual install folders.
+    PATH: [process.env.PATH, path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'].filter(Boolean).join(path.delimiter),
     HOME: os.homedir(),
     ELECTRON_RUN_AS_NODE: '1',
     PORT: String(PORT),
@@ -102,12 +96,12 @@ function backendEnv() {
     // Students connect Google once; the backend on their computer keeps the connection.
     ...(firebase.googleOAuth ? { GOOGLE_OAUTH_CLIENT_ID: firebase.googleOAuth.clientId, GOOGLE_OAUTH_CLIENT_SECRET: firebase.googleOAuth.clientSecret } : {}),
     LOCAL_DATA_FILE: path.join(app.getPath('userData'), 'store.json'),
+    // Which of Claude, ChatGPT and Grok is connected on this computer.
+    HARNESS_FILE: path.join(app.getPath('userData'), 'harness.json'),
   };
-  for (const name of ['TMPDIR', 'USER', 'LANG', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']) if (process.env[name]) env[name] = process.env[name];
-  if (settings.grokMode === 'cli' && cli) {
-    env.GROK_TRANSPORT = 'cli';
-    env.GROK_CLI_BIN = cli;
-  } else if (settings.grokMode === 'api') {
+  // The apps for the command line read their sign-ins from the keychain, which needs to know the user.
+  for (const name of ['TMPDIR', 'USER', 'LOGNAME', 'LANG', 'SHELL', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']) if (process.env[name]) env[name] = process.env[name];
+  if (settings.grokMode === 'api') {
     const key = storedKey(settings);
     if (key) env.XAI_API_KEY = key;
   }
@@ -147,10 +141,8 @@ function mount() {
   ipcMain.handle('grok:status', () => grokStatus());
   ipcMain.handle('grok:connect', async (_event, choice) => {
     const settings = readSettings();
-    if (choice && choice.mode === 'cli') {
-      if (!findGrokCli()) return { ...grokStatus(), error: 'The Grok app for the command line was not found on this computer.' };
-      settings.grokMode = 'cli';
-    } else if (choice && choice.mode === 'api') {
+    // The apps for the command line are connected through the backend (Settings calls /api/harnesses).
+    if (choice && choice.mode === 'api') {
       const key = typeof choice.key === 'string' ? choice.key.trim() : '';
       if (!KEY_SHAPE.test(key)) return { ...grokStatus(), error: 'That does not look like an xAI API key.' };
       if (!safeStorage.isEncryptionAvailable()) return { ...grokStatus(), error: 'This computer cannot store the key securely.' };

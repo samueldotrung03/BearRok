@@ -1,62 +1,51 @@
-// The Agents page. When the agent backend has a run, the map, detail panel and activity list show
-// that real run (src/lib/agents/fromLive.ts). Without one it plays a simulated run of the agent
-// system on sample data: the pure engine in src/lib/agents, with this page owning the clock (how
-// fast beats arrive), the student's standing instructions, and which agent is selected.
-import { Pause, Play, RotateCcw, Server, SkipForward, Square } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+// The Agents page: the agent backend's real run, drawn as the whole system (master, search
+// managers, worker fleet, validators, presentation, feed) with what each agent is doing and the
+// activity log (src/lib/agents/fromLive.ts). Before the first search it shows the team that will
+// run, idle. With no model connected (Claude, ChatGPT or Grok) it sends the student to Settings to
+// connect one first. Nothing on this page is simulated.
+import { ArrowRight, Play, Plug, Server, Square } from 'lucide-react';
+import { Link } from 'react-router';
+import { useMemo, useState, type ReactNode } from 'react';
 import { AgentSettingsButton, autoLine } from '../components/agents/AgentSettings.tsx';
-import { AnimatedNumber, clockText, compact } from '../components/agents/AnimatedNumber.tsx';
-import { Funnel } from '../components/agents/Funnel.tsx';
+import { AnimatedNumber } from '../components/agents/AnimatedNumber.tsx';
 import { useBackendStatus, useReducedMotion, type BackendState } from '../components/agents/hooks.ts';
-import { TeamAbout, TeamMap } from '../components/agents/TeamMap.tsx';
-import type { TeamId } from '../lib/agents/team.ts';
-import { BriefCard, TellBar, type StandingInstruction } from '../components/agents/TellAgents.tsx';
-import { MemoryCard, UsageCard } from '../components/agents/UsageMemory.tsx';
+import { ActivityStream, LiveNodeDetail } from '../components/agents/NodeDetail.tsx';
+import { RunGraph } from '../components/agents/RunGraph.tsx';
 import { Page, StatusPill } from '../components/Page.tsx';
-import { opportunities } from '../data/sample.ts';
-import { assignSlots, buildBrief, memoryFrom } from '../lib/agents/brief.ts';
-import { funnel, idleRun, runReducer, totals, type RunInput } from '../lib/agents/engine.ts';
 import { fromLive, liveStats, sourceLabel, type Provider } from '../lib/agents/fromLive.ts';
-import { fromRun } from '../lib/agents/view.ts';
-import { useLocal } from '../lib/useLocal.ts';
-import { SAMPLE_FEED, useLive, withNextManagers } from '../state/live.tsx';
-import { useStore } from '../state/StoreProvider.tsx';
+import { anyConnected, useHarnesses } from '../lib/harnesses.ts';
+import { useLive, withNextManagers, type LiveAgents } from '../state/live.tsx';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import '../styles/agents.css';
 
-const SPEEDS = [0.5, 1, 2, 4] as const;
-/** Real time per beat at 1x. A full run is about 17 beats, so roughly 22 seconds. */
-const BEAT_MS = 1300;
-
-/** Says more about a backend run after its label. */
+/** Says more about a run after its label, without ever calling Claude output Grok. */
 const sourceNote: Record<Provider, string> = {
-  grok: 'The agent backend’s latest run, as it happens.',
-  simulated: 'The agent backend’s latest run. Its agents are simulated and its postings invented.',
+  grok: 'Your agents\u2019 latest run, as it happens.',
+  claude: 'Your agents\u2019 latest run, on the Claude account signed in on this computer.',
+  gpt: 'Your agents\u2019 latest run, on the ChatGPT account signed in on this computer.',
+  simulated: 'No model is connected to the agent backend, so a run here uses simulated agents and invented postings.',
 };
 
-function BackendChip({ status, showing }: { status: BackendState; showing: boolean }) {
-  // The public showcase has no agent server behind it, so it says so instead of checking one.
-  if (SAMPLE_FEED && !showing)
-    return (
-      <span className="ag-chip-dark" title="This public copy has no agent server. The run below is a simulation on sample data.">
-        <Server className="size-3.5" aria-hidden="true" />
-        <span className="size-1.5 rounded-full bg-white/40" aria-hidden="true" />
-        Sample mode: no agent server
-      </span>
-    );
+const providerName: Record<Provider, string> = { grok: 'Grok', claude: 'Claude', gpt: 'ChatGPT', simulated: 'no model' };
+
+/** The team before its first search: the master, idle, and the managers the next search will have. */
+const NO_RUN: LiveAgents = {
+  master: { id: 'master', name: 'Master agent', role: 'Reads your profile, background and memory, and briefs the managers', status: 'idle', detail: 'Waiting for the first search.' },
+  managers: [],
+  workers: [],
+  validators: [],
+  presenter: null,
+  events: [],
+  running: false,
+  summary: 'No search yet',
+};
+
+function BackendChip({ status, provider }: { status: BackendState; provider: Provider }) {
   const text =
-    status.kind === 'checking' ? 'Backend: checking…' : status.kind === 'connected' ? `Backend: connected${status.live ? '' : ' (no Grok key)'}` : 'Backend: not running';
+    status.kind === 'checking' ? 'Backend: checking\u2026' : status.kind === 'connected' ? `Backend: connected, on ${providerName[provider]}` : 'Backend: not running';
   return (
-    <span
-      className="ag-chip-dark"
-      title={
-        showing
-          ? "The teammates' agent server on port 8787. This page shows its latest run."
-          : "The teammates' agent server on port 8787. Without a run from it, this page plays its own simulation."
-      }
-      aria-live="polite"
-    >
+    <span className="ag-chip-dark" title="The agent backend on port 8787. This page shows its latest run." aria-live="polite">
       <Server className="size-3.5" aria-hidden="true" />
       <span className={`size-1.5 rounded-full ${status.kind === 'connected' ? 'bg-[#34c759]' : status.kind === 'offline' ? 'bg-white/40' : 'bg-[#f5c451]'}`} aria-hidden="true" />
       {text}
@@ -64,218 +53,124 @@ function BackendChip({ status, showing }: { status: BackendState; showing: boole
   );
 }
 
+/** Shown instead of the agents while no model is connected. */
+export function ConnectFirst({ offline }: { offline: boolean }) {
+  return (
+    <section className="ag-hero" aria-labelledby="ag-connect-title">
+      <div className="mx-auto max-w-xl py-10 text-center">
+        <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-white/10 text-white" aria-hidden="true">
+          <Plug className="size-6" />
+        </span>
+        <h2 id="ag-connect-title" className="mt-5 font-display text-3xl leading-tight">
+          {offline ? 'The agent backend is not running' : 'Connect a model first'}
+        </h2>
+        <p className="ag-honest mt-3">
+          {offline
+            ? 'Your agents run in the BearRok backend on this computer. Start it, then open this page again.'
+            : 'Your agents run on Claude, ChatGPT or Grok, through that company\u2019s app for the command line on this computer and your own account. Connect one in Settings, then come back to run your first search.'}
+        </p>
+        {!offline && (
+          <Link to="/settings#models" className="ag-btn mt-6 inline-flex" data-primary="true">
+            Connect Claude, ChatGPT or Grok
+            <ArrowRight className="size-4" aria-hidden="true" />
+          </Link>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function Agents() {
-  const { state } = useStore();
+  const harnesses = useHarnesses();
+  const live = useLive();
+  // A connected harness, or a deployed copy's xAI key (the backend then reports Grok).
+  const ready = anyConnected(harnesses.state) || (live.status === 'connected' && live.provider !== 'simulated');
+  if (harnesses.state === 'loading') return <AgentsFrame aside="Checking your models" />;
+  if (!ready) return <AgentsFrame aside={harnesses.state === 'offline' ? 'Agent backend not reachable' : 'No model connected'}><ConnectFirst offline={harnesses.state === 'offline'} /></AgentsFrame>;
+  return <AgentsLive />;
+}
+
+function AgentsFrame({ aside, children }: { aside: string; children?: ReactNode }) {
+  return (
+    <div className="ag-xai">
+      <Page
+        title="Your agents"
+        subtitle="Watch your agents search for you: the master briefs the managers, workers read the web, and validators decide what reaches you."
+        aside={<StatusPill>{aside}</StatusPill>}
+      >
+        {children}
+      </Page>
+    </div>
+  );
+}
+
+export function AgentsLive() {
   const reduced = useReducedMotion();
   const backend = useBackendStatus();
-  const [instructions, setInstructions] = useLocal<StandingInstruction[]>('bearrok.agents.instructions', []);
-  const [storedSpeed, setSpeed] = useLocal<number>('bearrok.agents.speed', 1);
-  const speed = (SPEEDS as readonly number[]).includes(storedSpeed) ? storedSpeed : 1;
   const [selected, setSelected] = useState('master');
   const live = useLive();
-  // The backend's run, when there is one, replaces the simulation on the map and in the panels.
+  const connected = live.status === 'connected';
+  const hasRun = live.agents !== null;
   // Between searches, the managers the next search will have (they follow the kinds chosen in Agent settings).
-  // The agent picked in the team picture.
-  const [teamSelected, setTeamSelected] = useState<TeamId>('manager');
-  const real = useMemo(() => (live.agents ? withNextManagers(live.agents, live.nextManagers) : null), [live.agents, live.nextManagers]);
-
-  const memory = useMemo(() => memoryFrom(state, opportunities), [state]);
-  const texts = useMemo(() => instructions.map((i) => i.text), [instructions]);
-  const inputFor = useCallback(
-    (list: string[], trigger: string): RunInput => ({ profile: state.profile, memory, instructions: list, dismissed: state.dismissed, trigger }),
-    [state.profile, state.dismissed, memory],
-  );
-
-  const [run, dispatch] = useReducer(runReducer, undefined, () => idleRun(inputFor(texts, 'Scheduled run.')));
-
-  // Open the page on a run already moving, the way a scheduled run would be. The ref keeps
-  // React's development double-mount from starting two runs.
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    dispatch({ type: 'start', input: inputFor(texts, 'Scheduled run. The demo starts one when you open this page.') });
-  }, [inputFor, texts]);
-
-  // The clock: one beat per tick while running. Cleared on pause, on every beat and on unmount.
-  const beatMs = BEAT_MS / speed;
-  useEffect(() => {
-    if (real || run.status !== 'running') return;
-    const timer = window.setTimeout(() => dispatch({ type: 'tick' }), beatMs);
-    return () => window.clearTimeout(timer);
-  }, [real, run.status, run.cursor, beatMs]);
-
-  const start = (list: string[], trigger: string) => dispatch({ type: 'start', input: inputFor(list, trigger) });
-
-  const send = (text: string) => {
-    const next = [...instructions.filter((i) => i.text.toLowerCase() !== text.toLowerCase()), { id: `${Date.now()}`, text }];
-    setInstructions(next);
-    setSelected('master');
-    // Per the design a student request is a trigger. Restarting at once lets the student watch
-    // their instruction become the brief and flow down the tree.
-    start(
-      next.map((i) => i.text),
-      `You said: "${text}"`,
-    );
-  };
-
-  const nextBrief = useMemo(() => buildBrief(state.profile, memory, texts), [state.profile, memory, texts]);
-  const nextSlots = useMemo(() => assignSlots(nextBrief), [nextBrief]);
-  const stale = run.status !== 'idle' && (nextBrief.summary !== run.brief.summary || JSON.stringify(nextSlots) !== JSON.stringify(run.slots));
-
-  const t = totals(run);
-  const { counts } = funnel(run.candidates);
-  const shown = counts[4] ?? 0;
-  const view = useMemo(() => (real ? fromLive(real) : fromRun(run, shown)), [real, run, shown]);
+  const real = useMemo(() => withNextManagers(live.agents ?? NO_RUN, live.nextManagers), [live.agents, live.nextManagers]);
+  const view = useMemo(() => fromLive(real), [real]);
   const node = view.nodes.find((n) => n.id === selected) ?? view.nodes[0];
-  const simStats: [string, number, ((n: number) => string) | undefined][] = [
-    ['agents working', t.working, undefined],
-    ['Grok calls', t.calls, undefined],
-    ['tokens', t.tokens, compact],
-    ['pages read', run.pages, undefined],
-    ['found', counts[0] ?? 0, undefined],
-    ['in your feed', shown, undefined],
-  ];
-
-  const stats = real ? liveStats(real).map(([label, value]): [string, number, undefined] => [label, value, undefined]) : simStats;
-
-  const runLabel = real ? (real.running ? 'Running' : 'Done') : run.status === 'idle' ? 'Ready' : run.status === 'paused' ? 'Paused' : run.status === 'done' ? 'Done' : 'Running';
-  const chipStatus = real
-    ? real.running
-      ? 'working'
-      : 'done'
-    : run.status === 'running'
-      ? 'working'
-      : run.status === 'paused'
-        ? 'waiting'
-        : run.status === 'done'
-          ? 'done'
-          : 'idle';
+  const stats = liveStats(real);
+  const runLabel = !connected ? 'Offline' : real.running ? 'Running' : hasRun ? 'Done' : 'Ready';
+  const chipStatus = !connected ? 'idle' : real.running ? 'working' : hasRun ? 'done' : 'idle';
 
   return (
     // .ag-xai gives this page xAI's type and buttons (styles at the end of agents.css).
     <div className="ag-xai">
     <Page
       title="Your agents"
-      subtitle={
-        real
-          ? 'Watch your agents search for you: the master briefs the managers, workers read the web, and validators decide what reaches you.'
-          : 'A demonstration on sample data until your agents run their first search: the master briefs the managers, workers read the web, and validators decide what reaches you.'
-      }
-      aside={
-        <StatusPill>
-          {real
-            ? real.summary
-            : run.status === 'running'
-              ? `Run ${run.run} · ${t.working} of ${t.agents} agents working`
-              : run.status === 'done'
-                ? `Run ${run.run} done · ${shown} new in your feed`
-                : `${runLabel} · ${t.agents} agents`}
-        </StatusPill>
-      }
+      subtitle="Watch your agents search for you: the master briefs the managers, workers read the web, and validators decide what reaches you."
+      aside={<StatusPill>{!connected ? 'Agent backend not reachable' : real.summary}</StatusPill>}
     >
       <section className="ag-hero" aria-labelledby="ag-run-title">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <h2 id="ag-run-title" className="font-display text-3xl leading-none">
-              {real ? 'Latest run' : SAMPLE_FEED ? 'Sample run' : 'Live run'}
-              {!real && run.run > 0 && <span className="text-white/55"> #{run.run}</span>}
+              {hasRun ? 'Latest run' : 'Your agent team'}
             </h2>
             <span className="ag-chip-dark">
               <span className="ag-dot" data-status={chipStatus} aria-hidden="true" />
-              {real ? (
-                runLabel
-              ) : (
-                <>
-                  {runLabel} · <span className="tabular-nums">{clockText(run.clock)}</span> simulated
-                </>
-              )}
+              {runLabel}
             </span>
-            <BackendChip status={backend} showing={real !== null} />
+            <BackendChip status={backend} provider={live.provider} />
           </div>
           <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Run controls">
-            {real ? (
-              real.running ? (
-                // Stops the real search. Postings already checked stay in the feed.
-                <button type="button" className="ag-btn" data-primary="true" onClick={() => void live.stopRun()}>
-                  <Square className="size-4" fill="currentColor" aria-hidden="true" />
-                  Stop search
-                </button>
-              ) : (
-                <button type="button" className="ag-btn" data-primary="true" onClick={() => void live.runNow()}>
-                  <Play className="size-4" aria-hidden="true" />
-                  Run now
-                </button>
-              )
-            ) : null}
-            {real && <AgentSettingsButton />}
-            {real && autoLine(live.auto) && <span className="ag-auto-note">{autoLine(live.auto)}</span>}
-            {real ? null : (
-              <>
-                <button type="button" className="ag-btn" data-primary="true" onClick={() => start(texts, 'Started by hand with Run now.')}>
-                  <Play className="size-4" aria-hidden="true" />
-                  Run now
-                </button>
-                <button
-                  type="button"
-                  className="ag-btn"
-                  disabled={run.status !== 'running' && run.status !== 'paused'}
-                  onClick={() => dispatch({ type: run.status === 'paused' ? 'resume' : 'pause' })}
-                >
-                  {run.status === 'paused' ? <Play className="size-4" aria-hidden="true" /> : <Pause className="size-4" aria-hidden="true" />}
-                  {run.status === 'paused' ? 'Resume' : 'Pause'}
-                </button>
-                <AgentSettingsButton />
-                <div className="ag-seg" role="group" aria-label="Speed">
-                  {SPEEDS.map((s) => (
-                    <button key={s} type="button" aria-pressed={speed === s} onClick={() => setSpeed(s)}>
-                      {s === 0.5 ? '½' : s}×
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className="ag-btn"
-                  disabled={run.status !== 'running' && run.status !== 'paused'}
-                  onClick={() => dispatch({ type: 'finish' })}
-                  aria-label="Skip to the end of the run"
-                  title="Skip to the end"
-                >
-                  <SkipForward className="size-4" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="ag-btn"
-                  onClick={() => dispatch({ type: 'reset', input: inputFor(texts, 'Nothing yet. Press Run now.') })}
-                  aria-label="Reset the run"
-                  title="Reset"
-                >
-                  <RotateCcw className="size-4" aria-hidden="true" />
-                </button>
-              </>
+            {real.running ? (
+              // Stops the real search. Postings already checked stay in the feed.
+              <button type="button" className="ag-btn" data-primary="true" onClick={() => void live.stopRun()}>
+                <Square className="size-4" fill="currentColor" aria-hidden="true" />
+                Stop search
+              </button>
+            ) : (
+              <button type="button" className="ag-btn" data-primary="true" disabled={!connected} onClick={() => void live.runNow()}>
+                <Play className="size-4" aria-hidden="true" />
+                Run now
+              </button>
             )}
+            <AgentSettingsButton />
+            {connected && autoLine(live.auto) && <span className="ag-auto-note">{autoLine(live.auto)}</span>}
           </div>
         </div>
-        {real ? (
-          <p className="ag-honest mt-2">
-            <strong className="font-semibold text-white">{sourceLabel(live.provider)}.</strong> {sourceNote[live.provider]}
-          </p>
-        ) : (
-          <p className="ag-honest mt-2">{sourceLabel(null)}</p>
-        )}
+        <p className="ag-honest mt-2">
+          {connected ? (
+            <>
+              <strong className="font-semibold text-white">{sourceLabel(live.provider)}.</strong> {sourceNote[live.provider]}
+            </>
+          ) : (
+            'The agent backend is not reachable, so there is no run to show. Start it with npm run dev in backend/.'
+          )}
+        </p>
 
-        {/* Standing instructions feed the local simulation only; they cannot reach the backend's agents. */}
-        {!real && (
-          <div className="mt-4">
-            <TellBar onSend={send} standing={instructions.length} />
-          </div>
-        )}
-
-        <dl className={`mt-5 grid grid-cols-3 gap-4 border-y border-white/10 py-4 ${real ? 'sm:grid-cols-5' : 'sm:grid-cols-6'}`}>
-          {stats.map(([label, value, format]) => (
+        <dl className="mt-5 grid grid-cols-3 gap-4 border-y border-white/10 py-4 sm:grid-cols-5">
+          {stats.map(([label, value]) => (
             <div key={label}>
               <dd className="ag-stat-num">
-                <AnimatedNumber value={value} format={format} reduced={reduced} />
+                <AnimatedNumber value={value} reduced={reduced} />
               </dd>
               <dt className="ag-stat-label">{label}</dt>
             </div>
@@ -283,39 +178,20 @@ export function Agents() {
         </dl>
 
         <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_310px]">
-          {/* A simplified picture of the team: one manager and four workers toward one goal. */}
-          <TeamMap view={view} selected={teamSelected} onSelect={setTeamSelected} />
-          <div className="h-[420px] min-h-0 xl:h-[540px]">
-            <TeamAbout selected={teamSelected} onSelect={setTeamSelected} />
+          {/* The whole system as it runs: master, search managers, worker fleet, validators, presentation, feed. */}
+          <RunGraph view={view} selected={node?.id ?? ''} onSelect={setSelected} reduced={reduced} pulseMs={1400} />
+          <div className="grid gap-4 md:h-[420px] md:grid-cols-2 xl:h-[540px] xl:grid-cols-1 xl:grid-rows-[minmax(0,1.15fr)_minmax(0,1fr)]">
+            {!node ? (
+              <section className="ag-panel p-4 text-[13px] text-white/60">The run has not reported any agents yet.</section>
+            ) : (
+              <LiveNodeDetail node={node} agent={view.agents[node.id]!} info={view.info[node.id]} />
+            )}
+            <div className="h-[300px] min-h-0 md:h-auto">
+              <ActivityStream log={view.log} nodes={view.nodes} empty={hasRun ? 'The backend has not reported any activity for this run yet.' : 'No search yet. Press Run now to start one.'} />
+            </div>
           </div>
         </div>
       </section>
-
-      {real ? (
-        <p className="mt-6 text-sm text-ink-3">
-          The validation funnel, the brief, usage and memory cards belong to the simulated run on sample data, so they are hidden while the backend&rsquo;s run is shown.
-        </p>
-      ) : (
-        <>
-          <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-            <Funnel run={run} reduced={reduced} />
-            <BriefCard
-              instructions={instructions}
-              onRemove={(id) => setInstructions((list) => list.filter((i) => i.id !== id))}
-              onClear={() => setInstructions([])}
-              brief={nextBrief}
-              slots={nextSlots}
-              stale={stale}
-              onApply={() => start(texts, 'Started with your updated instructions.')}
-            />
-          </div>
-
-          <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            <UsageCard run={run} reduced={reduced} />
-            <MemoryCard profile={state.profile} memory={memory} instructions={instructions.length} />
-          </div>
-        </>
-      )}
     </Page>
     </div>
   );

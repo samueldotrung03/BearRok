@@ -1,0 +1,17 @@
+{
+  "id": "notes-want",
+  "covers": "notes-want",
+  "student": {
+    "classYear": "Junior",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Please find climate policy internships. I want climate work more than anything else this cycle."
+  },
+  "pages": {
+    "https://mossgrove.example/interns/climate-policy": "notes-want.html"
+  },
+  "expected": {
+    "required": [{ "title": "Climate Policy Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

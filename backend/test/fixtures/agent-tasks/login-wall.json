@@ -1,0 +1,17 @@
+{
+  "id": "login-wall",
+  "covers": "login-wall",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Any software internship with a public posting."
+  },
+  "pages": {
+    "https://glasshouse-careers.example/jobs/hidden-intern": "login-wall.html"
+  },
+  "expected": {
+    "required": [],
+    "forbidden": ["Hidden Intern"]
+  }
+}

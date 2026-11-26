@@ -1,0 +1,17 @@
+{
+  "id": "class-year",
+  "covers": "class-year",
+  "student": {
+    "classYear": "Freshman",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Hardware internships near campus."
+  },
+  "pages": {
+    "https://redwood-circuit.example/interns/hardware": "class-year.html"
+  },
+  "expected": {
+    "required": [],
+    "forbidden": ["Hardware Intern"]
+  }
+}

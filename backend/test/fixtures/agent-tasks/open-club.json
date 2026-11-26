@@ -1,0 +1,17 @@
+{
+  "id": "open-club",
+  "covers": "open-club",
+  "student": {
+    "classYear": "Freshman",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Beginner-friendly coding clubs on campus."
+  },
+  "pages": {
+    "https://oakwhistle.example/join": "open-club.html"
+  },
+  "expected": {
+    "required": [{ "title": "Oakwhistle Coding Club", "deadlineRequired": false }],
+    "forbidden": []
+  }
+}

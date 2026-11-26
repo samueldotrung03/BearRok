@@ -1,141 +1,309 @@
-# Student Opportunities
+# BearRok
 
-**An AI that hands opportunities to you, so you don’t have to go looking for them, and builds you a roadmap for reaching them.**
+**BearRok brings internships, events, clubs, programs, and career paths to one student, then keeps a roadmap and the applications.**
 
-Student Opportunities is a tool for students, built on a system of Grok AI agents for a Grok hackathon. It covers more than internships: it brings you internships, career discovery, networking events, and other opportunities such as clubs, hackathons, research openings, and scholarships. The agents run constantly in the background. They search, keep the results up to date, and base everything on your preferences. You open the app and the opportunities are already there, in a feed you scroll like Reels. Finding an internship should feel as easy and as entertaining as scrolling social media.
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat&logo=nodedotjs&logoColor=white)
 
-Finding an opportunity is only half of it. The app also creates a personal roadmap for each student: what to learn, in what order, and exactly which actions to take to get from where they are now to the career they want.
+There is no license file in this repo, and there are no GitHub workflows.
 
-It also manages the applications themselves. It collects each application’s prompts and deadlines, tracks the status of everything the student is pursuing, lets them apply from within the app, and sets reminders and Google Calendar entries automatically.
+![The For you reel](docs/screenshots/feed.png)
 
-## The student problem
+The For you reel for the demo student. The badge says Simulated agents. These cards were read from organizer pages on 2026-11-25. They are not the result of a live agent run.
 
-Most students know they should be building toward a career. Far fewer know which one, which opportunities lead to it, or how to get from where they are to an offer. Three difficulties compound each other.
+> **One minute.** Node 24 or newer. Two terminals, from a clone of this repo.
+>
+> ```
+> git clone https://github.com/samueldotrung03/BearRok.git
+> cd BearRok/backend
+> npm ci
+> npm run dev
+> ```
+>
+> ```
+> cd BearRok/dashboard
+> npm ci
+> npm run dev
+> ```
+>
+> Open http://localhost:5173. With no Firebase web settings, sign-in is off and the app opens as the guest demo student. The backend must be running. The dashboard does not ship its own sample feed.
 
-**Figuring out a career path.** A first-year student who likes coding cannot easily tell whether that points to software engineering, data science, product, or research, or what each of those expects from an intern. Advice comes from scattered places: a senior’s story, a Reddit thread, a posting that lists ten requirements with no order to them. The student is left guessing what to learn first, which projects count, and when to start applying. Many find out about a deadline or a prerequisite only after it has passed.
+## Contents
 
-**Locating opportunities efficiently.** Internships, networking events, career fairs, clubs, and programs are spread across company career pages, LinkedIn, Handshake, event sites, school newsletters, and community posts. The same opening is reposted in several places with different details, and listings stay up after they close. Finding what is real, open, and meant for someone at their level takes hours of searching that a student has to repeat every week.
+1. [The problem](#the-problem)
+2. [The answer](#the-answer)
+3. [Why you can trust it](#why-you-can-trust-it)
+4. [What one run does](#what-one-run-does)
+5. [A look inside](#a-look-inside)
+6. [Meet the agents](#meet-the-agents)
+7. [Why now](#why-now)
+8. [Try it](#try-it)
+9. [How it works](#how-it-works)
+10. [Configuration](#configuration)
+11. [Tests](#tests)
+12. [Repo layout](#repo-layout)
+13. [Roadmap](#roadmap)
+14. [Read next](#read-next)
 
-**Getting anything personalized.** Job boards and event listings return the same keyword results to everyone. They do not know the student’s year, skills, interests, or which listings they already looked at and rejected. A freshman sees roles for juniors, and a student who has skipped every finance posting keeps getting shown finance. The search never gets better with use.
+## The problem
 
-All three come from the same thing: the student has to do the looking. Students with a mentor or a well-connected network get a path and a shortlist handed to them. Everyone else gets a search box.
+A student hears about internships, events, clubs, research, scholarships, and careers in different places. Deadlines live on organizer pages, and a closed posting is easy to miss. BearRok keeps one feed, one roadmap, and a list of applications for that student.
 
-## The idea
+## The answer
 
-Turn the search around. Instead of the student looking for opportunities, an AI finds them and brings them to the student, then shows the way to reach them.
+The host owns the lineup, the rank, the stop, and the evidence check. Each live agent is one model call checked against a schema. With no model connected, SimBrain fills the same roles from an invented catalog. The demo feed on first open is a different set of cards, loaded in advance, and opening it does not start a search.
 
-- **It hands opportunities to you.** There is no query to write and no list of sites to check. The feed is filled before you open the app.
-- **It feels like social media, not a job board.** Internships come to you one after another, the way Reels do. You scroll, react, and keep going. Looking for opportunities stops being a chore and becomes something you would open the app for.
-- **It runs constantly.** The agents keep working while you are away: finding new postings, dropping ones that have closed, and refreshing what you see.
-- **It adapts to you.** You save, like, or dislike what it shows you, and each decision changes what the AI recommends next. The longer you use it, the more it becomes your own.
-
-- **It builds your roadmap.** Knowing an internship exists does not tell you how to get it. The app turns a goal into a step-by-step plan, and keeps that plan current as you make progress.
-- **It manages your applications.** Prompts, deadlines, statuses, reminders, and calendar entries are all handled in one place.
-
-The student stays in charge of every decision about what to pursue and where to apply.
-
-## What it brings you
-
-- **Internships.** Openings that fit your year, skills, and interests.
-- **Career discovery.** Paths and roles you may not have known to look for, based on what you like and what you are good at, with what each one expects.
-- **Networking events.** Career fairs, company info sessions, meetups, and talks where you can meet people in the field.
-- **Other opportunities.** Clubs, hackathons, research openings, scholarships, and programs.
-
-## What the app does
-
-The app has three parts that feed each other: a social-media-style feed that hands opportunities to the student, a roadmap that tells the student how to get there, and an application manager that handles everything about applying.
-
-### A feed you scroll like Reels
-
-Job searching today is work: open a board, type keywords, set filters, read through long listings, repeat. Most students put it off. Meanwhile the same students scroll social media every day without effort, because the app does the choosing and every swipe brings something new.
-
-The app brings that experience to opportunities.
-
-- **Opportunities are handed to you, one after another.** Open the app and the first internship is already on screen. Scroll and the next one appears. There is nothing to search for.
-- **Each one is quick to take in.** An opportunity is presented like a post, not a wall of text: what it is, who it is for, why it fits you, and when it is due. The full details and the official page are one tap away.
-- **You react like you would to a post.** Save it, like it, or dislike it, and keep scrolling.
-- **It is meant to be enjoyable.** The feed mixes internships with events, clubs, and career paths so there is always something fresh. A few minutes of scrolling is a few minutes of real progress on your career.
-- **The recommendations are the product.** As with any social feed, what makes it work is that the next thing shown is something you want to see. That is what the adapting AI below is for.
-
-### An AI that adapts to each student
-
-Adapting to the user is the core of the product. Two students who open the app on the same day should see different feeds, and one student’s feed should look different a month later.
-
-- **Preferences set the start.** The student tells the app a few things up front: interests, class year, skills, and location.
-- **Save, like, or dislike.** Every card has these three actions. Saving keeps an opportunity for later, liking asks for more like it, and disliking asks for less.
-- **Every decision counts.** Each action is a signal the AI learns from. Likes and saves pull similar opportunities up the feed. Dislikes push that kind down and teach the agents what to stop looking for.
-- **It shapes the search, not just the order.** The student’s decisions are saved to memory and read by the master agent, so they change what the agents go out and find next.
-- **It shapes the roadmap too.** What a student likes and saves shows where they are heading, and the roadmap follows.
-
-**Built on X’s recommendation algorithm.** The plan is to base this on the algorithm X uses for its For You feed, which xAI has published as open source ([xai-org/x-algorithm](https://github.com/xai-org/x-algorithm), Apache 2.0 license). That system predicts how likely a person is to take each action on a post, positive ones such as liking and negative ones such as “not interested”, and ranks the feed by combining those predictions. The same idea applies here with opportunities in place of posts, and save, like, and dislike as the actions. It is a proven design for feeds that learn from behavior, and it comes from the same company as Grok.
-
-### A roadmap built for each student
-
-Students struggle most with the question the feed alone cannot answer: “What do I actually need to do to get there?” The roadmap answers it.
-
-- **It starts with career discovery.** For a student who does not yet know what to aim for, the app suggests career paths that match their interests and background and shows what each one involves.
-- **It maps the path.** Once the student picks a path, a role, or a specific internship, the app works out what that goal requires, compares it with where the student is now, and lays out the steps in order.
-- **Every step is an action.** The roadmap says what to learn and exactly what to do: take a course, build a project, join a club, go to a networking event, apply before a deadline.
-- **It connects to the feed.** Steps link to real opportunities the agents have found, so the roadmap is something the student can act on today.
-- **It keeps updating.** As the student completes steps or changes direction, the roadmap adjusts, and so does what the feed recommends.
-
-### Application management, all in one place
-
-Finding an opportunity still leaves the work of applying: collecting the prompts, remembering the deadlines, and keeping track of where each application stands. The app manages all of it, so the student never needs a separate spreadsheet, notes file, or calendar.
-
-- **It gathers what each application needs.** The agents scrape the application prompts, questions, requirements, and deadlines for every opportunity and keep them with it.
-- **It keeps track of everything.** Every opportunity the student is pursuing is in one list, with its status, its deadline, and what is still left to do.
-- **The student can apply from within the app.** The prompts and materials are in front of them, and they work on the application without leaving.
-- **The student marks a status.** Each opportunity is marked as *interested*, *to apply*, *applying*, or *applied*.
-- **Reminders and calendar are automatic.** When something is marked *to apply* or *applying*, the AI sets reminders and adds the deadlines to the student’s Google Calendar on its own.
-
-Everything involved in setting up and managing an application is handled by this app.
-
-## The Grok agent system
-
-Grok powers every agent. The search for opportunities is automated: the agents start and repeat their work on their own, and are not just called when a user asks. The system has four levels.
-
-```
-              MASTER AGENT
-   reads your profile, background, and memory
-                    |
-              MANAGER AGENTS
-   organize the search, and design the feed and the roadmap
-                    |
-              WORKER AGENTS
-   scrape the web and collect opportunity details
-                    |
-             VALIDATION AGENTS
-   check the work against the student's criteria
+```mermaid
+flowchart TD
+  host[Host plans the lineup] --> master[Master writes the brief]
+  master --> managers[Search managers plan at most three jobs]
+  managers --> scouts[Scouts return title and URL]
+  scouts --> readers[Readers extract the posting]
+  readers --> review[Status reviewer and criteria reviewer]
+  review --> gate[Host checks, scores, and gates]
+  gate --> reason[Presentation writes one reason]
+  reason --> rank[Host ranks the feed]
 ```
 
-- **Master agent.** Reads the student’s profile, background, and memory of what they have done in the app. Decides what this student needs and passes that to the managers.
-- **Manager agents.** Organize how the search is carried out and design how the results are presented to the student, both as feed cards and as roadmap steps. They command the workers.
-- **Worker agents.** Go out to the web, scrape listings, and bring back the details of each internship, event, or other opportunity.
-- **Validation agents.** Take what the workers bring back and check it before the student sees it. They make sure each opportunity actually meets the student’s criteria and is what the student is looking for, and that it is real and still open. Anything that fails is sent back or dropped.
+1. The host plans four manager slots with `planLineup` and names them. The master writes the brief, the lenses, and the focus. The host then writes kind, name, and category back over the master's answer.
+2. Each search manager may return at most three jobs. A scout returns title-and-URL leads. The host slices that list to the cap: 2 on the Grok CLI, 4 for the API and for SimBrain.
+3. An extractor opens the lead. The status reviewer may reject the posting. The criteria reviewer scores a match from 0 to 100 and does not reject it. A rejection that rests only on whether it is open, or on something not confirmed, is overruled in `reviewGuard.ts`.
+4. The host drops a posting that fails `hardCheck` (the status reviewer said it is closed, the deadline has passed, or there is no real link) and one whose match is under the student's minimum. The default minimum is 30.
+5. On a live run, `gateLiveCard` fetches the posting page. An unreachable link drops the card. A blocked fetch keeps the card and clears the deadline. A deadline quote stays only when every sentence of 12 or more characters appears in the page text. A link check that was skipped is treated as blocked.
+6. If the organizer's pages stated no deadline, and the fetch was not blocked, the deadline finder is the only extra-listing search. It runs three queries: the title plus "deadline", the title plus "apply by", and the title plus the year. A date is stored only when `quoteOnPage` passes and the date is not in the past.
+7. The presentation manager writes one reason sentence per card. It does not order the feed. `rankFeed` in `backend/src/agents/scoring.ts` orders it from the student's history. The estimates are computed from that history, not from a trained model. The dashboard orders the reel again in `dashboard/src/state/ranking.ts`. That browser ranker is a stand-in on the student's own saves, likes, and dislikes. It is not the X For You algorithm.
+8. Stop runs inside `withSignal`. A `StoppedError` ends model calls and page fetches that are still going. Cards already kept stay in the feed.
 
-Only validated results flow back up into the two things the student sees: the feed and the roadmap. The same agents that find opportunities also build and update each student’s roadmap. What the student does next is saved to memory, the master agent reads it on the next run, and the cycle continues.
+## Why you can trust it
 
-## Team
+These are checks in code. A prompt can still say something else, and where it does, the table says so.
 
-Three people, provisional roles:
+| Rule | Where it is enforced |
+| --- | --- |
+| Lineup kinds and names are chosen before the master runs, then written back over its answer | `planLineup` in `lineup.ts`; the overwrite is in `system.ts` |
+| At most three jobs per search manager | `planJobs` keeps `data.jobs.slice(0, 3)` |
+| Scout lead cap, applied after the model answers | `scout` returns `data.leads.slice(0, cap)` |
+| CLI run size: feed target 8, at most two leads per scout | `engine()` in `server.ts`. `FEED_MIN` does not change this |
+| API and simulated feed target 12, scout cap 4, at most four fill runs | `config.feed` spread in `engine()`, and `DEFAULT_OPTIONS` |
+| Every live call is parsed with its zod schema | `grokJson` calls `schema.parse` |
+| Stop | `withSignal` and `StoppedError` in `stop.ts` |
+| Closed, expired, or unlinkable postings are dropped before the score matters | `hardCheck` in `match.ts` |
+| Match minimum, default 30. The criteria reviewer does not reject | `meetsThreshold`; the host sets the criteria verdict to keep and then applies the minimum |
+| A groundless rejection is overruled | `groundlessReject` in `reviewGuard.ts` |
+| Live evidence gate | `gateLiveCard` in `evidence.ts`. Unreachable drops the card. Blocked keeps it and clears the deadline. A quote stays only if each sentence of 12 or more characters is on the page |
+| Deadline from another listing | Stored only after `quoteOnPage`, and only if the date has not passed |
+| Web search off means an empty tool list | `writeSearch` passes `tools: []`, and the prompt says to rank only the student's own postings |
+| Web search on is one lookup, then a fill with no tools | Lookup uses `web_search` only, `maxTurns: 2`. The fill says not to search |
+| Roadmap search is one call, then a tool-free fill. A thin draft is filled again with no tools | `writeRoadmap`. `x_search` is added only when `XAI_X_SEARCH=1` |
+| Career path: one search, then writers with no tools | `careerSearch` uses `maxTurns: 2`. `x_search` is added only when the harness provider is Grok, which is not the same flag as `XAI_X_SEARCH` |
 
-- **A · Agent backend and database.** The Grok agent system, the recommendation algorithm, application tracking with reminders and Google Calendar, memory, and storage.
-- **B · Dashboard.** The feed, the cards with save, like, and dislike, the roadmap view, and the application manager.
-- **C · Pitch website and demo.** The pitch page and the presentation.
+The CLI scout is the place where two instructions disagree. When `scoutMaxLeads` is set, the scout's system string says to run the query once, return at most two title-and-URL pairs, and not open posting pages. That call does not set `maxTurns`. In `grokCli.ts`, an omitted `maxTurns` adds the line "Use web search and open the pages." The host still slices the leads to two, and the CLI feed target stays 8. The scout is also given `web_search`, and `x_search` when `XAI_X_SEARCH=1`. The API scout prompt does not say to skip opening pages. The deadline finder's own prompt tells it to open pages, and it also omits `maxTurns`, so those two lines agree.
 
-The event is **Thursday, November 19, 2026**. Grok account access is expected around **2 p.m.**
+`GROK_CLI_ALWAYS_APPROVE` is read in `config.ts`. Leave it unset. Setting it to `1` passes `--always-approve`, which also approves shell and file tools. This README does not ask you to set it.
 
-## Open questions
+## What one run does
 
-- How much of the agent system runs live in the demo, and what is shown from prepared examples?
-- Is the feed or the roadmap the centerpiece of the demo?
-- How much of X’s algorithm can be adapted in the time available, and what simpler ranking stands in for the rest?
-- What Grok access and budget will the team have?
-- What is the submission time, and how long is the pitch?
+A run starts on a manual request, a profile change, the fifth save-like-or-dislike (`feedbackThreshold`, default 5), a schedule, automode, or a fill when the feed is under its target. A first-visit run starts only when `runCount` is 0. The demo student is stored with `runCount` 1, so opening that feed does not start a search.
 
-## Status
+On the Grok CLI the host asks for about 8 cards, allows 2 leads per scout, runs `GROK_CLI_CONCURRENCY` processes at once (default 3), and caps jobs with `LIVE_MAX_JOBS` (default 12). On the API and in simulation the target is `FEED_MIN` (default 12), the scout cap is 4, and the host may fill up to `FEED_FILL_MAX_RUNS` times (default 4).
 
-The agent system is built in `backend/` and can be watched running: `cd backend && npm install && npm run dev`, then open http://localhost:8787/. Until Grok is connected it runs on simulated agents and sample data. Sign-in, the application manager and custom notes are built in the backend; the roadmap and career discovery are not. See `backend/AGENT_SYSTEM.md`.
+Cards that pass are stored on the student as they are kept, with origin `live` or `prepared`. The presentation reason is stored beside them. The four strongest new cards, by match, are sent to an application reader. When the shared opportunities table is open, saving memory also copies postings into it. The search does not read that table.
 
-The dashboard is in `dashboard/` (reel feed, roadmap, career discovery, saved, agents, a tabbed profile, settings, and sign-in with account set-up): `cd dashboard && npm install && npm run dev`, then open http://localhost:5173/. Sign-in, the profile and settings talk to the backend; the feed, roadmap and agents pages still show sample data. See `dashboard/README.md`.
+Reminders default to 7, 2, and 0 days before a deadline. The app records them. It does not send email. When Google Calendar is connected, the same offsets are popup minutes.
+
+## A look inside
+
+These are the running app, desktop width, with the backend up and no model connected. The guest is the demo student John, a computer science junior at UC Berkeley. Sample path counts on the roadmap are labeled on the page as a draft.
+
+![Today](docs/screenshots/today.png)
+
+Today. The page greets John and shows the week, due dates, and an empty application count. The badge says Simulated agents.
+
+![Roadmap](docs/screenshots/roadmap.png)
+
+Roadmap for the career goal Software engineering. The page says Grok is not connected and that this is a draft by fixed rules. The "12 people who reached Software engineering" line is counted from sample path profiles in `dashboard/src/data/sample.ts`, not from a model.
+
+![Career discovery](docs/screenshots/discover.png)
+
+Career discovery with the goal filled in and no guide written yet. The empty panel says to type or pick a career.
+
+![Search](docs/screenshots/search.png)
+
+Search before any query. The web and profile toggles are on. Nothing was searched for this picture. If you search with no model, the page says only your own postings were searched.
+
+![Agents](docs/screenshots/agents.png)
+
+Agents with no model connected. The page says to connect a model first. It does not draw a simulated fleet. The badge still says Simulated agents.
+
+Applications (`/applications`) and Saved (`/saved`) were empty for this guest: no applications yet, and nothing saved. Those two screens are not included.
+
+## Meet the agents
+
+Opportunity search roles that the host actually calls:
+
+| Role | May | May never |
+| --- | --- | --- |
+| Master | Write the brief, lenses, and focus. Read the profile, résumé text, and memory | Assign manager kinds or names. The host overwrites those |
+| Search manager | Turn one assignment into at most three search jobs | Cover another manager's kind. The host set the kind |
+| Scout | Return title-and-URL leads, sliced to the cap | Invent a URL the host will trust without the later checks. On the CLI, the system string says not to open pages; the CLI wrapper still says to open them when `maxTurns` is omitted |
+| Extractor | Open the lead and fill a record with quotes from that page | Search other listings for a deadline. That is the deadline finder's job |
+| Deadline finder | Run the three named queries and return a date, a URL, and a quote | Store the date by itself. The host checks the quote and drops past dates |
+| Status reviewer | Keep or reject from the posting's own page | Set the match score |
+| Criteria reviewer | Score the match | Reject the card. The host applies the minimum |
+| Presentation manager | Write one reason sentence per card | Order the feed or write the roadmap. The on-screen role string still says it orders the feed. `present()` does not |
+| Application reader | Read prompts and required materials on the apply page, for up to four new cards | Decide whether the card stays in the feed |
+
+Career discovery, when a student asks for a guide:
+
+| Role | May | May never |
+| --- | --- | --- |
+| Career master | Name the career and set each part's angle (`career_plan`). On "Add more", decide whether the ask stays on the guide or belongs on the feed (`career_ask`) | Search. Those calls set no tools |
+| Career manager | Nothing as a model. `managerBrief` writes the researcher's job as text | Call a model. `CAREER_TIERS.manager` is `none` |
+| Career search | One search, `maxTurns` 2. `x_search` only when the harness provider is Grok | Look for internships or postings. The prompt forbids that |
+| Researcher, validator, presentation | Write or check one part from the notes already gathered. No tools are set | Search. Voices on a harness that is not Grok are sample stories, and the code labels them that way |
+
+SimBrain implements the same opportunity-search brain when no model is connected. Other model calls in `grokBrain.ts`: calendar event, calendar sorter, illustrator, poster designer, poster art review, icon drawer, and application drafter.
+
+## Why now
+
+The listings already exist on organizer pages, department sites, and event listings. What a student still does by hand is keep the ones that fit, notice the deadline, and remember where an application stands. BearRok is that list, a roadmap toward a career goal, and a tracker. Order comes from this student's history. An older draft of this README described the feed as the X For You algorithm. That was a plan. This code does not do that, and no pass^k evaluation has been run.
+
+## Try it
+
+### Sample app
+
+Start the backend with no `XAI_API_KEY` and no harness connected in Settings. Start the dashboard. Sign-in stays off unless `FIREBASE_WEB_API_KEY` and `FIREBASE_PROJECT_ID` are set, and the app enters as the guest. Today greets John. The feed is his preloaded postings (`origin` `live`, found by a web check on 2026-11-25). The badge says Simulated agents because no model is connected.
+
+The Agents page hides Run now until a model is connected. The backend still builds a SimBrain when nothing is connected. A run that does start, such as `POST /api/students/:id/runs`, searches the invented catalog in `backend/src/agents/catalog.ts` (those links are `example.org`) and stores cards with origin `prepared`. That catalog is not the feed in the screenshot.
+
+`VITE_NO_SIGNIN` and `VITE_SAMPLE_FEED` are not read by the app. The only dashboard flag is `VITE_API_URL`.
+
+### Backend
+
+```
+cd backend
+npm ci
+npm test
+npm run typecheck
+npm run dev
+```
+
+`npm run dev` listens on port 8787. Guest memory stays in a local file. Signed-in students can use Firestore when account storage is configured.
+
+### Live model
+
+Connect Claude, ChatGPT, or Grok in Settings, or set `XAI_API_KEY` for the xAI API. A feed run, a career guide, or a roadmap spends model time. Leave `GROK_CLI_ALWAYS_APPROVE` unset.
+
+The model does not open this app. The dashboard is a page on your machine. Grok cannot open `127.0.0.1`.
+
+On the CLI, a run is the smaller one: feed target 8 and at most two leads per scout. On the API, the target stays 12.
+
+## How it works
+
+The dashboard is a React app on Vite, port 5173. It calls the backend at `VITE_API_URL`, default `http://localhost:8787`. The feed on screen is the backend's cards only. If the backend is down, the pages say so and stay empty. `Feed.tsx` then reorders those cards with `rankFeedDetailed`.
+
+Search from the search page is separate from a feed run. With a model and the web toggle on, `writeSearch` does one lookup (`web_search` only, `maxTurns` 2) and then fills the answer with no tools. The fill is told not to search. With a model and the web toggle off, the tool list is empty and the prompt says to rank only the student's own postings. `x_search` is not on this path. With no model, the local search marks `ai` false, and the page says: "Grok is not connected, so only your own postings were searched." It does not call the web route. That route, `POST /api/students/:id/search`, answers 503 if it is called with no model.
+
+A career guide is one search (`maxTurns` 2), then a researcher, a validator, and a presentation writer, each with no tools. `x_search` is included only when `provider()` is `grok`.
+
+A roadmap is one search (`maxTurns` 2), then a fill with no tools. If the draft is thin, it is filled once more, still with no tools. `x_search` is included only when `config.xSearch` is on. With no model, the roadmap route answers 503 and the page draws the fixed-rule draft you see in the screenshot.
+
+Opportunity workers (`tools()` in `grokBrain.ts`) get `web_search`, plus `x_search` when `XAI_X_SEARCH=1`. That includes the scout, the extractor, and the deadline finder.
+
+An older clubs-and-events worker in `workers.ts` is still in the tree, with its own `maxTurns: 2` search. The feed run goes through `AgentSystem`, not that file.
+
+Google sign-in, Calendar, and Sheets are optional. Their variables live in `googleOAuth.ts`, not in the table below.
+
+## Configuration
+
+Only variables read in `backend/src/config.ts`, plus the one dashboard flag. Defaults are what the code uses when the variable is unset.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `PORT` | `8787` | Backend port |
+| `XAI_API_KEY` | unset | Selects the xAI API when no harness is active |
+| `XAI_BASE_URL` | `https://api.x.ai/v1` | API base |
+| `XAI_MODEL` | `grok-4.7` | Fallback model name |
+| `XAI_MODEL_HIGH` | `grok-4.7` | Read, and assigned to no level |
+| `XAI_MODEL_NORMAL` | `grok-4.5` | Master, managers, validators, presentation |
+| `XAI_MODEL_LOW` | `grok-4.3` | Workers |
+| `CLAUDE_CLI_TIMEOUT_MS` | `240000` | Claude CLI call timeout |
+| `CLAUDE_EFFORT` | unset | Passed through as `--effort` when set |
+| `LIVE_MAX_JOBS` | `12` | Job cap on a CLI run |
+| `FEED_MIN` | `12` | Feed target for the API and for simulation. The CLI target stays 8 |
+| `FEED_FILL_MAX_RUNS` | `4` | How many times a short feed may search again |
+| `CODEX_CLI_TIMEOUT_MS` | `240000` | ChatGPT CLI call timeout |
+| `GROK_CLI_ALWAYS_APPROVE` | unset | Leave unset. `1` passes `--always-approve` |
+| `GROK_CLI_TIMEOUT_MS` | `240000` | Grok CLI call timeout |
+| `GROK_CLI_EFFORT` | `low` | Reasoning effort. An empty value uses the CLI default |
+| `GROK_CLI_CONCURRENCY` | `3` | CLI processes at once |
+| `XAI_X_SEARCH` | off | `1` adds `x_search` for opportunity workers and the roadmap search. Career search does not use this flag |
+| `STUDENT_STORE` | local file | `account` stores signed-in students in Firestore |
+| `FIREBASE_SERVICE_ACCOUNT` | unset | Service account JSON path |
+| `FIREBASE_WEB_API_KEY` | unset | Both this and the project id turn sign-in on |
+| `FIREBASE_PROJECT_ID` | unset | Firebase project |
+| `FIREBASE_AUTH_DOMAIN` | unset | Firebase auth domain |
+| `MAX_RESULTS_PER_TYPE` | `3` | Cap applied in `pipeline.ts` |
+| `GROK_TIMEOUT_MS` | `120000` | API call timeout |
+| `PREPARED_STEP_MS` | `1200` | Pause between simulated stages |
+| `LOCAL_DATA_FILE` | `backend/.data/store.json` | Guest and local student file |
+| `OPPORTUNITIES_DB` | on | `off` disables the shared table |
+| `DATABASE_URL` | unset | Hosted Postgres for that table. Without it, a folder on this machine is used |
+| `OPPORTUNITIES_DB_DIR` | `backend/.data/opportunities-db` | Local table directory |
+| `USAGE_TRACKING` | on | `off` stops it. Rows are keyed by a one-way code, not a name or email |
+| `METRICS_TOKEN` | unset | Password for `GET /api/metrics`. With none, that route answers nobody |
+| `CAREER_GUIDES_FILE` | `backend/.data/career-guides.json` | Saved guides |
+| `VITE_API_URL` | `http://localhost:8787` | Dashboard only, in `dashboard/src/auth/firebase.ts` |
+
+Connecting a model in the running app is Settings, or `XAI_API_KEY` at startup. Which harness is active is decided in `harness.ts`, not by a variable in this table.
+
+## Tests
+
+No pass counts are listed here. Run them yourself.
+
+```
+cd backend
+npm test
+npm run typecheck
+```
+
+`npm test` is `node --test "test/*.test.ts"`. The files cover the host loop, the evidence gate, lineup, match, search, roadmap, careers, the harness, the Grok CLI argument builder, the demo student, and the shared table.
+
+```
+cd dashboard
+npm test
+npm run typecheck
+```
+
+`npm test` is `vitest run`. It covers dashboard state, the browser ranker, and the page helpers.
+
+`npm run grok:check`, `npm run probe:live`, and `npm run roadmap:check` in `backend/` call a live model and spend model time. `npm run opportunities:backfill` and `npm run usage:report` are maintenance scripts, not the test suite.
+
+## Repo layout
+
+```
+backend/           agent host, HTTP API, tests
+dashboard/         React app (Vite, port 5173)
+website/           pitch site, built files only
+docs/screenshots/  the pictures in this README
+```
+
+There is no root `package.json`. Install and run each package on its own. Both declare `node` `>=24`.
+
+## Roadmap
+
+Still open in this tree:
+
+- The shared opportunities table is written whenever a student's memory is saved. The agent search does not read it.
+- Usage rows are recorded for signed-in students. Sign-up does not tell the student that.
+- `XAI_MODEL_HIGH` is configured and assigned to no level.
+- With no model, the roadmap page is a draft counted from sample path profiles.
+
+Search is already split into a lookup and a tool-free fill, in `search.ts`, `roadmap.ts`, and `workers.ts`. That is not future work.
+
+## Read next
+
+- [backend/AGENT_SYSTEM.md](backend/AGENT_SYSTEM.md) is the design notes. It still says the master decides how many managers each kind gets, and that a card is kept only when both reviewers keep it. `system.ts` does not work that way: the host plans the lineup, and the criteria reviewer does not reject.
+- [backend/src/agents/skills/index.ts](backend/src/agents/skills/index.ts) describes the two skills. Its opportunity-search card repeats those two stale lines. Trust `system.ts`.
+- [dashboard/README.md](dashboard/README.md) lists the routes. Its opening still says everything comes from `src/data/sample.ts` and that nothing calls the backend. The running app calls the backend.
+- [backend/README.md](backend/README.md) is how to run the server.

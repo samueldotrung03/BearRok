@@ -72,6 +72,8 @@ export interface SystemOptions {
   typingPauseMs: number;
   /** Cards the feed should hold. While it has fewer, the agents search again on their own. */
   feedTarget: number;
+  /** Cap on leads each scout may return. Live CLI sets 2; API and simulated stay at 4. */
+  scoutMaxLeads: number;
   /** Searches in a row the agents may start to fill the feed before they stop and wait for the student. */
   maxFillRuns: number;
   /** Finds each posting's picture. Without it postings keep whatever picture the reader gave, unchecked. */
@@ -93,6 +95,7 @@ export const DEFAULT_OPTIONS: SystemOptions = {
   managerStaggerMs: 0,
   typingPauseMs: 4000,
   feedTarget: 12,
+  scoutMaxLeads: 4,
   maxFillRuns: 4,
   now: () => new Date(),
 };
@@ -1694,7 +1697,7 @@ export class AgentSystem {
             const readers = Math.max(scouts.length, a.budget - scouts.length);
             const specs = scouts.map((s, i) => ({
               ...s,
-              maxLeads: Math.min(4, Math.floor(readers / scouts.length) + (i < readers % scouts.length ? 1 : 0)),
+              maxLeads: Math.min(this.opts.scoutMaxLeads, Math.floor(readers / scouts.length) + (i < readers % scouts.length ? 1 : 0)),
             }));
             set(manager, { detail: `Covering: ${a.focus.join(', ')}` });
             log(a.name, `Sent ${specs.length} scouts: ${specs.map((s) => s.label).join(' / ')}`);

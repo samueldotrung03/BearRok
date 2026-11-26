@@ -40,6 +40,7 @@ const { config } = await import('../src/config.ts');
 const { setHarnessStateForTest } = await import('../src/harness.ts');
 setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
 const { answerText, extractJson, structuredAnswer, fullestAnswer } = await import('../src/grokCli.ts');
+const { GrokBrain, DEADLINE_RULE, DEADLINE_FINDER_SEARCH } = await import('../src/agents/grokBrain.ts');
 const { readFileSync, rmSync } = await import('node:fs');
 const Schema = z.object({ title: z.string(), url: z.string() });
 const reset = () => { for (const f of ['count', 'reply-1', 'reply-2', 'exit', 'stderr']) rmSync(join(dir, f), { force: true }); };
@@ -149,4 +150,86 @@ test('an exhausted Grok balance (HTTP 402) fails at once with a clear reason, an
   await assert.rejects(grokJson({ name: 't', system: 's', user: 'u', schema: Schema }), (e) => e instanceof BalanceExhaustedError && e.message === BALANCE_MESSAGE);
   assert.equal(readFileSync(join(dir, 'count'), 'utf8'), '1');
   reset();
+});
+
+const assignment = { managerId: 'm1', name: 'Manager 1', category: 'internship' as const, lens: 'field' as const, focus: ['software'], budget: 8, others: [] };
+const brief = { goal: 'internships', hardCriteria: [], preferences: [], avoid: [], interests: ['coding'], year: 'Freshman' as const, location: 'Berkeley, CA', remoteOk: true, notes: [] };
+const spec = { label: 'software internships', query: 'software internship freshman open Berkeley remote', lensValue: 'software', maxLeads: 4 };
+const promptArgs = () => readFileSync(join(dir, 'args'), 'utf8');
+
+test('API and simulated scouts still ask for up to 4 leads', async () => {
+  reset();
+  writeFileSync(join(dir, 'reply'), JSON.stringify({ leads: [{ title: 'A', url: 'https://example.org/a' }] }));
+  await new GrokBrain().scout(spec, assignment, brief, new Set());
+  const args = promptArgs();
+  assert.match(args, /Search the web and return up to 4 leads/);
+  assert.doesNotMatch(args, /Do not open the posting pages/);
+  assert.doesNotMatch(args, /at most two title-and-URL pairs/);
+});
+
+test('a live CLI scout runs one query, returns at most two pairs, and does not open posting pages', async () => {
+  reset();
+  writeFileSync(join(dir, 'reply'), JSON.stringify({
+    leads: [
+      { title: 'A', url: 'https://example.org/a' },
+      { title: 'B', url: 'https://example.org/b' },
+      { title: 'C', url: 'https://example.org/c' },
+    ],
+  }));
+  const leads = await new GrokBrain({ scoutMaxLeads: 2 }).scout(spec, assignment, brief, new Set());
+  assert.equal(leads.length, 2);
+  assert.deepEqual(leads.map((l) => l.title), ['A', 'B']);
+  const args = promptArgs();
+  assert.match(args, /Run the manager's Search query once and return at most two title-and-URL pairs/);
+  assert.match(args, /Do not open the posting pages/);
+  assert.match(args, /Stop after that one search even if fewer than two leads come back/);
+  assert.doesNotMatch(args, /Search the web and return up to 4 leads/);
+  // The CLI wrapper still tells extractors they may open pages.
+  assert.match(args, /Use web search and open the pages/);
+});
+
+test('the manager query names the kind, class year, an apply word, and place or remote, and skips LinkedIn and Handshake', async () => {
+  reset();
+  writeFileSync(join(dir, 'reply'), JSON.stringify({ jobs: [{ label: 'software', query: 'software internship freshman open Berkeley remote', lensValue: 'software' }] }));
+  await new GrokBrain().planJobs(assignment, brief, []);
+  const args = promptArgs();
+  assert.match(args, /at most 3 search jobs/);
+  assert.match(args, /kind of opportunity/);
+  assert.match(args, /class year/);
+  assert.match(args, /open, deadline, apply, or register/);
+  assert.match(args, /place or the word remote/);
+  assert.match(args, /Do not name LinkedIn or Handshake/);
+});
+
+test('extractors and the status reviewer do not search other listings for a deadline', () => {
+  assert.match(DEADLINE_RULE, /Read only the pages you were given/);
+  assert.match(DEADLINE_RULE, /If those pages state no deadline, return null/);
+  assert.match(DEADLINE_RULE, /Do not search other listings/);
+  assert.doesNotMatch(DEADLINE_RULE, /search for other public postings of the same opportunity/);
+  assert.match(DEADLINE_RULE, /current cycle/);
+  assert.match(DEADLINE_RULE, /"Rolling"/);
+  assert.match(DEADLINE_RULE, /deadlineSource/);
+});
+
+test('the deadline finder runs three queries and then stops', async () => {
+  assert.equal(DEADLINE_FINDER_SEARCH, 'Run exactly three searches: the title plus "deadline", the title plus "apply by", and the title plus the year. Then stop.');
+  reset();
+  writeFileSync(join(dir, 'reply'), JSON.stringify({ found: false, deadline: null, url: null, quote: null }));
+  await new GrokBrain().findDeadline({
+    type: 'internship', title: 'Summer Intern', organizer: 'Org', sourceUrl: 'https://example.org/intern', actionUrl: null,
+    format: 'online', location: null, field: 'software', tags: [], eligibility: null, eligibleYears: null,
+    deadline: null, deadlineSource: null, startTime: null, image: null, evidence: [],
+  });
+  const args = promptArgs();
+  assert.match(args, /Run exactly three searches: the title plus "deadline", the title plus "apply by", and the title plus the year\. Then stop\./);
+  assert.doesNotMatch(args, /Run several searches with different wording/);
+  assert.doesNotMatch(args, /Do not search other listings/);
+});
+
+test('the CLI engine in server.ts sets a feed of 8 and a scout cap of 2', () => {
+  const src = readFileSync(new URL('../src/server.ts', import.meta.url), 'utf8');
+  assert.match(src, /feedTarget:\s*8/);
+  assert.match(src, /new GrokBrain\(\{\s*scoutMaxLeads:\s*2\s*\}\)/);
+  assert.match(src, /scoutMaxLeads:\s*2/);
+  assert.equal(config.feed.target, 12);
 });

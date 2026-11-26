@@ -127,21 +127,42 @@ export function criteriaVerdict(data: { reason: string; match: { score: number; 
   return { keep: true, reason: match.reason, fit: match.score / 100, match, record: data.record };
 }
 
-/** Said to every agent that reads a posting: how to get the deadline right. */
-const DEADLINE_RULE = `Getting the deadline right matters most, because the student plans around it.
+/**
+ * Date rules shared by the extractor, the status reviewer, and the deadline finder.
+ * Searching other listings is the deadline finder's job, not this block.
+ */
+const DEADLINE_DATES = `Getting the deadline right matters most, because the student plans around it.
 - deadline is the last moment to apply, register or sign up. It is not the date the event or program starts (that is startTime), not the date the posting was published, and not a decision date.
 - Look for it everywhere on the organizer's own site before giving up: the posting itself, the apply or register page it links to, the application form, an FAQ, a timeline or "important dates" section, and the program's main page. Words to look for: "apply by", "applications close", "due", "deadline", "closes", "register by", "priority deadline", "last day".
 - It must be for the current cycle. A date from a past year, or one that has already passed while the page still says applications are open, is last cycle's: do not use it.
 - With several dates (priority, regular, final), use the final one the student can still meet.
 - "Rolling", "until filled" and "open until further notice" are not dates: return null.
-- If the organizer's site states no deadline, search for other public postings of the same opportunity: job boards, internship and scholarship directories, hackathon and event listing sites, university career and department pages, and the organizer's own announcements. Use a deadline from one of them only when it is clearly the same opportunity and the same cycle, and prefer what two listings agree on. If listings disagree and the organizer's site does not settle it, use the earliest date that has not passed.
 - Set deadlineSource to "official" when the organizer's own site states the deadline, "listing" when it came from another posting, and null when there is no deadline. The deadline's evidence entry must quote the words giving the date and carry the URL of the page they are on.
 - A date without a time means the end of that day. Keep the time and the time zone exactly as the page states them, and write the offset that zone has on that date: Eastern is -05:00 in winter and -04:00 in summer, Central -06:00 and -05:00, Mountain -07:00 and -06:00, Pacific -08:00 and -07:00. With no zone on the page, use the organizer's local time. Check the finished date against the quote before answering.
 - If no page states it, return null. Never work a deadline out from a start date or from last year's.`;
 
+/** Extractor and status reviewer: read the pages they were given; the deadline finder searches other listings. */
+export const DEADLINE_RULE = `${DEADLINE_DATES}
+- Read only the pages you were given. If those pages state no deadline, return null. Do not search other listings.`;
+
+/** The deadline finder runs these three searches, then stops. */
+export const DEADLINE_FINDER_SEARCH = `Run exactly three searches: the title plus "deadline", the title plus "apply by", and the title plus the year. Then stop.`;
+
+export type GrokBrainOpts = {
+  /**
+   * Live CLI only. Cap scout leads (2) and tell the scout to run the manager's query once, return
+   * title-and-URL pairs, and not open posting pages. Unset keeps the API cap of 4.
+   */
+  scoutMaxLeads?: number;
+};
+
 export class GrokBrain implements Brain {
   mode = 'live' as const;
   private models: Partial<Record<AgentGroup, string>> = {};
+  private readonly liveOpts: GrokBrainOpts;
+  constructor(liveOpts: GrokBrainOpts = {}) {
+    this.liveOpts = liveOpts;
+  }
 
   setModels(models: Partial<Record<AgentGroup, string>>) {
     this.models = { ...models };
@@ -200,7 +221,7 @@ Read the notes before the rest of the profile. Put what they ask for at the top 
       name: 'search_manager',
       model: this.model('managers', TIER.normal),
       schema: Out,
-      system: `You are a search manager for ${CATEGORY_LABEL[assignment.category].toLowerCase()}. Turn your assignment into at most 3 search jobs for scout workers. Each job has a short label, a web search query a scout should run, and the focus value it covers. Favor employer and organizer pages and public listings; avoid sites that need a login. Do not cover what the other managers cover.\n\n${NOTES_RULE}`,
+      system: `You are a search manager for ${CATEGORY_LABEL[assignment.category].toLowerCase()}. Turn your assignment into at most 3 search jobs for scout workers. Each job has a short label, a web search query a scout should run, and the focus value it covers. Favor employer and organizer pages and public listings; avoid sites that need a login. Do not cover what the other managers cover. The query a scout will run must contain the kind of opportunity, the student's class year, one of the words open, deadline, apply, or register, and the place or the word remote. Do not name LinkedIn or Handshake.\n\n${NOTES_RULE}`,
       user: `Today is ${today()}.\n${notesBlock(brief.notes)}\nStudent brief: ${JSON.stringify(brief)}\nYour assignment: lens ${assignment.lens}, focus ${assignment.focus.join(', ')}\nOther managers: ${assignment.others.join('; ') || 'none'}\nSearches already run for this student in this category (write queries that differ from every one of these, with new organizations, wording or sources): ${pastSearches.length ? pastSearches.slice(-25).join(' | ') : 'none yet'}`,
     });
     return data.jobs.slice(0, 3);
@@ -208,15 +229,20 @@ Read the notes before the rest of the profile. Put what they ask for at the top 
 
   async scout(spec: ScoutSpec, assignment: Assignment, brief: Brief, known: Set<string>) {
     const Out = z.object({ leads: z.array(z.object({ title: z.string(), url: z.string() })) });
+    const cap = this.liveOpts.scoutMaxLeads ?? spec.maxLeads ?? 4;
+    const kind = CATEGORY_LABEL[assignment.category].toLowerCase();
+    const system = this.liveOpts.scoutMaxLeads != null
+      ? `You are a scout worker. Run the manager's Search query once and return at most two title-and-URL pairs: real, currently open ${kind} that match this student's goal, interests and hard criteria. Each lead is a title and the http(s) URL of a real posting or official page. Prefer organizer pages and public listings the student has not been shown. Do not invent URLs. Do not open the posting pages. Stop after that one search even if fewer than two leads come back.`
+      : `You are a scout worker. Search the web and return up to ${cap} leads: real, currently open ${kind} that match this student's goal, interests and hard criteria. Each lead is a title and the http(s) URL of a real posting or official page. Prefer organizer pages and public listings the student has not been shown. Do not invent URLs.`;
     const { data } = await grokJson({
       name: 'scout',
       model: this.model('workers', TIER.low),
       schema: Out,
       tools: tools(),
-      system: `You are a scout worker. Search the web and return up to ${spec.maxLeads ?? 4} leads: real, currently open ${CATEGORY_LABEL[assignment.category].toLowerCase()} that match this student's goal, interests and hard criteria. Each lead is a title and the http(s) URL of a real posting or official page. Prefer organizer pages and public listings the student has not been shown. Do not invent URLs.`,
+      system,
       user: `Today is ${today()}.\nSearch: ${spec.query}\n${studentAsk(brief)}\nAlready shown: ${[...known].slice(0, 30).join(', ') || 'nothing yet'}`,
     });
-    return data.leads.slice(0, spec.maxLeads ?? 4);
+    return data.leads.slice(0, cap);
   }
 
   async extract(lead: { title: string; url: string }, assignment: Assignment, brief?: Brief): Promise<Candidate | null> {
@@ -240,7 +266,7 @@ Read the notes before the rest of the profile. Put what they ask for at the top 
       model: this.model('workers', TIER.low),
       schema: Out,
       tools: tools(),
-      system: `You are a deadline finder. The organizer's own pages gave no application or registration deadline for this posting. Search the web for other public postings of the same opportunity and read the deadline off one of them: job boards, internship and scholarship directories, hackathon and event listing sites, university career and department pages, and the organizer's announcements or social posts. Run several searches with different wording (the title with "deadline", "apply by", the year) and open the pages; do not answer from search snippets alone. Check the organizer's apply page and FAQ once more as well.\nSet found to true only when a page states the deadline for this same opportunity in its current cycle. Then return the date in ISO 8601, the URL of the page that states it, and the words giving the date, copied from that page.\n${DEADLINE_RULE}`,
+      system: `You are a deadline finder. The organizer's own pages gave no application or registration deadline for this posting. Search the web for other public postings of the same opportunity and read the deadline off one of them: job boards, internship and scholarship directories, hackathon and event listing sites, university career and department pages, and the organizer's announcements or social posts. ${DEADLINE_FINDER_SEARCH} Open the pages; do not answer from search snippets alone. Check the organizer's apply page and FAQ once more as well.\nSet found to true only when a page states the deadline for this same opportunity in its current cycle. Then return the date in ISO 8601, the URL of the page that states it, and the words giving the date, copied from that page.\n${DEADLINE_DATES}`,
       user: `Today is ${today()}.\nPosting: ${candidate.title}\nOrganizer: ${candidate.organizer}\nType: ${candidate.type}\nOrganizer's page: ${candidate.sourceUrl}\nApply at: ${candidate.actionUrl ?? 'not known'}\nStarts: ${candidate.startTime ?? 'not known'}\nLocation: ${candidate.location ?? 'not known'}`,
     });
     if (!data.found || !data.deadline || !data.url || !data.quote) return null;

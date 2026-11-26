@@ -28,7 +28,8 @@ function engine() {
   return via === 'api'
     ? { brain: new GrokBrain(), opts: { ...live, concurrency: 8, maxJobs: 30, managerStaggerMs: 0 } }
     : // Each command-line call is a whole program, so far fewer run at once and a run is kept small.
-      { brain: new GrokBrain(), opts: { ...live, concurrency: config.grokCli.concurrency, maxJobs: config.liveCli.maxJobs, managerStaggerMs: 600 } };
+      // A CLI run can keep about 8 cards; a target of 12 would start another full run.
+      { brain: new GrokBrain({ scoutMaxLeads: 2 }), opts: { ...live, concurrency: config.grokCli.concurrency, maxJobs: config.liveCli.maxJobs, managerStaggerMs: 600, feedTarget: 8, scoutMaxLeads: 2 } };
 }
 const systems = new Set<AgentSystem>();
 const newSystem = (profile = {}) => {

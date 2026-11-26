@@ -1,0 +1,17 @@
+{
+  "id": "quote-not-on-page",
+  "covers": "quote-not-on-page",
+  "student": {
+    "classYear": "Junior",
+    "location": "Oakland, CA",
+    "remoteOk": true,
+    "notes": "Data internships, remote is fine."
+  },
+  "pages": {
+    "https://ironbark.example/jobs/data-intern": "quote-not-on-page.html"
+  },
+  "expected": {
+    "required": [{ "title": "Data Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

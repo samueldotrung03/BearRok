@@ -1,0 +1,17 @@
+{
+  "id": "pass-open-intern",
+  "covers": "pass",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Looking for software internships I can reach from campus."
+  },
+  "pages": {
+    "https://pebble-creek.example/careers/software-intern": "pass-open-intern.html"
+  },
+  "expected": {
+    "required": [{ "title": "Software Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

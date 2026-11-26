@@ -6,15 +6,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-/** `bash` on PATH, or Git Bash when that is installed but not on PATH (this Windows machine). */
-function bashBin(): string {
+/** `bash` on PATH, or Git Bash when that is installed but not on PATH. Null when neither exists. */
+function bashBin(): string | null {
   const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter((p): p is string => Boolean(p));
   for (const root of roots) {
     const bash = join(root, 'Git', 'bin', 'bash.exe');
     if (existsSync(bash)) return bash;
   }
-  return 'bash';
+  const probe = spawnSync('bash', ['-c', 'exit 0']);
+  if (!probe.error) return 'bash';
+  return null;
 }
+
+const bash = bashBin();
 
 const require = createRequire(import.meta.url);
 const { scriptFor, STEPS } = require('../../electron/harnessSetup.cjs') as { scriptFor: (id: string, status: string) => string; STEPS: Record<string, unknown> };
@@ -45,12 +49,13 @@ describe('one-click set-up scripts', () => {
     expect(s).toContain('echo "failed: $1" > "$STATUS"');
   });
 
-  it('are valid bash', () => {
+  // Skipped when bash is not installed (typical `bash` on Windows PATH). Do not treat the scripts as invalid.
+  it.skipIf(!bash)('are valid bash (syntax check skipped when bash is not installed)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'bearok-setup-'));
     for (const id of Object.keys(STEPS)) {
       const file = join(dir, `${id}.command`);
       writeFileSync(file, scriptFor(id, join(dir, `${id}.status`)));
-      expect(spawnSync(bashBin(), ['-n', file]).status, id).toBe(0);
+      expect(spawnSync(bash!, ['-n', file]).status, id).toBe(0);
     }
   });
 });

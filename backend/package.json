@@ -11,6 +11,7 @@
     "test": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "grok:check": "node --env-file-if-exists=.env scripts/grok-check.ts",
+    "probe:live": "node --env-file-if-exists=.env scripts/live-probe.ts",
     "roadmap:check": "node --env-file-if-exists=.env scripts/roadmap-check.ts",
     "opportunities:backfill": "node --env-file-if-exists=.env scripts/opportunities-backfill.ts",
     "usage:report": "node --env-file-if-exists=.env scripts/usage-report.ts"

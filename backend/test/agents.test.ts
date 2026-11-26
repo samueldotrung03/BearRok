@@ -621,6 +621,59 @@ test('experience: text is read out of a PDF résumé', async () => {
   assert.equal(await readResume(new TextEncoder().encode('not a pdf'), 'application/pdf'), null);
 });
 
+test('the host slices scout leads to scoutMaxLeads so extra pairs are not extracted', async () => {
+  const urls = ['a', 'b', 'c', 'd'].map((id) => `https://example.org/${id}`);
+  class Flood extends SimBrain {
+    override async planJobs(assignment: Parameters<SimBrain['planJobs']>[0]) {
+      if (assignment.category !== 'internship') return [];
+      return [{ label: 'flood', query: 'flood', lensValue: 'flood' }];
+    }
+    override async scout() {
+      return urls.map((url, i) => ({ title: `Lead ${i + 1}`, url }));
+    }
+    override async extract(lead: { title: string; url: string }) {
+      return {
+        type: 'internship' as const,
+        title: lead.title,
+        organizer: 'Org',
+        sourceUrl: lead.url,
+        actionUrl: null,
+        format: 'online' as const,
+        location: null,
+        field: 'software',
+        tags: [],
+        eligibility: null,
+        eligibleYears: ['Freshman' as const],
+        deadline: '2026-12-31',
+        deadlineSource: 'official' as const,
+        startTime: null,
+        image: null,
+        evidence: [{ field: 'deadline', quote: 'Deadline December 31, 2026', url: lead.url }],
+      };
+    }
+  }
+  const runWith = async (scoutMaxLeads: number) => {
+    const s = new AgentSystem(
+      new Flood({ speed: 0, now: () => NOW }),
+      { now: () => NOW, feedTarget: 0, slots: 1, maxJobs: 20, scoutMaxLeads },
+      { categories: ['internship'] },
+    );
+    await s.trigger('first');
+    await s.idle();
+    const run = s.currentRun()!;
+    return {
+      scout: run.jobs.find((j) => j.kind === 'scout')?.result,
+      extracts: run.jobs.filter((j) => j.kind === 'extract' && j.status === 'done').length,
+    };
+  };
+  const cli = await runWith(2);
+  assert.equal(cli.scout, '2 leads');
+  assert.equal(cli.extracts, 2);
+  const api = await runWith(4);
+  assert.equal(api.scout, '4 leads');
+  assert.equal(api.extracts, 4);
+});
+
 test('a small run budget still reads postings: searching cannot use the whole budget', async () => {
   const s = system({ maxJobs: 8 });
   await s.trigger('first');

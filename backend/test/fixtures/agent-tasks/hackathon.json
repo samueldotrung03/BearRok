@@ -1,0 +1,17 @@
+{
+  "id": "hackathon",
+  "covers": "hackathon",
+  "student": {
+    "classYear": "Freshman",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Beginner-friendly remote hackathons this winter."
+  },
+  "pages": {
+    "https://quillmoth.example/winter-hack": "hackathon.html"
+  },
+  "expected": {
+    "required": [{ "title": "Quillmoth Winter Hack", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

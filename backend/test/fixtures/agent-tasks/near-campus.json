@@ -1,0 +1,17 @@
+{
+  "id": "near-campus",
+  "covers": "near-campus",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": false,
+    "notes": "In-person hardware internships I can reach from Berkeley."
+  },
+  "pages": {
+    "https://whitecap.example/careers/hardware-intern": "near-campus.html"
+  },
+  "expected": {
+    "required": [{ "title": "Hardware Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

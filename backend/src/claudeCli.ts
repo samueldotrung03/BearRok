@@ -2,9 +2,10 @@
 // Claude account signed in on this computer.
 //
 // Same job as grok.ts and grokCli.ts: send one prompt, get one JSON answer back.
-import { mkdirSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { z } from 'zod';
 import { currentSignal, StoppedError } from './agents/stop.ts';
 import { config } from './config.ts';
@@ -32,28 +33,51 @@ export async function claudeCliJson<S extends z.ZodType>(opts: {
   tools?: GrokTool[];
   model?: string;
   timeoutMs?: number;
+  images?: string[];
 }): Promise<GrokResult<z.infer<S>>> {
   const schema = z.toJSONSchema(opts.schema) as Record<string, unknown>;
   delete schema.$schema;
   const search = Boolean(opts.tools?.length);
+  // A picture is copied into the CLI's empty folder under a fresh name, and Read is allowed for
+  // that one file only, so the model can look at it and at nothing else on this computer.
+  const dir = sandboxDir();
+  const pictures = (opts.images ?? []).map((file) => {
+    const name = `picture-${randomBytes(8).toString('hex')}${extname(file).toLowerCase()}`;
+    copyFileSync(file, join(dir, name));
+    return { name, original: basename(file) };
+  });
+  let user = opts.user;
+  for (const p of pictures) user = user.split(p.original).join(p.name);
 
+  const toolNote = search
+    ? 'Use web search and page fetches to find and open pages. You have no other tools.'
+    : pictures.length
+      ? `Use the Read tool to look at ${pictures.map((p) => `./${p.name}`).join(', ')}. You have no other tools.`
+      : 'Answer from the information given. You have no tools.';
+  const toolList = [...(search ? ['WebSearch', 'WebFetch'] : []), ...(pictures.length ? ['Read'] : [])];
   const args = [
-    '-p', opts.user,
-    '--system-prompt', `${opts.system}\n\n${search ? 'Use web search and page fetches to find and open pages. You have no other tools.' : 'Answer from the information given. You have no tools.'}`,
+    '-p', user,
+    '--system-prompt', `${opts.system}\n\n${toolNote}`,
     '--output-format', 'json',
     '--json-schema', JSON.stringify(schema),
     '--model', opts.model ?? HARNESSES.claude.defaults.normal!,
-    // Only the two web tools, or none at all: no shell, no file access.
-    '--tools', search ? 'WebSearch,WebFetch' : '',
+    // Only the two web tools and reading the given pictures, or none at all: no shell, no other files.
+    '--tools', toolList.join(','),
     // Nothing from this machine's own Claude Code set-up: no settings, hooks, plugins, memory or connectors.
     '--setting-sources', '',
     '--strict-mcp-config',
     '--no-session-persistence',
   ];
-  if (search) args.push('--allowedTools', 'WebSearch', 'WebFetch');
+  const allowed = [...(search ? ['WebSearch', 'WebFetch'] : []), ...pictures.map((p) => `Read(./${p.name})`)];
+  if (allowed.length) args.push('--allowedTools', ...allowed);
   if (config.claudeCli.effort) args.push('--effort', config.claudeCli.effort);
 
-  const stdout = await run(args, opts.timeoutMs ?? config.claudeCli.timeoutMs);
+  let stdout: string;
+  try {
+    stdout = await run(args, opts.timeoutMs ?? config.claudeCli.timeoutMs);
+  } finally {
+    for (const p of pictures) rmSync(join(dir, p.name), { force: true });
+  }
   let body: any;
   try {
     body = JSON.parse(stdout);

@@ -33,6 +33,8 @@ interface BackendOpportunity {
   imageKind?: Opportunity['imageKind'];
   imageCredit?: string | null;
   imageCreditUrl?: string | null;
+  poster?: Opportunity['poster'];
+  icon?: string | null;
   unknowns: Opportunity['unknowns'];
   foundAt: string;
   lastCheckedAt: string;
@@ -272,6 +274,8 @@ function toCard(entry: BackendFeedEntry, simulated: boolean): Opportunity {
     imageCredit: o.image ? (o.imageCredit ?? null) : null,
     imageCreditUrl: o.image ? (o.imageCreditUrl ?? null) : null,
     imageAspect: 0.8 + 0.5 * hash(o.id),
+    poster: o.poster ?? null,
+    icon: o.icon ?? null,
     tags: o.tags,
     eligibility: o.eligibility ?? null,
     deadlineSource: o.deadlineSource ?? null,
@@ -292,7 +296,7 @@ const nodeStatus = (s: string): AgentNode['status'] => (s === 'running' || s ===
 
 function toAgents(run: BackendRun): LiveAgents {
   const node = (a: BackendRun['agents'][number]): AgentNode => ({ id: a.id, name: a.name, role: a.role, status: nodeStatus(a.status), detail: a.status === 'failed' ? `Failed. ${a.detail}` : a.detail });
-  const kind = { scout: 'Scout: searches for leads', extract: 'Reader: opens a posting and reads its details', application: 'Application reader: collects prompts and materials', deadline: 'Deadline finder: checks other listings for a deadline', image: 'Picture finder: event photo, logo, stock photo or a drawn illustration' };
+  const kind = { scout: 'Scout: searches for leads', extract: 'Reader: opens a posting and reads its details', application: 'Application reader: collects prompts and materials', deadline: 'Deadline finder: checks other listings for a deadline', image: 'Picture finder and poster designer: finds the picture, then remakes the card as a For You poster' };
   const master = run.agents.find((a) => a.level === 'master');
   const presenter = run.agents.find((a) => a.level === 'presentation');
   const jobs = run.jobs.filter((j) => j.status !== 'skipped');

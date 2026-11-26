@@ -14,7 +14,11 @@ import { belowThresholdReason, cleanThreshold, hardCheck, matchFromFit, meetsThr
 import { plainError } from '../plainError.ts';
 import { BalanceExhaustedError } from '../quota.ts';
 import { isStopped, StoppedError, throwIfStopped, withSignal } from './stop.ts';
-import type { FoundImage, ImageFinder } from './images.ts';
+import { cleanSvg, ImageFinder, type FoundImage } from './images.ts';
+import { artIsClean, checkPoster, cleanBox } from './poster.ts';
+
+type Box = { x: number; y: number; w: number; h: number };
+import { rmSync } from 'node:fs';
 import type { CalendarEventInput } from './eventSorter.ts';
 import type { TrackerItem } from '../sheets.ts';
 import { buildMemory, categoryWeights, noteSignals, rankFeed, summarize } from './scoring.ts';
@@ -197,6 +201,20 @@ const MAX_APPLICATIONS = 200;
 /** True for a posting nobody has looked for a picture for, or one nothing was found for a day ago. */
 const needsPicture = (o: Opportunity, now: Date) =>
   o.imageKind === undefined || (o.imageKind === null && (!o.imageTriedAt || now.getTime() - Date.parse(o.imageTriedAt) > PICTURE_RETRY_MS));
+
+/** True for a card with its picture settled and no poster yet, or one whose poster failed a day ago. */
+function needsPoster(o: Opportunity, now: Date): boolean {
+  if (o.imageKind === undefined) return false;
+  // Designed before the picture was part of it, or before the part of a flyer it shows was checked.
+  if (o.poster) return !('arrangement' in o.poster) || (o.imageKind === 'event' && Boolean(o.poster.art) && !o.poster.artChecked);
+  return !o.posterTriedAt || now.getTime() - Date.parse(o.posterTriedAt) > PICTURE_RETRY_MS;
+}
+
+/** True for a card with its picture settled that is not a logo and has no icon yet, or whose icon failed a day ago. */
+function needsIcon(o: Opportunity, now: Date): boolean {
+  if (o.imageKind === undefined || o.imageKind === 'logo' || o.icon) return false;
+  return !o.iconTriedAt || now.getTime() - Date.parse(o.iconTriedAt) > PICTURE_RETRY_MS;
+}
 
 /** Record what the image finder found on the posting. Looked for once either way. */
 function applyPicture(o: Opportunity, found: FoundImage | null, now: Date) {
@@ -390,6 +408,8 @@ export class AgentSystem {
   private calendarSync: CalendarSync | null = null;
   /** Postings a picture is being looked for right now, so two passes do not look for the same one. */
   private picturing = new Set<string>();
+  /** Cards a poster is being designed for right now. */
+  private postering = new Set<string>();
   /** Called after anything worth saving changed. */
   private saver: (() => void) | null = null;
   private running: Promise<void> | null = null;
@@ -542,7 +562,102 @@ export class AgentSystem {
           }
         }),
       ),
+    ).then(() => this.fillPosters(limit));
+  }
+
+  /**
+   * Design the For You poster for stored cards that have their picture but no poster, straight
+   * away and without a search. Runs after `fillPictures`, so cards found before posters existed get one.
+   */
+  fillPosters(limit = 30): Promise<void> {
+    const now = this.opts.now();
+    const todo = [...this.opportunities.values()].filter((o) => (needsPoster(o, now) || needsIcon(o, now)) && !this.postering.has(o.id)).slice(0, limit);
+    const slot = limiter(3);
+    return Promise.all(
+      todo.map((o) =>
+        slot(() =>
+          this.designPoster(o).catch((e) => {
+            console.error(`poster designer failed for "${o.title}": ${errorText(e)}`);
+          }),
+        ),
+      ),
     ).then(() => {});
+  }
+
+  /**
+   * Up to two rounds of: cut the chosen part out of the flyer, have the presentation agent look at
+   * it, and take its better box when it found printed words, a cut-through subject or empty
+   * background. Keeps the last box when no review can be done or none is better.
+   */
+  private async reviewPosterArt(flyer: string, first: Box): Promise<Box> {
+    let box = first;
+    for (let round = 0; round < 2; round++) {
+      const part = await ImageFinder.crop(flyer, box).catch(() => null);
+      if (!part) return box;
+      try {
+        const review = await this.brain.reviewPosterArt(flyer, part, box).catch(() => null);
+        if (!review || artIsClean(review)) return box;
+        const better = cleanBox(review.art);
+        if (!better || JSON.stringify(better) === JSON.stringify(box)) return box;
+        box = better;
+      } finally {
+        rmSync(part, { force: true });
+      }
+    }
+    return box;
+  }
+
+  /**
+   * The presentation agent remakes one card as a portrait poster. When the card's picture is the
+   * organizer's own flyer, it is saved to a temporary file for the agent to read, then deleted.
+   * True when a poster was made.
+   */
+  private async designPoster(o: Opportunity): Promise<boolean> {
+    if (this.postering.has(o.id)) return false;
+    this.postering.add(o.id);
+    let flyer: string | null = null;
+    try {
+      if (o.imageKind === 'event' && o.image && this.opts.images?.download) flyer = await this.opts.images.download(o.image).catch(() => null);
+      const now = this.opts.now();
+      if (needsPoster(o, now)) {
+        try {
+          const draft = await this.brain.designPoster(o, flyer);
+          const poster = draft ? checkPoster(draft, o, flyer !== null) : null;
+          // The part of the flyer the poster shows is looked at again, cut out, for printed words,
+          // a cut-through subject or empty background, and moved if need be.
+          if (poster && flyer && poster.art) {
+            poster.art = await this.reviewPosterArt(flyer, poster.art);
+            poster.artChecked = true;
+          }
+          // Still in the feed (not rejected or reset meanwhile): record it.
+          if (this.opportunities.get(o.id) !== o) return false;
+          o.poster = poster;
+          o.posterTriedAt = this.opts.now().toISOString();
+          this.emitStudent();
+        } catch (e) {
+          o.posterTriedAt = this.opts.now().toISOString();
+          throw e;
+        }
+      }
+      // The Feed tab's icon, for a card with no logo: drawn in the flyer's style, else the poster's colours.
+      if (needsIcon(o, now)) {
+        let icon: string | null = null;
+        try {
+          const svg = await this.brain.drawIcon(o, o.poster?.palette ?? null, flyer);
+          icon = svg ? cleanSvg(svg, 12_000) : null;
+        } catch (e) {
+          console.error(`icon drawer failed for "${o.title}": ${errorText(e)}`);
+        }
+        if (this.opportunities.get(o.id) !== o) return false;
+        o.icon = icon;
+        o.iconTriedAt = this.opts.now().toISOString();
+        this.emitStudent();
+      }
+      return Boolean(o.poster);
+    } finally {
+      if (flyer) rmSync(flyer, { force: true });
+      this.postering.delete(o.id);
+    }
   }
 
   /**
@@ -1553,7 +1668,7 @@ export class AgentSystem {
         this.emitStudent();
         if (!o.deadline) working.push(findDeadline(o).catch((e) => log('Worker fleet', `Deadline finder failed for "${o.title}": ${errorText(e)}`, 'bad')));
         // A re-found posting keeps the picture it already has.
-        if (previous?.imageKind && previous.image) Object.assign(o, { image: previous.image, imageKind: previous.imageKind, imageCredit: previous.imageCredit, imageCreditUrl: previous.imageCreditUrl, imageTriedAt: previous.imageTriedAt });
+        if (previous?.imageKind && previous.image) Object.assign(o, { image: previous.image, imageKind: previous.imageKind, imageCredit: previous.imageCredit, imageCreditUrl: previous.imageCreditUrl, imageTriedAt: previous.imageTriedAt, poster: previous.poster, posterTriedAt: previous.posterTriedAt, icon: previous.icon, iconTriedAt: previous.iconTriedAt });
         else if (finder) working.push(findImage(o).catch((e) => log('Worker fleet', `Picture finder failed for "${o.title}": ${errorText(e)}`, 'bad')));
       };
 
@@ -1635,6 +1750,13 @@ export class AgentSystem {
         } finally {
           this.picturing.delete(o.id);
         }
+        // With its picture settled, the presentation agent remakes the card as a For You poster.
+        await fleet
+          .run({ kind: 'image', managerId: o.foundBy, label: `Poster: ${o.title}`, exempt: true }, async () => {
+            const made = await this.designPoster(o);
+            return { value: made, summary: made ? 'designed its For You poster' : 'no poster; the card shows its facts' };
+          })
+          .catch((e) => log('Presentation manager', `Poster for "${o.title}" failed: ${errorText(e)}`, 'bad'));
       };
       // Stored postings still without a picture are looked at alongside the search.
       void this.fillPictures(this.opts.imageBackfill ?? 30);

@@ -111,7 +111,7 @@ export function MonthGrid({
                   )}
                 </span>
                 {shown.map((item) => (
-                  <span key={item.id} className="cal-pill" data-priority={item.priority} data-done={item.done} data-kind={item.kind}>
+                  <span key={item.id} className="cal-pill" data-priority={item.priority} data-done={item.done} data-kind={item.kind} title={item.title}>
                     {item.title}
                   </span>
                 ))}

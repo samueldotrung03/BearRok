@@ -1,4 +1,6 @@
 // Thin client for the xAI Responses API with structured output and server-side search tools.
+import { readFileSync } from 'node:fs';
+import { extname } from 'node:path';
 import { z } from 'zod';
 import { throwIfStopped, timeoutOrStop } from './agents/stop.ts';
 import { config } from './config.ts';
@@ -18,6 +20,12 @@ export async function grokJson<S extends z.ZodType>(opts: {
   /** Model to use for this call. Defaults to XAI_MODEL. */
   model?: string;
   timeoutMs?: number;
+  /**
+   * Picture files on this computer for the model to look at (a flyer). Claude reads them with its
+   * Read tool, Codex and the xAI API take them as attached images; the Grok CLI cannot see them,
+   * so the prompt must still make sense without them.
+   */
+  images?: string[];
 }): Promise<GrokResult<z.infer<S>>> {
   // A stopped search makes no new calls.
   throwIfStopped();
@@ -48,7 +56,7 @@ export async function grokJson<S extends z.ZodType>(opts: {
       model: opts.model ?? config.xaiModel,
       input: [
         { role: 'system', content: opts.system },
-        { role: 'user', content: opts.user },
+        { role: 'user', content: opts.images?.length ? [{ type: 'input_text', text: opts.user }, ...opts.images.map(imageInput)] : opts.user },
       ],
       ...(opts.tools?.length ? { tools: opts.tools } : {}),
       text: { format: { type: 'json_schema', name: opts.name, schema: jsonSchema, strict: true } },
@@ -66,6 +74,13 @@ export async function grokJson<S extends z.ZodType>(opts: {
   const text = extractText(body);
   if (!text) throw new Error(`Grok returned no text: ${raw.slice(0, 500)}`);
   return { data: opts.schema.parse(JSON.parse(text)), citations: extractCitations(body) };
+}
+
+/** A picture file as an image the xAI API reads. */
+function imageInput(file: string) {
+  const ext = extname(file).slice(1).toLowerCase();
+  const type = ext === 'jpg' ? 'jpeg' : ext;
+  return { type: 'input_image', image_url: `data:image/${type};base64,${readFileSync(file).toString('base64')}` };
 }
 
 /** Final message text from a Responses API body. */

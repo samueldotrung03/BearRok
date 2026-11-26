@@ -2,6 +2,7 @@
 // Opportunity fields follow dashboard/src/types.ts so the dashboard can read them directly.
 import type { Match } from './match.ts';
 export type { Match, MatchPart, MatchFactor } from './match.ts';
+import type { Poster } from './poster.ts';
 
 export type Category = 'internship' | 'event' | 'club' | 'program';
 export type OppType = 'internship' | 'event' | 'club' | 'hackathon' | 'research' | 'scholarship';
@@ -140,6 +141,16 @@ export interface Candidate {
   imageCreditUrl?: string | null;
   /** When pictures were last looked for. One that found none is looked for again a day later. */
   imageTriedAt?: string;
+  /** The For You poster the presentation agent designed for it (poster.ts). Unset until designed. */
+  poster?: Poster | null;
+  /** When a poster was last asked for. One that failed is asked for again a day later. */
+  posterTriedAt?: string;
+  /**
+   * The Feed tab's icon for a card whose picture is not a logo: an SVG the presentation agent drew
+   * (as a data URL), in the style of the flyer when there is one. Unset until drawn.
+   */
+  icon?: string | null;
+  iconTriedAt?: string;
   evidence: Evidence[];
 }
 

@@ -40,6 +40,7 @@ export async function codexCliJson<S extends z.ZodType>(opts: {
   tools?: GrokTool[];
   model?: string;
   timeoutMs?: number;
+  images?: string[];
 }): Promise<GrokResult<z.infer<S>>> {
   const schema = z.toJSONSchema(opts.schema) as Record<string, unknown>;
   delete schema.$schema;
@@ -66,6 +67,7 @@ export async function codexCliJson<S extends z.ZodType>(opts: {
     '-m', opts.model ?? HARNESSES.codex.defaults.normal!,
   ];
   if (search) base.push('-c', 'web_search="live"');
+  for (const image of opts.images ?? []) base.push('--image', image);
   try {
     let lastError: unknown;
     // One retry without the schema option, in case Codex turned the schema down: the prompt still asks for the JSON.

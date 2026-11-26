@@ -5,7 +5,15 @@
 //   4. generated: an illustration drawn by the agents' model, labelled as AI-generated
 // Every picture is fetched once to check it is really an image of a usable size, so a card never
 // points at a broken link or a tiny icon stretched to fill the screen.
+import { randomBytes } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { limiter } from './fleet.ts';
+
+const run = promisify(execFile);
 import { timeoutOrStop } from './stop.ts';
 import type { Candidate } from './types.ts';
 
@@ -217,6 +225,51 @@ export class ImageFinder {
     await reader?.cancel().catch(() => {});
     const dims = imageSize(Buffer.concat(chunks));
     return { url: final, type, width: dims?.width ?? null, height: dims?.height ?? null };
+  }
+
+  /**
+   * Saves a picture to a fresh file in this computer's temporary folder, so the poster designer can
+   * look at it. Only PNG, JPEG, WebP and GIF files up to 8 MB. The caller deletes the file.
+   */
+  async download(url: string): Promise<string | null> {
+    if (!safeUrl(url)) return null;
+    const res = await this.get(url, 'image/webp,image/png,image/jpeg,image/gif');
+    if (!res) return null;
+    const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+    const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }[type];
+    if (!ext) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer().catch(() => new ArrayBuffer(0)));
+    if (!bytes.length || bytes.length > 8_000_000 || !imageSize(bytes)) return null;
+    const dir = join(tmpdir(), 'bearok-flyers');
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `flyer-${randomBytes(8).toString('hex')}${ext}`);
+    writeFileSync(file, bytes);
+    return file;
+  }
+
+  /**
+   * Cuts one part of a saved picture out to a new temporary file, so the poster reviewer can look
+   * at exactly what the card will show. `box` is in fractions of the picture. Uses macOS's own
+   * image tool (sips); null elsewhere or when the picture cannot be read. The caller deletes the file.
+   */
+  static async crop(file: string, box: { x: number; y: number; w: number; h: number }): Promise<string | null> {
+    if (process.platform !== 'darwin') return null;
+    const size = imageSize(new Uint8Array(readFileSync(file)));
+    if (!size) return null;
+    const x = Math.round(box.x * size.width);
+    const y = Math.round(box.y * size.height);
+    const w = Math.max(1, Math.min(size.width - x, Math.round(box.w * size.width)));
+    const h = Math.max(1, Math.min(size.height - y, Math.round(box.h * size.height)));
+    const out = file.replace(/(\.[a-z]+)$/i, `-part${randomBytes(4).toString('hex')}.png`);
+    try {
+      await run('sips', ['-s', 'format', 'png', '--cropToHeightWidth', String(h), String(w), '--cropOffset', String(y), String(x), file, '--out', out], { timeout: 15_000 });
+      return existsSync(out) ? out : null;
+    } catch {
+      return null;
+    }
   }
 
   /** A picture of the event or posting itself: large, not square and small, not named like a logo. */

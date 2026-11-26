@@ -2,6 +2,7 @@
 // application readers and validators get the web search tool.
 // Not yet run against a real key; `npm run grok:check` tests the account first.
 import { z } from 'zod';
+import { basename } from 'node:path';
 import { config } from '../config.ts';
 import { fitsTransport, tierModels } from '../harness.ts';
 import { grokJson, type GrokTool } from '../grok.ts';
@@ -9,6 +10,7 @@ import { cleanDraft, sortByRules, type CalendarEventInput, type EventAsk, type E
 import type { Brain, DraftedApplication, DraftInput, MasterInput } from './brain.ts';
 import { MATCH_FACTORS, normalizeMatch } from './match.ts';
 import { aboutOpenness } from './reviewGuard.ts';
+import { ART_REVIEW_SYSTEM, ArtReviewSchema, artReviewBrief, ICON_SYSTEM, IconSchema, iconBrief, POSTER_SYSTEM, PosterSchema, posterBrief, type ArtReview, type PosterDraft } from './poster.ts';
 import { CATEGORY_LABEL, type AgentGroup, type ReviewFocus, type Assignment, type Brief, type Candidate, type FoundDeadline, type MemorySummary, type Opportunity, type ScoutSpec, type Verdict } from './types.ts';
 
 /**
@@ -293,6 +295,43 @@ Read the notes before the rest of the profile. Put what they ask for at the top 
       schema: Out,
       system: `You draw a simple, attractive cover illustration as SVG for an opportunity card, used only when no photo of it exists. Rules: one <svg> element with viewBox="0 0 800 500" and no width or height; flat shapes, gradients and paths only; no text, letters, logos, people's faces, or brand marks; no <image>, <use>, <style>, <script>, links, external references or data URLs; under 7000 characters. Show the subject in an abstract way (for example a laptop and circuit lines for a coding hackathon, flasks for a lab, a stage for a conference) in a calm palette.`,
       user: `Type: ${candidate.type}\nField: ${candidate.field ?? 'not stated'}\nTitle: ${candidate.title}\nTags: ${candidate.tags.join(', ') || 'none'}`,
+    });
+    return data.svg;
+  }
+
+  async designPoster(o: Opportunity, flyer: string | null): Promise<PosterDraft | null> {
+    const { data } = await grokJson({
+      name: 'poster_designer',
+      // The presentation agent works on the normal tier.
+      model: this.model('presentation', TIER.normal),
+      schema: PosterSchema,
+      system: POSTER_SYSTEM,
+      user: posterBrief(o, o.imageKind, flyer ? basename(flyer) : null),
+      images: flyer ? [flyer] : undefined,
+    });
+    return data;
+  }
+
+  async reviewPosterArt(full: string, part: string, box: { x: number; y: number; w: number; h: number }): Promise<ArtReview | null> {
+    const { data } = await grokJson({
+      name: 'poster_art_review',
+      model: this.model('presentation', TIER.normal),
+      schema: ArtReviewSchema,
+      system: ART_REVIEW_SYSTEM,
+      user: artReviewBrief(basename(full), basename(part), box),
+      images: [full, part],
+    });
+    return data;
+  }
+
+  async drawIcon(o: Opportunity, palette: { background: string; text: string; accent: string } | null, flyer: string | null): Promise<string | null> {
+    const { data } = await grokJson({
+      name: 'icon_drawer',
+      model: this.model('presentation', TIER.normal),
+      schema: IconSchema,
+      system: ICON_SYSTEM,
+      user: iconBrief(o, palette, flyer ? basename(flyer) : null),
+      images: flyer ? [flyer] : undefined,
     });
     return data.svg;
   }

@@ -8,6 +8,7 @@ import { CATALOG, findByUrl, officialUrl, repostUrl, toCandidate, type CatalogIt
 import { noteMatch, noteSignals } from './scoring.ts';
 import { normalizeMatch, type Match, type MatchPart } from './match.ts';
 import { CATEGORY_LABEL, yearPlural, type ReviewFocus, type Assignment, type Brief, type Candidate, type FoundDeadline, type Category, type Lens, type MemorySummary, type Opportunity, type ScoutSpec, type Verdict } from './types.ts';
+import type { ArtReview, PosterDraft } from './poster.ts';
 
 const INTEREST_FIELDS: Record<string, string[]> = {
   coding: ['software'],
@@ -245,6 +246,19 @@ export class SimBrain implements Brain {
 
   /** Simulated agents do not draw: an invented picture would pass for a made one. */
   async illustrate(_candidate: Candidate): Promise<string | null> {
+    return null;
+  }
+
+  /** The simulated agents design no posters; the dashboard builds one from the card's facts. */
+  async designPoster(_o: Opportunity, _flyer: string | null): Promise<PosterDraft | null> {
+    return null;
+  }
+
+  async reviewPosterArt(_full: string, _part: string, _box: { x: number; y: number; w: number; h: number }): Promise<ArtReview | null> {
+    return null;
+  }
+
+  async drawIcon(_o: Opportunity, _palette: { background: string; text: string; accent: string } | null, _flyer: string | null): Promise<string | null> {
     return null;
   }
 

@@ -53,48 +53,48 @@ A student hears about internships, events, clubs, research, scholarships, and ca
 
 The **Host** is code, not a model. **SimBrain** is the stand-in when no model is connected.
 
+Gold nodes are the **Host**. Blue nodes are one model call.
+
+1. Plan
+
 ```mermaid
-flowchart TD
-  subgraph hostPlan["Host"]
-    lineup["Plans four slots and names them"]
-  end
-  subgraph masterBox["Master"]
-    brief["Writes the brief, lenses, and focus"]
-  end
-  subgraph hostBack["Host"]
-    writeBack["Writes kind, name, and category back"]
-  end
-  subgraph managerBox["Search manager"]
-    jobs["Plans the jobs"]
-  end
-  subgraph scoutBox["Scout"]
-    leads["Returns title and URL"]
-  end
-  subgraph hostCap["Host"]
-    cap["Slices the lead list"]
-  end
-  subgraph extractorBox["Extractor"]
-    opened["Opens the lead"]
-  end
-  subgraph statusBox["Status reviewer"]
-    status["May reject"]
-  end
-  subgraph criteriaBox["Criteria reviewer"]
-    scored["Scores the match and does not reject"]
-  end
-  subgraph hostGate["Host"]
-    gate["Drops, scores, and gates"]
-  end
-  subgraph deadlineBox["Deadline finder"]
-    due["Runs only when no deadline remains"]
-  end
-  subgraph presentBox["Presentation manager"]
-    reason["Writes the reason"]
-  end
-  subgraph hostRank["Host"]
-    rank["Ranks the feed and can stop the run"]
-  end
-  lineup --> brief --> writeBack --> jobs --> leads --> cap --> opened --> status --> scored --> gate --> due --> reason --> rank
+flowchart LR
+  h1["Host<br/>Plans four slots and names them"] --> m["Master<br/>Writes the brief, lenses, and focus"] --> h2["Host<br/>Writes kind, name, and category back"] --> sm["Search manager<br/>At most three jobs"]
+  classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
+  classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
+  class h1,h2 host
+  class m,sm agent
+```
+
+2. Find
+
+```mermaid
+flowchart LR
+  sc["Scout<br/>Returns title and URL"] --> h3["Host<br/>Slices the lead list"] --> ex["Extractor<br/>Opens the lead"] --> st["Status reviewer<br/>May reject"]
+  classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
+  classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
+  class h3 host
+  class sc,ex,st agent
+```
+
+3. Check
+
+```mermaid
+flowchart LR
+  cr["Criteria reviewer<br/>Scores the match. Does not reject"] --> h4["Host<br/>Drops, scores, and gates"] --> df["Deadline finder<br/>Only when no deadline remains"] --> pr["Presentation manager<br/>Writes one reason"]
+  classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
+  classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
+  class h4 host
+  class cr,df,pr agent
+```
+
+4. Order
+
+```mermaid
+flowchart LR
+  h5["Host<br/>Ranks the feed and can stop the run"]
+  classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
+  class h5 host
 ```
 
 1. The **Host** plans four manager slots with `planLineup` and names them. The **Master** writes the brief, the lenses, and the focus. The **Host** writes kind, name, and category back over that answer.

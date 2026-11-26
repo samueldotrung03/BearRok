@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import { z } from 'zod';
 
 // A stand-in for the real `grok` program: records its arguments and prints a canned reply.
-// A `.mjs` file so Windows can run it; grokCli starts `.mjs` with Node instead of spawning a shell script.
+// A `.mjs` file so Windows can run it: CreateProcess returns ENOENT on an extensionless #!/bin/sh
+// file, and a `.cmd` shim would split quoted argv. harness.ts starts `.mjs` with Node.
 const dir = mkdtempSync(join(tmpdir(), 'fake-grok-'));
 const bin = join(dir, 'grok.mjs');
 writeFileSync(
@@ -34,6 +35,7 @@ process.env.GROK_TRANSPORT = 'cli';
 process.env.GROK_CLI_BIN = bin;
 
 const { grokJson } = await import('../src/grok.ts');
+const { config } = await import('../src/config.ts');
 // Tests never read the saved harness choice, so the Grok harness is connected here by hand.
 const { setHarnessStateForTest } = await import('../src/harness.ts');
 setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
@@ -41,6 +43,14 @@ const { answerText, extractJson, structuredAnswer, fullestAnswer } = await impor
 const { readFileSync, rmSync } = await import('node:fs');
 const Schema = z.object({ title: z.string(), url: z.string() });
 const reset = () => { for (const f of ['count', 'reply-1', 'reply-2', 'exit', 'stderr']) rmSync(join(dir, f), { force: true }); };
+
+test('the default Grok CLI config leaves alwaysApprove false when GROK_CLI_ALWAYS_APPROVE is unset', () => {
+  assert.ok(
+    process.env.GROK_CLI_ALWAYS_APPROVE === undefined || process.env.GROK_CLI_ALWAYS_APPROVE === '',
+    'GROK_CLI_ALWAYS_APPROVE must stay unset so the default stays locked',
+  );
+  assert.equal(config.grokCli.alwaysApprove, false);
+});
 
 test('CLI replies are unwrapped from the json envelope, prose and code fences', () => {
   assert.equal(answerText('{"result":"hello","session_id":"s1"}'), 'hello');

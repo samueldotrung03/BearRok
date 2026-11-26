@@ -100,10 +100,32 @@ test('grokJson passes a host maxTurns of 2 to the Grok CLI and omits the flag wh
   const capped = readFileSync(join(dir, 'args'), 'utf8');
   assert.match(capped, /--max-turns\n2\n/);
   assert.doesNotMatch(capped, /--always-approve/);
+  // No tools: the turn cap does not replace the no-tools sentence.
+  assert.match(capped, /Answer from the information given\. Do not use any tools\./);
+  assert.doesNotMatch(capped, /open the pages/);
   reset();
   writeFileSync(join(dir, 'reply'), '{"title":"B","url":"https://example.org/b"}');
   await grokJson({ name: 't', system: 's', user: 'u', schema: Schema });
   assert.doesNotMatch(readFileSync(join(dir, 'args'), 'utf8'), /--max-turns/);
+});
+
+test('a capped tool call stops once the notes and urls are known, and an uncapped tool call may still open a page', async () => {
+  reset();
+  writeFileSync(join(dir, 'reply'), '{"title":"A","url":"https://example.org/a"}');
+  await grokJson({ name: 't', system: 'Search once.', user: 'u', schema: Schema, tools: [{ type: 'web_search' }], maxTurns: 2 });
+  const capped = readFileSync(join(dir, 'args'), 'utf8');
+  assert.match(capped, /Use at most 2 tool turns/);
+  assert.match(capped, /Run the search the system prompt names/);
+  assert.match(capped, /Do not open further pages once the notes and urls are known/);
+  assert.doesNotMatch(capped, /open the pages/);
+  assert.match(capped, /--max-turns\n2\n/);
+  assert.doesNotMatch(capped, /--always-approve/);
+  reset();
+  writeFileSync(join(dir, 'reply'), '{"title":"B","url":"https://example.org/b"}');
+  await grokJson({ name: 't', system: 's', user: 'u', schema: Schema, tools: [{ type: 'web_search' }] });
+  const open = readFileSync(join(dir, 'args'), 'utf8');
+  assert.match(open, /Use web search and open the pages/);
+  assert.doesNotMatch(open, /--max-turns/);
 });
 
 test('the xAI Responses body includes max_turns only when maxTurns is set', async () => {

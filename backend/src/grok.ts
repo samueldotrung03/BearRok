@@ -21,6 +21,12 @@ export async function grokJson<S extends z.ZodType>(opts: {
   model?: string;
   timeoutMs?: number;
   /**
+   * How many turns a search may take. When set, the xAI body sends max_turns as that integer.
+   * When omitted, the field is not sent. Claude and Codex have no matching flag, so the option
+   * is passed through and those clients leave their arguments unchanged.
+   */
+  maxTurns?: number;
+  /**
    * Picture files on this computer for the model to look at (a flyer). Claude reads them with its
    * Read tool, Codex and the xAI API take them as attached images; the Grok CLI cannot see them,
    * so the prompt must still make sense without them.
@@ -59,6 +65,7 @@ export async function grokJson<S extends z.ZodType>(opts: {
         { role: 'user', content: opts.images?.length ? [{ type: 'input_text', text: opts.user }, ...opts.images.map(imageInput)] : opts.user },
       ],
       ...(opts.tools?.length ? { tools: opts.tools } : {}),
+      ...(opts.maxTurns !== undefined ? { max_turns: opts.maxTurns } : {}),
       text: { format: { type: 'json_schema', name: opts.name, schema: jsonSchema, strict: true } },
     }),
   });

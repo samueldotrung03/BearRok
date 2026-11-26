@@ -33,7 +33,6 @@ import {
 } from '../../lib/discover/guide.ts';
 import { AskAgents } from './AskAgents.tsx';
 import { PartIcon } from './CareerGuideIcons.tsx';
-import { SAMPLE_FEED } from '../../state/live.tsx';
 
 const dateLabel = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -655,15 +654,13 @@ export function CareerGuide({
               <>
                 <span className="live-dot size-2 rounded-full bg-[#34c759]" aria-hidden="true" />
                 {line}
-                {guide.provider === 'simulated' && !SAMPLE_FEED && <span className="text-ink-3">· simulated agents, not research</span>}
+                {guide.provider === 'simulated' && <span className="text-ink-3">· simulated agents, not research</span>}
               </>
             ) : (
               <span className="text-ink-3">
-                {SAMPLE_FEED && guide.provider === 'simulated'
-                  ? 'Sample guide, written for this public copy. No agents researched it.'
-                  : guide.provider === 'simulated'
-                    ? `Simulated example, written ${dateLabel(guide.startedAt)} by simulated agents, not researched. Connect Grok in Settings for a real guide.`
-                    : `Researched ${dateLabel(guide.startedAt)} by ${providerLabel(guide.provider)}`}
+                {guide.provider === 'simulated'
+                  ? `Simulated example, written ${dateLabel(guide.startedAt)} by simulated agents, not researched. Connect Grok in Settings for a real guide.`
+                  : `Researched ${dateLabel(guide.startedAt)} by ${providerLabel(guide.provider)}`}
               </span>
             )}
           </p>

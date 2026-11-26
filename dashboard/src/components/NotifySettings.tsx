@@ -33,7 +33,7 @@ export function NotifySettings() {
   const [enabled, setEnabled] = useLocal(ENABLED_KEY, false);
   const [permission, setPermission] = useState<NotifyPermission>(notifyPermission);
   const [result, setResult] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const pool = useMemo(() => postingPool(live.sample, live.opportunities, live.savedCards), [live.sample, live.opportunities, live.savedCards]);
+  const pool = useMemo(() => postingPool(live.opportunities, live.savedCards), [live.opportunities, live.savedCards]);
   const items = useMemo(() => calendarItems(state, Date.now(), pool), [state, pool]);
   const onDesktop = Boolean((window as unknown as { bearrokDesktop?: unknown }).bearrokDesktop);
 

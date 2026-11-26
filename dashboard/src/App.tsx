@@ -36,9 +36,6 @@ export function SavedRedirect() {
 /** Pages for getting into an account. They have no sidebar and need no sign-in. */
 const accountPages = ['/signin', '/signup', '/forgot-password'];
 
-/** True only in a build made for the public web address, where the sign-in page is skipped. */
-const OPEN_TO_GUESTS = import.meta.env.VITE_NO_SIGNIN === '1';
-
 export function App() {
   const { pathname } = useLocation();
   useEffect(() => {
@@ -47,10 +44,9 @@ export function App() {
 
   const { status, user, continueAsGuest, signInEnabled } = useAuth();
   const onAccountPage = accountPages.includes(pathname);
-  // On the public web copy (built with VITE_NO_SIGNIN=1) nobody has to sign in to look around: a
-  // visitor with no account goes straight in as a guest. The same happens when this backend has
-  // sign-in turned off, so the local user can use the app. The account pages stay reachable.
-  const enterAsGuest = (OPEN_TO_GUESTS || signInEnabled === false) && status === 'signedOut' && !onAccountPage;
+  // When this backend has sign-in turned off, a signed-out visitor goes straight in as a guest so
+  // the local user can use the app. The account pages stay reachable.
+  const enterAsGuest = signInEnabled === false && status === 'signedOut' && !onAccountPage;
   useEffect(() => {
     if (enterAsGuest) continueAsGuest();
   }, [enterAsGuest, continueAsGuest]);

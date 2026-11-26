@@ -354,13 +354,7 @@ export function Feed() {
   // The ranking runs again on every save, like and dislike, but only for cards the student has
   // not reached yet: cards already scrolled past keep their place, so nothing moves under the thumb.
   const [seen, setSeen] = useState<string[]>([]);
-  const live = useMemo(() => {
-    const ranked = rankFeedDetailed(opportunities, state);
-    // The public showcase leads with the real postings Grok found, in rank order, then the samples.
-    if (!agentsLive.sample) return ranked;
-    const real = (r: RankedOpportunity) => r.opportunity.origin === 'live';
-    return [...ranked.filter(real), ...ranked.filter((r) => !real(r))];
-  }, [opportunities, state, agentsLive.sample]);
+  const live = useMemo(() => rankFeedDetailed(opportunities, state), [opportunities, state]);
   const slides = useMemo(() => {
     const byId = new Map(live.map((r) => [r.opportunity.id, r]));
     const kept = seen.map((id) => byId.get(id)).filter((r): r is RankedOpportunity => r !== undefined);
@@ -567,7 +561,6 @@ export function Feed() {
                 </h2>
                 <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-ink-2">
                   {emptyFeedCopy({
-                    sample: agentsLive.sample,
                     offline: agentsLive.status === 'offline',
                     searching: agentsLive.searching,
                     shown: slides.length,

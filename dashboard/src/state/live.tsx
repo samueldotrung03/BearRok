@@ -6,14 +6,12 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '../auth/AuthProvider.tsx';
 import { API_URL } from '../auth/firebase.ts';
-import { applicationInfo, coverFor, opportunities as sampleOpportunities } from '../data/sample.ts';
-import { grokFinds } from '../data/grokFinds.ts';
+import { applicationInfo, coverFor } from '../data/sample.ts';
 import type { AgentEvent, AgentNode, ApplicationStatus, Opportunity, OpportunityType } from '../types.ts';
 import { dataBadgeText, isOutOfCredit } from './dataBadge.ts';
 import { type FeedOutcome } from './feedCopy.ts';
 import { reactionSends } from './reactions.ts';
 import { googleInfo, type CalendarSync, type GoogleInfo, type GoogleServer, type GoogleService, type StreamGoogle } from '../lib/google/connection.ts';
-import { sampleRequest } from './sampleBackend.ts';
 import { useStore } from './StoreProvider.tsx';
 
 // ---- what the backend sends ------------------------------------------------------------------
@@ -138,11 +136,6 @@ export interface LiveAgents {
 interface LiveValue {
   /** offline: the backend cannot be reached, so there is nothing new to show. */
   status: 'connecting' | 'connected' | 'offline';
-  /**
-   * True in the public showcase (SAMPLE_FEED) while no backend answers: the pages show the sample
-   * student's postings and applications, labelled as samples, instead of an empty state.
-   */
-  sample: boolean;
   /** True when the agents have results on screen. */
   usingLive: boolean;
   /** Cards the feed should hold; the agents keep searching on their own while it has fewer. */
@@ -209,37 +202,7 @@ interface LiveValue {
 /** The feed's target when the backend has not said: at least this many cards by default. */
 export const FEED_TARGET = 12;
 
-/**
- * True only in the build for the public web address (VITE_SAMPLE_FEED=1), which has no agents
- * behind it: there the feed shows the sample postings, labelled as samples, so a visitor can see
- * how the app works. Every other build shows only what the agents found.
- */
-export const SAMPLE_FEED = import.meta.env.VITE_SAMPLE_FEED === '1';
-
 const LiveContext = createContext<LiveValue | null>(null);
-
-/** The sample student's applications, shaped as the backend's application manager keeps them. */
-export function sampleTracked(applications: Record<string, { status: ApplicationStatus }>, postings: Opportunity[]): Record<string, TrackedApplication> {
-  const byId = new Map(postings.map((o) => [o.id, o]));
-  return Object.fromEntries(
-    Object.entries(applications).map(([id, a]) => {
-      const posting = byId.get(id);
-      const info = applicationInfo[id];
-      const tracked: TrackedApplication = {
-        opportunityId: id,
-        status: a.status,
-        deadline: posting?.deadline ?? null,
-        actionUrl: posting?.actionUrl ?? null,
-        prompts: info?.prompts ?? [],
-        materials: info?.materials ?? [],
-        reminders: [],
-        needsDeadline: false,
-        calendar: { state: 'none', eventId: null, htmlLink: null, addUrl: null, error: null },
-      };
-      return [id, tracked];
-    }),
-  );
-}
 
 const hash = (text: string) => {
   let h = 2166136261;
@@ -412,8 +375,6 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   // ---- applications and the linked sheet -------------------------------------------------
   const request = async (path: string, init: RequestInit = {}) => {
-    // The public showcase answers from the sample data while no backend does.
-    if (SAMPLE_FEED && status !== 'connected') return sampleRequest(path, init, { saved: state.saved, applications: state.applications });
     const token = await auth.getToken().catch(() => null);
     return fetch(`${API_URL}/api/students/${who}${path}`, {
       ...init,
@@ -587,22 +548,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.saved, state.liked, state.dismissed, state.opened]);
 
-  const sample = SAMPLE_FEED && status !== 'connected';
-  const showcaseCards = useMemo(() => [...grokFinds, ...sampleOpportunities], []);
-  const sampleApplications = useMemo(() => (sample ? sampleTracked(state.applications, sampleOpportunities) : {}), [sample, state.applications]);
-
   const value = useMemo<LiveValue>(
     () => ({
       status,
-      sample,
       usingLive,
       provider: student?.provider ?? 'simulated',
       feedTarget: student?.feedTarget ?? FEED_TARGET,
       // Only what the agents found. The sample set is not mixed in: pages show real results or say why they are empty.
-      // The showcase leads with the real postings Grok found, then the sample set.
-      opportunities: sample ? showcaseCards : liveCards,
+      opportunities: liveCards,
       savedCards,
-      applications: sample ? sampleApplications : Object.fromEntries((status === 'connected' ? (student?.applications ?? []) : []).map((a) => [a.opportunityId, a])),
+      applications: Object.fromEntries((status === 'connected' ? (student?.applications ?? []) : []).map((a) => [a.opportunityId, a])),
       sheet: status === 'connected' ? (student?.sheet ?? null) : null,
       calendar: { connected: calendarOn, ...calendarSync },
       google,
@@ -639,7 +594,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       memoryCounts,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [status, sample, sampleApplications, state.saved, usingLive, student, liveCards, savedCards, run, who, google, calendarOn, calendarSync, memoryCounts],
+    [status, state.saved, usingLive, student, liveCards, savedCards, run, who, google, calendarOn, calendarSync, memoryCounts],
   );
   return <LiveContext value={value}>{children}</LiveContext>;
 }
@@ -658,7 +613,6 @@ export function DataBadge() {
   const live = useLive();
   const { long, short } = dataBadgeText({
     searching: live.searching,
-    sampleFeed: SAMPLE_FEED,
     status: live.status,
     usingLive: live.usingLive,
     provider: live.provider,

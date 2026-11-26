@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { emptyFeedCopy } from './feedCopy.ts';
 
-const base = { sample: false, offline: false, searching: false, shown: 0, target: 2, outcome: null };
+const base = { offline: false, searching: false, shown: 0, target: 2, outcome: null };
 
 describe('emptyFeedCopy', () => {
-  it('keeps the showcase and the offline sentences', () => {
-    expect(emptyFeedCopy({ ...base, sample: true })).toMatch(/sample postings/);
+  it('keeps the offline sentence', () => {
     expect(emptyFeedCopy({ ...base, offline: true })).toMatch(/cannot be reached/);
   });
 

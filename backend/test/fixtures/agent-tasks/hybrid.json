@@ -1,0 +1,17 @@
+{
+  "id": "hybrid",
+  "covers": "hybrid",
+  "student": {
+    "classYear": "Junior",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Health or data internships in the East Bay, hybrid is fine."
+  },
+  "pages": {
+    "https://loonriver.example/interns/data": "hybrid.html"
+  },
+  "expected": {
+    "required": [{ "title": "Data Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

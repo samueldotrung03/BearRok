@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { addToCalendarUrl, type DeadlineEvent } from '../calendar.ts';
 import { resumeInfo, type Resume, type ResumeInfo } from '../resume.ts';
 import { canonicalUrl } from '../validate.ts';
+import { gateLiveCard, quoteOnPage } from './evidence.ts';
 import type { Brain, DraftedApplication } from './brain.ts';
 import { cleanDraft, cleanTabs, emptyPortal, mergeTabs, PORTAL_LIMITS, portalBytes, tabsFromDraft, tabsFromPosting } from './portal.ts';
 import { Fleet, limiter } from './fleet.ts';
@@ -79,6 +80,8 @@ export interface SystemOptions {
   imageBackfill?: number;
   /** Which model family a live brain talks to, for labelling. */
   provider?: 'grok' | 'claude' | 'gpt';
+  /** Used by the live evidence gate to open posting pages. Defaults to global fetch. */
+  fetch?: typeof fetch;
   now: () => Date;
 }
 
@@ -1459,6 +1462,8 @@ export class AgentSystem {
           return { value: usable ? value : null, summary: usable ? `${value.deadline.slice(0, 10)} on another listing` : value ? 'only a date that cannot be used' : 'no listing states one' };
         });
         if (!hit) return;
+        // Live runs: the quote must appear on the listing page before it is stored.
+        if (this.brain.mode === 'live' && !(await quoteOnPage(hit.quote, hit.url, this.opts.fetch ?? fetch))) return;
         o.deadline = new Date(hit.deadline).toISOString();
         o.deadlineSource = 'listing';
         o.unknowns = o.unknowns.filter((u) => u.field !== 'deadline');
@@ -1468,7 +1473,7 @@ export class AgentSystem {
       };
 
       /** Decide one posting once its last review is in. */
-      const settle = (key: string, f: Found) => {
+      const settle = async (key: string, f: Found) => {
         const v = run.validations.find((x) => x.id === idFor(key))!;
         const both = verdicts.get(key) ?? {};
         // The status reviewer read the official page, so its version of the facts is the one kept;
@@ -1523,18 +1528,39 @@ export class AgentSystem {
           return;
         }
         this.lowMatch.delete(key);
+        let record = c;
+        let host: 'ok' | 'blocked' = 'ok';
+        if (this.brain.mode === 'live') {
+          const gated = await gateLiveCard(c, this.opts.fetch ?? fetch);
+          if (!gated.keep) {
+            v.status = 'rejected';
+            v.reason = gated.reason;
+            Object.assign(v.reviews.find((r) => r.focus === 'status')!, { status: 'rejected', reason: gated.reason, fit: null });
+            run.stats.rejected++;
+            this.pending.delete(key);
+            this.opportunities.delete(v.id);
+            this.lowMatch.delete(key);
+            this.rejected.set(key, gated.reason);
+            this.rejectedUrls.add(f.candidate.sourceUrl);
+            log('Validation agents', `Rejected "${f.candidate.title}". ${gated.reason}`.replace(/\.?$/, '.'), 'bad');
+            this.emitStudent();
+            return;
+          }
+          record = gated.record;
+          host = gated.host;
+        }
         v.status = 'kept';
         v.reason = match.reason;
         const id = v.id;
         const previous = this.opportunities.get(id);
-        const unknowns: Unknown[] = c.deadline ? [] : [{ field: 'deadline', label: UNKNOWN_DEADLINE[CATEGORY_OF[c.type]] }];
+        const unknowns: Unknown[] = record.deadline ? [] : [{ field: 'deadline', label: UNKNOWN_DEADLINE[CATEGORY_OF[record.type]] }];
         const o: Opportunity = {
-          ...c,
+          ...record,
           id,
           origin: this.brain.mode === 'live' ? 'live' : 'prepared',
           fitExplanation: v.reason,
           unknowns,
-          deadlineSource: c.deadline ? (c.deadlineSource ?? 'official') : null,
+          deadlineSource: record.deadline ? (record.deadlineSource ?? 'official') : null,
           foundAt: previous?.foundAt ?? now().toISOString(),
           lastCheckedAt: now().toISOString(),
           baseScore: fit,
@@ -1551,7 +1577,7 @@ export class AgentSystem {
         run.stats.kept = kept.length;
         run.stats.added = this.newIds.size;
         this.emitStudent();
-        if (!o.deadline) working.push(findDeadline(o).catch((e) => log('Worker fleet', `Deadline finder failed for "${o.title}": ${errorText(e)}`, 'bad')));
+        if (!o.deadline && host !== 'blocked') working.push(findDeadline(o).catch((e) => log('Worker fleet', `Deadline finder failed for "${o.title}": ${errorText(e)}`, 'bad')));
         // A re-found posting keeps the picture it already has.
         if (previous?.imageKind && previous.image) Object.assign(o, { image: previous.image, imageKind: previous.imageKind, imageCredit: previous.imageCredit, imageCreditUrl: previous.imageCreditUrl, imageTriedAt: previous.imageTriedAt });
         else if (finder) working.push(findImage(o).catch((e) => log('Worker fleet', `Picture finder failed for "${o.title}": ${errorText(e)}`, 'bad')));

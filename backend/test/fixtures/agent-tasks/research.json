@@ -1,0 +1,17 @@
+{
+  "id": "research",
+  "covers": "research",
+  "student": {
+    "classYear": "Junior",
+    "location": "Berkeley, CA",
+    "remoteOk": false,
+    "notes": "On-campus research labs."
+  },
+  "pages": {
+    "https://nightjar-lab.example/join/undergrad": "research.html"
+  },
+  "expected": {
+    "required": [{ "title": "Undergrad Researcher", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

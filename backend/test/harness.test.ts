@@ -9,17 +9,25 @@ import { z } from 'zod';
 
 // A stand-in for `codex exec`: records its arguments, what it read on stdin and whether an API key
 // reached it, then writes a canned answer to the file named after -o.
+// A `.mjs` file so Windows can spawn it (CreateProcess ENOENT on an extensionless #!/bin/sh file).
+// harness.ts starts `.mjs` with Node, so argv (including web_search="live") is not passed through a
+// shell. A `.cmd` shim would split those arguments. Unix keeps the same `.mjs` path.
 const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'));
-const bin = join(dir, 'codex');
+const bin = join(dir, 'codex.mjs');
 writeFileSync(
   bin,
-  `#!/bin/sh
-printf '%s\\n' "$@" > "${dir}/args"
-cat > "${dir}/stdin"
-echo "key=\${OPENAI_API_KEY:-none}" > "${dir}/env"
-out=""
-while [ $# -gt 0 ]; do if [ "$1" = "-o" ]; then out="$2"; fi; shift; done
-cat "${dir}/reply" > "$out"
+  `import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const dir = ${JSON.stringify(dir)};
+const args = process.argv.slice(2);
+writeFileSync(join(dir, 'args'), args.join('\\n') + '\\n');
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+writeFileSync(join(dir, 'stdin'), Buffer.concat(chunks));
+writeFileSync(join(dir, 'env'), 'key=' + (process.env.OPENAI_API_KEY || 'none') + '\\n');
+let out = '';
+for (let i = 0; i < args.length; i++) if (args[i] === '-o') out = args[i + 1] ?? '';
+writeFileSync(out, readFileSync(join(dir, 'reply')));
 `,
 );
 chmodSync(bin, 0o755);

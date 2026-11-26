@@ -1,0 +1,17 @@
+{
+  "id": "remote-role",
+  "covers": "remote-role",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Remote software internships."
+  },
+  "pages": {
+    "https://nimbus-works.example/jobs/backend-intern": "remote-role.html"
+  },
+  "expected": {
+    "required": [{ "title": "Backend Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

@@ -665,19 +665,11 @@ export class AgentSystem {
   }
 
   /**
-   * Saved and Applications are one list: a saved posting is an application at the first stage,
-   * Saved (status "interested"). Saves made before saving started tracking, or whose application
-   * was lost, get that application here, so nothing saved goes missing from Applications. Nothing
-   * is removed and no status is changed. Returns how many were added.
+   * Saving does not create an application. Existing records are left as they are, including ones
+   * already stored as Interested. Returns how many were added, which is always none.
    */
   migrateSaved(): number {
-    const memory = this.memory();
-    let added = 0;
-    for (const id of memory.saved) {
-      if (this.applications.has(id) || !this.opportunities.has(id) || memory.reaction.get(id) === 'dislike') continue;
-      if (this.setApplication(id, { status: 'interested' })) added++;
-    }
-    return added;
+    return 0;
   }
 
   /**
@@ -756,12 +748,11 @@ export class AgentSystem {
     if (!this.opportunities.has(opportunityId)) return null;
     this.interactions.push({ opportunityId, action, at: this.opts.now().toISOString() });
     if (action !== 'open') this.feedbackSinceRun++;
-    // Saving starts tracking it as Interested. Unsaving one that never got further stops tracking it.
+    // Saving does not create an application. Unsaving an Interested one that has nothing written removes it.
     if (action === 'save') {
       const nowSaved = this.memory().saved.has(opportunityId);
       const app = this.applications.get(opportunityId);
-      if (nowSaved && !app) this.setApplication(opportunityId, { status: 'interested' });
-      else if (!nowSaved && app?.status === 'interested' && Object.keys(app.drafts).length === 0 && !portalHasWork(app.portal)) this.removeApplication(opportunityId);
+      if (!nowSaved && app?.status === 'interested' && Object.keys(app.drafts).length === 0 && !portalHasWork(app.portal)) this.removeApplication(opportunityId);
     }
     this.emitStudent();
     if (this.feedbackSinceRun >= this.opts.feedbackThreshold) void this.trigger('feedback');

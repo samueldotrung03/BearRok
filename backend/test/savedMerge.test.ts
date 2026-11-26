@@ -1,5 +1,5 @@
-// Saved is the first stage of Applications: what was saved before the merge becomes a Saved
-// application with nothing lost, and a save still reaches the agents' memory.
+// Saving does not create an application. A save made before that change stays a save, an
+// application the student already has is left as it is, and a new save still reaches the agents.
 import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -69,13 +69,15 @@ function checkNoLoss(before: StudentMemory, s: AgentSystem) {
     assert.equal(kept.status, a.status, 'an existing status is not changed');
     assert.deepEqual(kept.drafts, a.drafts, 'what was written is kept');
   }
-  // Every posting still saved is in Applications.
+  // A save on its own is not turned into an application.
   const listed = new Set(s.listApplications().map((a) => a.opportunityId));
-  const disliked = new Set(before.learned.interactions.filter((i) => i.action === 'dislike').map((i) => i.opportunityId));
-  for (const id of savedIds(before)) if (!disliked.has(id) && before.learned.opportunities.some((o) => o.id === id)) assert.ok(listed.has(id), `saved ${id} is listed`);
+  for (const id of savedIds(before)) {
+    const existing = (before.learned.applications ?? []).find((a) => a.opportunityId === id);
+    if (!existing) assert.equal(listed.has(id), false, `saved ${id} is not listed`);
+  }
 }
 
-test('migration: legacy saves become Saved applications; nothing else changes, and it runs once', async () => {
+test('migration: legacy saves stay saves; nothing else changes, and it adds nothing', async () => {
   const seed = fresh();
   await seed.trigger('first');
   const memory = seed.memorySnapshot();
@@ -87,16 +89,14 @@ test('migration: legacy saves become Saved applications; nothing else changes, a
 
   const { before, s, again } = await migrateFile(file, 'guest:demo');
   checkNoLoss(before, s);
-  assert.equal(s.getApplication(ids.saved)?.status, 'interested', 'saved and nothing more: the Saved stage');
-  assert.equal(s.getApplication(ids.unsaved), null, 'unsaved before the merge: not brought back');
+  assert.equal(s.getApplication(ids.saved), null, 'a legacy save is not turned into an application');
+  assert.equal(s.getApplication(ids.unsaved), null, 'unsaved before: not brought back');
   assert.equal(s.getApplication(ids.disliked), null, 'disliked after saving: not brought back');
   assert.equal(s.getApplication(ids.working)?.status, 'applying');
   assert.deepEqual(s.student().saved.sort(), [ids.saved, ids.working].sort(), 'the saved list itself is unchanged');
-  // Saved back and loaded again: the same list, no duplicates, nothing added a second time.
   assert.deepEqual(again.listApplications().map((a) => [a.opportunityId, a.status]).sort(), s.listApplications().map((a) => [a.opportunityId, a.status]).sort());
-  assert.equal(again.migrateSaved(), 0, 'nothing left to migrate');
-  // The original file on disk is the migrated one now; the seed memory is untouched in this test.
-  assert.equal(JSON.parse(readFileSync(file, 'utf8')).students['guest:demo'].learned.applications.length, 2);
+  assert.equal(again.migrateSaved(), 0, 'nothing is migrated');
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).students['guest:demo'].learned.applications.length, 1);
 });
 
 // The student's real store, copied into backend/.data (gitignored) for this check. Skipped when no
@@ -114,13 +114,13 @@ test('migration: on a copy of the real store, with legacy saves added, nothing s
     await store.saveStudent(key, memory);
     const { before, s, again } = await migrateFile(file, key);
     checkNoLoss(before, s);
-    assert.equal(s.getApplication(ids.saved)?.status, 'interested');
-    assert.equal(again.getApplication(ids.saved)?.status, 'interested', 'kept after a restart');
+    assert.equal(s.getApplication(ids.saved), null);
+    assert.equal(again.getApplication(ids.saved), null, 'still not an application after a restart');
     assert.equal(s.student().profile.name, before.profile.profile.name, 'the profile is untouched');
   }
 });
 
-test('save: the memory signal reaches the agents, and the posting shows in Applications as Saved', async () => {
+test('save: the memory signal reaches the agents, and saving does not create an application', async () => {
   const s = fresh();
   await s.trigger('first');
   const { app } = createApp(new LocalStore(null), {}, { demo: s });
@@ -133,15 +133,16 @@ test('save: the memory signal reaches the agents, and the posting shows in Appli
   assert.deepEqual(memory.at(-1), { opportunityId: o.id, action: 'save', at: NOW.toISOString() }, 'kept in what the agents learn from');
   assert.equal(s.student().memory.counts.save, 1, 'the ranking counts it');
   assert.ok(s.student().saved.includes(o.id));
-  const apps = (await (await app.request('/api/students/demo/applications')).json()) as any;
-  assert.deepEqual(apps.applications.map((a: any) => [a.opportunityId, a.status]), [[o.id, 'interested']], 'in Applications at the Saved stage');
+  const apps = (await (await app.request('/api/students/demo/applications')).json()) as { applications: { opportunityId: string }[] };
+  assert.equal(apps.applications.some((a) => a.opportunityId === o.id), false, 'a save is not an application');
 
-  // Moving it on keeps it saved; unsaving one still only Saved takes it out again.
+  // Setting To apply creates the application. Unsaving the first posting does not remove it.
   const other = s.student().feed[1]!.opportunity;
   s.interact(other.id, 'save');
   await app.request(`/api/students/demo/applications/${other.id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'to_apply' }) });
   assert.equal(s.getApplication(other.id)?.status, 'to_apply');
   await post('save');
-  assert.equal(s.getApplication(o.id), null, 'unsaved while only Saved: no longer listed');
+  assert.equal(s.getApplication(o.id), null, 'unsaved while only saved: still no application');
+  assert.equal(s.getApplication(other.id)?.status, 'to_apply', 'To apply stays after another posting is unsaved');
   assert.equal(s.student().memory.counts.save, 3, 'two saves and the unsave all reach memory');
 });

@@ -38,7 +38,7 @@ test('tracker: every saved posting is a row with its status, deadline, details a
   assert.ok(row[col('Apply link')]!.startsWith('http'));
   assert.equal(row[col('Calendar')], 'Added once Google Calendar is connected');
   assert.equal(row[col('Saved on')], NOW.toISOString().slice(0, 10));
-  assert.equal(rows[0]![col('Status')], 'Saved', 'saving puts it at the first stage, Saved');
+  assert.equal(rows[0]![col('Status')], 'Interested', 'a save with no application is shown as Interested');
   if (undated) assert.equal(rows[2]![col('Deadline')], 'Not stated');
 });
 
@@ -110,11 +110,12 @@ test('tracker: the app reads the rows, links a sheet on first sync, and keeps wr
   assert.equal(s.student().sheet, null);
 });
 
-test('status: saving makes a posting Interested; unsaving one that never got further stops tracking it', async () => {
+test('status: saving does not make an application; unsaving an Interested one that never got further stops tracking it', async () => {
   const s = await student();
   const [a, b] = s.student().feed.map((f) => f.opportunity);
   s.interact(a!.id, 'save');
-  assert.equal(s.getApplication(a!.id)?.status, 'interested');
+  assert.equal(s.getApplication(a!.id), null, 'a save is not an application');
+  s.setApplication(a!.id, { status: 'interested' });
   s.interact(a!.id, 'save');
   assert.equal(s.getApplication(a!.id), null, 'unsaved while still only Interested');
   // One the student moved on keeps its status when unsaved.

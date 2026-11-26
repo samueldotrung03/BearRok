@@ -144,7 +144,7 @@ test('calendar page: events are read and written through the backend with the st
 });
 
 test('sheets: export mapping, one row per application with its stage in the appâ€™s words', async () => {
-  assert.deepEqual(STATUS_LABEL, { interested: 'Saved', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' });
+  assert.deepEqual(STATUS_LABEL, { interested: 'Interested', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' });
   const s = await student();
   const [a, b, c, d] = s.student().feed.map((f) => f.opportunity);
   s.interact(a!.id, 'save');
@@ -155,7 +155,7 @@ test('sheets: export mapping, one row per application with its stage in the appâ
   const col = (name: string) => TRACKER_HEADER.indexOf(name);
   assert.deepEqual(header, TRACKER_HEADER);
   const byTitle = new Map(rows.map((r) => [r[col('Opportunity')], r]));
-  assert.equal(byTitle.get(a!.title)![col('Status')], 'Saved');
+  assert.equal(byTitle.get(a!.title)![col('Status')], 'Interested');
   assert.equal(byTitle.get(b!.title)![col('Status')], 'To apply');
   assert.equal(byTitle.get(d!.title)![col('Status')], 'Applied');
   const applying = byTitle.get(c!.title)!;

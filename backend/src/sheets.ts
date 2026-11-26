@@ -3,8 +3,8 @@
 // connection for each call; it is never stored here or sent to a page.
 import type { Application, Opportunity } from './agents/types.ts';
 
-/** Saved is the first stage of an application (status "interested"); the sheet uses the app's words. */
-export const STATUS_LABEL: Record<Application['status'], string> = { interested: 'Saved', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
+/** The status "interested" is shown as Interested. The stored value stays "interested". */
+export const STATUS_LABEL: Record<Application['status'], string> = { interested: 'Interested', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
 const HEADER = ['Opportunity', 'Organizer', 'Status', 'Deadline', 'Next reminder', 'Apply at', 'Materials', 'Prompts'];
 
 export function sheetRows(applications: Application[]): string[][] {

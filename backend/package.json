@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "grok:check": "node --env-file-if-exists=.env scripts/grok-check.ts",
     "roadmap:check": "node --env-file-if-exists=.env scripts/roadmap-check.ts",
-    "opportunities:backfill": "node --env-file-if-exists=.env scripts/opportunities-backfill.ts"
+    "opportunities:backfill": "node --env-file-if-exists=.env scripts/opportunities-backfill.ts",
+    "usage:report": "node --env-file-if-exists=.env scripts/usage-report.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.6.0",

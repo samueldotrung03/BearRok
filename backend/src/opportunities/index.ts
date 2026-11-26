@@ -1,15 +1,16 @@
 // Opens the shared opportunities table and feeds it from the students' memories.
 import type { StudentMemory } from '../agents/types.ts';
 import type { Store } from '../store/index.ts';
-import { openEmbedded, openServer } from './db.ts';
+import { openDatabase } from './db.ts';
 import { OpportunityCatalog } from './store.ts';
 
 export { mountOpportunities } from './api.ts';
+export { openDatabase } from './db.ts';
 export { OpportunityCatalog } from './store.ts';
 
 /** DATABASE_URL names a hosted Postgres; without it the table is kept in `dir` on this computer. */
 export async function openCatalog(url: string | null, dir: string): Promise<OpportunityCatalog> {
-  return OpportunityCatalog.open(url ? await openServer(url) : await openEmbedded(dir));
+  return OpportunityCatalog.open(await openDatabase(url, dir));
 }
 
 type Memory = Pick<Store, 'loadStudent' | 'saveStudent' | 'deleteStudent'>;

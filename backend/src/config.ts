@@ -75,6 +75,12 @@ export const config = {
     url: env.DATABASE_URL?.trim() || null,
     dir: env.OPPORTUNITIES_DB_DIR ?? fileURLToPath(new URL('../.data/opportunities-db', import.meta.url)),
   },
+  /**
+   * Usage tracking, kept in the same database as the opportunities table. USAGE_TRACKING=off stops
+   * it. METRICS_TOKEN is the password the team sends to read the numbers at /api/metrics; without
+   * one that page answers nobody.
+   */
+  usage: { off: env.USAGE_TRACKING === 'off', token: env.METRICS_TOKEN?.trim() || null },
   careerGuidesFile: env.CAREER_GUIDES_FILE ?? fileURLToPath(new URL('../.data/career-guides.json', import.meta.url)),
 };
 

@@ -30,6 +30,9 @@ export async function openServer(url: string): Promise<Sql> {
   };
 }
 
+/** DATABASE_URL names a hosted Postgres; without it the same tables are kept in `dir` on this computer. */
+export const openDatabase = (url: string | null, dir: string): Promise<Sql> => (url ? openServer(url) : openEmbedded(dir));
+
 /** Embedded Postgres. Pass null to keep it in memory only (tests). */
 export async function openEmbedded(dir: string | null): Promise<Sql> {
   const { PGlite } = await import('@electric-sql/pglite');

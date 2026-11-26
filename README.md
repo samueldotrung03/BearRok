@@ -51,65 +51,138 @@ A student hears about internships, events, clubs, research, scholarships, and ca
 
 ## The answer
 
-The host owns the lineup, the rank, the stop, and the evidence check. Each live agent is one model call checked against a schema. With no model connected, SimBrain fills the same roles from an invented catalog. The demo feed on first open is a different set of cards, loaded in advance, and opening it does not start a search.
+The **Host** is code, not a model. **SimBrain** is the stand-in when no model is connected.
 
 ```mermaid
 flowchart TD
-  host[Host plans the lineup] --> master[Master writes the brief]
-  master --> managers[Search managers plan at most three jobs]
-  managers --> scouts[Scouts return title and URL]
-  scouts --> readers[Readers extract the posting]
-  readers --> review[Status reviewer and criteria reviewer]
-  review --> gate[Host checks, scores, and gates]
-  gate --> reason[Presentation writes one reason]
-  reason --> rank[Host ranks the feed]
+  subgraph hostPlan["Host"]
+    lineup["Plans four slots and names them"]
+  end
+  subgraph masterBox["Master"]
+    brief["Writes the brief, lenses, and focus"]
+  end
+  subgraph hostBack["Host"]
+    writeBack["Writes kind, name, and category back"]
+  end
+  subgraph managerBox["Search manager"]
+    jobs["Plans the jobs"]
+  end
+  subgraph scoutBox["Scout"]
+    leads["Returns title and URL"]
+  end
+  subgraph hostCap["Host"]
+    cap["Slices the lead list"]
+  end
+  subgraph extractorBox["Extractor"]
+    opened["Opens the lead"]
+  end
+  subgraph statusBox["Status reviewer"]
+    status["May reject"]
+  end
+  subgraph criteriaBox["Criteria reviewer"]
+    scored["Scores the match and does not reject"]
+  end
+  subgraph hostGate["Host"]
+    gate["Drops, scores, and gates"]
+  end
+  subgraph deadlineBox["Deadline finder"]
+    due["Runs only when no deadline remains"]
+  end
+  subgraph presentBox["Presentation manager"]
+    reason["Writes the reason"]
+  end
+  subgraph hostRank["Host"]
+    rank["Ranks the feed and can stop the run"]
+  end
+  lineup --> brief --> writeBack --> jobs --> leads --> cap --> opened --> status --> scored --> gate --> due --> reason --> rank
 ```
 
-1. The host plans four manager slots with `planLineup` and names them. The master writes the brief, the lenses, and the focus. The host then writes kind, name, and category back over the master's answer.
-2. Each search manager may return at most three jobs. A scout returns title-and-URL leads. The host slices that list to the cap: 2 on the Grok CLI, 4 for the API and for SimBrain.
-3. An extractor opens the lead. The status reviewer may reject the posting. The criteria reviewer scores a match from 0 to 100 and does not reject it. A rejection that rests only on whether it is open, or on something not confirmed, is overruled in `reviewGuard.ts`.
-4. The host drops a posting that fails `hardCheck` (the status reviewer said it is closed, the deadline has passed, or there is no real link) and one whose match is under the student's minimum. The default minimum is 30.
-5. On a live run, `gateLiveCard` fetches the posting page. An unreachable link drops the card. A blocked fetch keeps the card and clears the deadline. A deadline quote stays only when every sentence of 12 or more characters appears in the page text. A link check that was skipped is treated as blocked.
-6. If the organizer's pages stated no deadline, and the fetch was not blocked, the deadline finder is the only extra-listing search. It runs three queries: the title plus "deadline", the title plus "apply by", and the title plus the year. A date is stored only when `quoteOnPage` passes and the date is not in the past.
-7. The presentation manager writes one reason sentence per card. It does not order the feed. `rankFeed` in `backend/src/agents/scoring.ts` orders it from the student's history. The estimates are computed from that history, not from a trained model. The dashboard orders the reel again in `dashboard/src/state/ranking.ts`. That browser ranker is a stand-in on the student's own saves, likes, and dislikes. It is not the X For You algorithm.
+1. The **Host** plans four manager slots with `planLineup` and names them. The **Master** writes the brief, the lenses, and the focus. The **Host** writes kind, name, and category back over that answer.
+2. Each **Search manager** returns *at most three jobs*. A **Scout** returns title-and-URL leads. The **Host** slices that list: *two leads on the CLI*, and *four on the API* and for **SimBrain**.
+3. An **Extractor** opens the lead. The **Status reviewer** may reject the posting. The **Criteria reviewer** scores a match from 0 to 100 and does not reject it. A rejection that rests only on whether it is open, or on something not confirmed, is overruled in `reviewGuard.ts`.
+4. The **Host** drops a posting that fails `hardCheck` (the **Status reviewer** said it is closed, the deadline has passed, or there is no real link) and one under the student's minimum. The default is a *match minimum 30*.
+5. On a live run, `gateLiveCard` fetches the posting page. An unreachable link drops the card. A blocked fetch keeps the card and clears the deadline. A deadline quote stays only when every sentence of 12 or more characters is on the page. A skipped link check counts as blocked.
+6. If the organizer pages stated no deadline, and the fetch was not blocked, the **Deadline finder** is the only extra-listing search. It runs *three deadline queries*: the title plus "deadline", the title plus "apply by", and the title plus the year. A date is stored only when `quoteOnPage` passes and the date is not in the past.
+7. The **Presentation manager** writes *one reason sentence* per card. It does not order the feed. The **Host** orders with `rankFeed` in `backend/src/agents/scoring.ts`, from the student's history. Those estimates come from that history, not from a trained model. The dashboard orders the reel again in `dashboard/src/state/ranking.ts`. That browser ranker is a stand-in on the student's own saves, likes, and dislikes. It is not the X For You algorithm.
 8. Stop runs inside `withSignal`. A `StoppedError` ends model calls and page fetches that are still going. Cards already kept stay in the feed.
+
+Each live agent is one model call checked against a schema. **SimBrain** fills the same roles from an invented catalog. The demo feed is a different set of cards, loaded in advance, and opening it does not start a search.
 
 ## Why you can trust it
 
-These are checks in code. A prompt can still say something else, and where it does, the table says so.
+```
+Trust
+├── Host
+│   ├── plans kinds and names before the Master (`planLineup` in `lineup.ts`)
+│   ├── writes kind, name, and category back (`system.ts`)
+│   ├── slices leads after the model answers (`data.leads.slice`)
+│   ├── CLI target 8, and `FEED_MIN` does not change it (`engine()` in `server.ts`)
+│   ├── API and simulated target 12, scout cap 4, at most four fills (`config.feed`, `DEFAULT_OPTIONS`)
+│   ├── parses every live call (`grokJson` calls `schema.parse`)
+│   ├── stops with `withSignal` and `StoppedError` (`stop.ts`)
+│   ├── drops closed, expired, or unlinkable cards before the score (`hardCheck` in `match.ts`)
+│   ├── keeps the criteria verdict, then applies the minimum, default 30 (`meetsThreshold`)
+│   ├── overrules a groundless rejection (`groundlessReject` in `reviewGuard.ts`)
+│   ├── live gate (`gateLiveCard` in `evidence.ts`)
+│   │   ├── unreachable link drops the card
+│   │   ├── blocked fetch keeps the card and clears the deadline
+│   │   └── a quote stays only if each sentence of 12 or more characters is on the page
+│   └── stores another listing's deadline only after `quoteOnPage`, and not if the date has passed
+├── Search manager
+│   └── at most three jobs (`planJobs` keeps `data.jobs.slice(0, 3)`)
+├── Scout
+│   ├── the CLI **Scout** is told not to open pages, but that call omits maxTurns, so grokCli.ts also says to open them. The Host still slices to two leads
+│   ├── when `scoutMaxLeads` is set, that string also says to run the query once and return at most two title-and-URL pairs
+│   ├── tools are `web_search`, plus `x_search` when `XAI_X_SEARCH=1`
+│   └── the API prompt does not say to skip opening pages
+├── Criteria reviewer
+│   └── scores the match and does not reject
+├── Deadline finder
+│   └── its prompt says to open pages, and it also omits maxTurns, so those two lines agree
+├── Search
+│   ├── web off: `tools: []`, and the prompt says to rank only the student's own postings
+│   └── web on: one lookup (`web_search` only, `maxTurns` 2), then a fill with no tools that says not to search
+├── Roadmap
+│   ├── one search, then a fill with no tools (`writeRoadmap`)
+│   ├── a thin draft is filled again with no tools
+│   └── `x_search` only when `XAI_X_SEARCH=1`
+└── Career
+    ├── one search (`careerSearch`, `maxTurns` 2), then writers with no tools
+    └── `x_search` only when the harness provider is Grok, not from `XAI_X_SEARCH`
+```
 
-| Rule | Where it is enforced |
-| --- | --- |
-| Lineup kinds and names are chosen before the master runs, then written back over its answer | `planLineup` in `lineup.ts`; the overwrite is in `system.ts` |
-| At most three jobs per search manager | `planJobs` keeps `data.jobs.slice(0, 3)` |
-| Scout lead cap, applied after the model answers | `scout` returns `data.leads.slice(0, cap)` |
-| CLI run size: feed target 8, at most two leads per scout | `engine()` in `server.ts`. `FEED_MIN` does not change this |
-| API and simulated feed target 12, scout cap 4, at most four fill runs | `config.feed` spread in `engine()`, and `DEFAULT_OPTIONS` |
-| Every live call is parsed with its zod schema | `grokJson` calls `schema.parse` |
-| Stop | `withSignal` and `StoppedError` in `stop.ts` |
-| Closed, expired, or unlinkable postings are dropped before the score matters | `hardCheck` in `match.ts` |
-| Match minimum, default 30. The criteria reviewer does not reject | `meetsThreshold`; the host sets the criteria verdict to keep and then applies the minimum |
-| A groundless rejection is overruled | `groundlessReject` in `reviewGuard.ts` |
-| Live evidence gate | `gateLiveCard` in `evidence.ts`. Unreachable drops the card. Blocked keeps it and clears the deadline. A quote stays only if each sentence of 12 or more characters is on the page |
-| Deadline from another listing | Stored only after `quoteOnPage`, and only if the date has not passed |
-| Web search off means an empty tool list | `writeSearch` passes `tools: []`, and the prompt says to rank only the student's own postings |
-| Web search on is one lookup, then a fill with no tools | Lookup uses `web_search` only, `maxTurns: 2`. The fill says not to search |
-| Roadmap search is one call, then a tool-free fill. A thin draft is filled again with no tools | `writeRoadmap`. `x_search` is added only when `XAI_X_SEARCH=1` |
-| Career path: one search, then writers with no tools | `careerSearch` uses `maxTurns: 2`. `x_search` is added only when the harness provider is Grok, which is not the same flag as `XAI_X_SEARCH` |
-
-The CLI scout is the place where two instructions disagree. When `scoutMaxLeads` is set, the scout's system string says to run the query once, return at most two title-and-URL pairs, and not open posting pages. That call does not set `maxTurns`. In `grokCli.ts`, an omitted `maxTurns` adds the line "Use web search and open the pages." The host still slices the leads to two, and the CLI feed target stays 8. The scout is also given `web_search`, and `x_search` when `XAI_X_SEARCH=1`. The API scout prompt does not say to skip opening pages. The deadline finder's own prompt tells it to open pages, and it also omits `maxTurns`, so those two lines agree.
-
-`GROK_CLI_ALWAYS_APPROVE` is read in `config.ts`. Leave it unset. Setting it to `1` passes `--always-approve`, which also approves shell and file tools. This README does not ask you to set it.
+`GROK_CLI_ALWAYS_APPROVE` stays unset. `1` would pass `--always-approve`, which also approves shell and file tools.
 
 ## What one run does
 
-A run starts on a manual request, a profile change, the fifth save-like-or-dislike (`feedbackThreshold`, default 5), a schedule, automode, or a fill when the feed is under its target. A first-visit run starts only when `runCount` is 0. The demo student is stored with `runCount` 1, so opening that feed does not start a search.
-
-On the Grok CLI the host asks for about 8 cards, allows 2 leads per scout, runs `GROK_CLI_CONCURRENCY` processes at once (default 3), and caps jobs with `LIVE_MAX_JOBS` (default 12). On the API and in simulation the target is `FEED_MIN` (default 12), the scout cap is 4, and the host may fill up to `FEED_FILL_MAX_RUNS` times (default 4).
-
-Cards that pass are stored on the student as they are kept, with origin `live` or `prepared`. The presentation reason is stored beside them. The four strongest new cards, by match, are sent to an application reader. When the shared opportunities table is open, saving memory also copies postings into it. The search does not read that table.
-
-Reminders default to 7, 2, and 0 days before a deadline. The app records them. It does not send email. When Google Calendar is connected, the same offsets are popup minutes.
+```
+One run
+├── Starts
+│   ├── manual request, profile change, schedule, or automode
+│   ├── the fifth save, like, or dislike (`feedbackThreshold` 5)
+│   ├── a fill when the feed is under its target
+│   ├── a first visit only when `runCount` is 0
+│   └── the demo student is stored with `runCount` 1, so opening that feed does not search
+├── CLI size
+│   ├── about 8 cards
+│   ├── 2 leads per scout
+│   ├── `GROK_CLI_CONCURRENCY` 3
+│   └── `LIVE_MAX_JOBS` 12
+├── API and simulation size
+│   ├── target `FEED_MIN` 12
+│   ├── scout cap 4
+│   └── up to `FEED_FILL_MAX_RUNS` 4
+├── Kept card
+│   ├── stored as it is kept, origin `live` or `prepared`
+│   ├── the presentation reason is stored beside it
+│   ├── the four strongest new cards, by match, go to the **Application reader**
+│   ├── when the shared opportunities table is open, saving memory copies postings into it
+│   └── the search does not read that table
+└── Reminders
+    ├── default 7, 2, and 0 days before a deadline
+    ├── the app records them and sends no email
+    └── with Google Calendar connected, the same offsets are popup minutes
+```
 
 ## A look inside
 

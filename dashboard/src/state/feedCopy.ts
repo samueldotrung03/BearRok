@@ -1,5 +1,4 @@
 // What the empty feed says. Real runs are described from the memory the agents stored.
-// Sample wording is only for the public showcase, which has no agents behind it.
 
 export interface FeedOutcome {
   found: number;
@@ -9,14 +8,12 @@ export interface FeedOutcome {
 }
 
 export function emptyFeedCopy(input: {
-  sample: boolean;
   offline: boolean;
   searching: boolean;
   shown: number;
   target: number;
   outcome: FeedOutcome | null;
 }): string {
-  if (input.sample) return 'These are sample postings. This public copy has no agents behind it, so nothing new arrives.';
   if (input.offline) return 'The agents cannot be reached right now, so there is nothing new to show. This page fills in on its own once they are back.';
   const aim =
     input.shown < input.target

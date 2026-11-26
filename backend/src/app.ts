@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { mountActivity } from './activity/api.ts';
 import { FileRunHistory } from './activity/history.ts';
 import { ActivityHub } from './activity/hub.ts';
+import { passPicture } from './picture.ts';
 import { HttpError, mountAgents, type AgentsOptions } from './agents/api.ts';
 import { mountCareers } from './careers/api.ts';
 import type { CareerGuides } from './careers/guide.ts';
@@ -30,6 +31,9 @@ export function createApp(
   const engine = new Engine(store, deps);
   const app = new Hono();
   app.use('/api/*', cors());
+
+  // A card's picture, passed on so the dashboard may read its pixels (picture.ts).
+  app.get('/api/picture', (c) => passPicture(c.req.query('url')));
 
   app.get('/api/health', (c) =>
     c.json({

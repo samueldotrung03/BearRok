@@ -2,7 +2,7 @@
 // one column per day, an all-day row on top, events placed at their real times and as long as they
 // last, and a line at the current time. It scrolls inside the calendar's fixed frame, opening on
 // the working day. Clicking an event opens its card; clicking a day's heading opens that day.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { dayDate } from '../../lib/cal/days.ts';
 import type { CxItem } from '../../lib/cal/items.ts';
 import type { PlanBlock } from '../../lib/cal/planner.ts';
@@ -17,6 +17,17 @@ const minutesOf = (iso: string) => {
 };
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+/**
+ * How a timed event of this height (in pixels) uses its room: as many 16px lines of title as fit,
+ * and the time underneath only once the title still has two lines left beside it. A one-hour event
+ * gives its name two lines; its time is already shown by where it sits on the grid.
+ */
+export function eventLines(height: number): { title: number; time: boolean } {
+  const lines = Math.floor((height - 2 - 6) / 16);
+  if (lines >= 3) return { title: lines - 1, time: true };
+  return { title: Math.max(1, lines), time: false };
+}
 
 interface Placed {
   item: CxItem;
@@ -155,8 +166,10 @@ export function TimeGrid({
                   onClick={() => onOpen(item)}
                   title={`${item.title} · ${clock(item.date)}`}
                 >
-                  <span className="cx-tg-ev-title">{item.title}</span>
-                  {height >= 40 && <span className="cx-tg-ev-time">{clock(item.date)}{item.end ? ` – ${clock(item.end)}` : ''}</span>}
+                  <span className="cx-tg-ev-title" style={{ '--cx-lines': eventLines(height).title } as CSSProperties}>
+                    {item.title}
+                  </span>
+                  {eventLines(height).time && <span className="cx-tg-ev-time">{clock(item.date)}{item.end ? ` – ${clock(item.end)}` : ''}</span>}
                 </button>
               ))}
               {d === today && <span className="cx-tg-now" style={{ top: nowTop }} aria-hidden="true" />}

@@ -204,6 +204,8 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
   tools?: GrokTool[];
   model?: string;
   timeoutMs?: number;
+  /** The Grok CLI is not known to read pictures; the poster designer works from the posting alone. */
+  images?: string[];
 }): Promise<GrokResult<z.infer<S>>> {
   const schema = z.toJSONSchema(opts.schema) as Record<string, unknown>;
   delete schema.$schema;

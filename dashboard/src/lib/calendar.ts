@@ -43,12 +43,8 @@ export function dayKey(date: Date | string | number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/**
- * The postings a page should read. The public showcase uses the sample set. Everywhere else the
- * feed and the saved list are the only cards, so an empty feed stays empty.
- */
-export function postingPool(sample: boolean, live: Opportunity[], saved: Opportunity[]): Opportunity[] {
-  if (sample) return opportunities;
+/** The postings a page should read: the feed and the saved list, so an empty feed stays empty. */
+export function postingPool(live: Opportunity[], saved: Opportunity[]): Opportunity[] {
   const byId = new Map<string, Opportunity>();
   for (const card of [...live, ...saved]) byId.set(card.id, card);
   return [...byId.values()];

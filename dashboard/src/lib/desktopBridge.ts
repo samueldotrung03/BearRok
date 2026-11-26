@@ -26,6 +26,8 @@ export type MenuBarAction = { type: 'run' } | { type: 'stop' } | { type: 'open';
 
 interface DesktopBridge {
   platform: string;
+  /** Full screen on and off. Absent in an older desktop shell. */
+  onFullScreen?: (callback: (on: boolean) => void) => () => void;
   /** One-click set-up of Claude, ChatGPT (codex) or Grok in Terminal. Absent in an older desktop shell. */
   harness?: {
     setup: (id: 'claude' | 'codex' | 'grok') => Promise<{ ok: boolean; error?: string }>;
@@ -50,6 +52,15 @@ interface DesktopBridge {
 // Undefined when the page is rendered outside a browser (tests render on the server).
 export const desktopBridge: DesktopBridge | undefined =
   typeof window === 'undefined' ? undefined : (window as unknown as { bearrokDesktop?: DesktopBridge }).bearrokDesktop;
+
+/**
+ * Keeps the `is-fullscreen` class on the page in step with the desktop window, so the sidebar and
+ * top bars use the room the hidden window buttons leave. Returns a function that stops it.
+ */
+export function followFullScreen(bridge: DesktopBridge | undefined, root: HTMLElement): () => void {
+  if (!bridge?.onFullScreen) return () => {};
+  return bridge.onFullScreen((on) => root.classList.toggle('is-fullscreen', on));
+}
 
 const KEY = 'bearrok.allowed';
 

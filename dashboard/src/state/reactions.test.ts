@@ -29,7 +29,7 @@ describe('reactionSends', () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('./live.tsx', import.meta.url), 'utf8');
     const start = source.indexOf('const send = reactionSends');
-    const block = source.slice(start, source.indexOf('const sample = SAMPLE_FEED', start));
+    const block = source.slice(start, source.indexOf('const value = useMemo<LiveValue>', start));
     expect(block).toContain('reactionSends(before, now, known)');
     expect(block).toContain('/api/students/${who}/interactions');
     expect(block).toContain('JSON.stringify({ opportunityId: id, action })');

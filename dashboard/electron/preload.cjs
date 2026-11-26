@@ -12,6 +12,12 @@ contextBridge.exposeInMainWorld('bearrokDesktop', {
   openPermission: (kind) => ipcRenderer.invoke('permissions:open', kind),
   /** Brings the app window to the front, for example after a notification is clicked. */
   focusWindow: () => ipcRenderer.send('window:focus'),
+  /** Calls back with true or false whenever the window enters or leaves full screen. Returns a function that stops listening. */
+  onFullScreen: (callback) => {
+    const listener = (_event, on) => callback(on === true);
+    ipcRenderer.on('window:fullscreen', listener);
+    return () => ipcRenderer.removeListener('window:fullscreen', listener);
+  },
   /** The menu bar icon: what it shows, and what the student picked from it. */
   menuBar: {
     /** { signedIn, searching, deadlines: [{ label, path }], top: { label, path } | null } */

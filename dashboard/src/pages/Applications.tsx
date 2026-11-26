@@ -82,9 +82,7 @@ export function Applications() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeKey, live.status]);
 
-  // The public showcase shows the sample student's applications instead of saying they cannot be reached.
-  const unreachable = live.status === 'offline';
-  const offline = unreachable && !live.sample;
+  const offline = live.status === 'offline';
   const all = useMemo(
     () => (offline ? [] : mergeApplications(live.applications, records, [...live.savedCards, ...live.opportunities])),
     [offline, live.applications, records, live.savedCards, live.opportunities],
@@ -128,7 +126,7 @@ export function Applications() {
               </button>
             ))}
           </div>
-          <NewApplicationButton disabled={unreachable} />
+          <NewApplicationButton disabled={offline} />
         </div>
       }
     >

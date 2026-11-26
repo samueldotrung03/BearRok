@@ -4,7 +4,6 @@ import { modelName } from '../lib/modelName.ts';
 
 export interface BadgeInput {
   searching: boolean;
-  sampleFeed: boolean;
   status: 'connecting' | 'connected' | 'offline';
   usingLive: boolean;
   provider: 'grok' | 'claude' | 'gpt' | 'simulated';
@@ -19,7 +18,6 @@ export function dataBadgeText(input: BadgeInput): { long: string; short: string 
   const named = modelName(input.provider);
   if (input.searching) return named ? { long: `${named} is searching…`, short: named } : { long: 'Agents searching…', short: 'Searching' };
   if (input.outOfCredit && input.status === 'connected') return { long: 'Grok balance used up', short: 'No credit' };
-  if (input.sampleFeed && input.status !== 'connected') return { long: 'Sample postings', short: 'Samples' };
   if (input.status === 'offline') return { long: 'Agents offline', short: 'Offline' };
   if (input.status === 'connecting') return { long: 'Connecting…', short: 'Connecting' };
   if (named) return input.usingLive ? { long: `Live · ${named}`, short: named } : { long: `${named} · no results yet`, short: named };

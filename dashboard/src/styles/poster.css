@@ -1,0 +1,494 @@
+/* ---------- For You poster (components/feed/ReelPoster.tsx) ----------
+   Every size is in card units (cqw), so the poster keeps its proportions at any window size.
+   The poster's words and picture sit in the top three quarters; the card's caption and buttons
+   use the rest. The picture's frame size is worked out in lib/poster.ts (planArt). */
+
+.poster {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  overflow: hidden;
+  color: var(--p-text);
+  background: var(--p-bg);
+  pointer-events: none;
+  --p-head-font: var(--font-sans);
+  --p-head-weight: 800;
+  --p-head-track: -0.035em;
+  --p-head-leading: 0.98;
+}
+
+.poster[data-video='true'] {
+  background: transparent;
+}
+
+/* ---- type, matched to the flyer ---- */
+
+.poster[data-typeface='grotesk'] {
+  --p-head-font: 'Space Grotesk Variable', var(--font-sans);
+  --p-head-weight: 700;
+  --p-head-track: -0.04em;
+}
+
+.poster[data-typeface='serif'] {
+  --p-head-font: var(--font-display);
+  --p-head-weight: 400;
+  --p-head-track: -0.01em;
+  --p-head-leading: 1;
+}
+
+.poster[data-typeface='bold-serif'] {
+  --p-head-font: 'Playfair Display Variable', Georgia, serif;
+  --p-head-weight: 800;
+  --p-head-track: -0.015em;
+  --p-head-leading: 1.02;
+}
+
+.poster[data-typeface='condensed'] {
+  --p-head-font: 'Oswald Variable', 'Arial Narrow', sans-serif;
+  --p-head-weight: 600;
+  --p-head-track: 0;
+  --p-head-leading: 1.02;
+}
+
+/* ---- backgrounds ---- */
+
+.poster-trace,
+.poster-full {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A remade flyer: a faint, blurred trace of it behind, washed with its background colour. */
+.poster-trace {
+  filter: blur(40px) saturate(1.3);
+  transform: scale(1.3);
+  opacity: 0.35;
+}
+
+/* A photo under the words fills the card, with the words' side darkened. */
+.poster-full {
+  object-position: var(--p-focus);
+}
+
+.poster[data-overlay='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgb(0 0 0 / 0.5) 0%, transparent 20%),
+    linear-gradient(0deg, rgb(0 0 0 / 0.35) 25%, transparent 60%);
+}
+
+/* No picture: a soft glow of the accent colour and a faint grid, like a printed poster. */
+.poster-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(80% 50% at 85% 10%, color-mix(in srgb, var(--p-accent) 35%, transparent), transparent 70%),
+    linear-gradient(color-mix(in srgb, var(--p-text) 5%, transparent) 1px, transparent 1px) 0 0 / 7cqw 7cqw,
+    linear-gradient(90deg, color-mix(in srgb, var(--p-text) 5%, transparent) 1px, transparent 1px) 0 0 / 7cqw 7cqw;
+}
+
+/* ---- top row: organizer and badge ---- */
+
+.poster-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 3cqw;
+  padding: 6.5cqw 7cqw 0;
+}
+
+.poster-org {
+  overflow: hidden;
+  font-size: 3.6cqw;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.poster[data-overlay='true'] .poster-org {
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.35);
+}
+
+.poster-logo {
+  display: grid;
+  place-items: center;
+  width: 15cqw;
+  height: 15cqw;
+  padding: 2cqw;
+  border-radius: 4cqw;
+  background: white;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.2);
+}
+
+.poster-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.poster-badge {
+  flex-shrink: 0;
+  padding: 1.6cqw 3cqw;
+  font-family: 'Geist Mono Variable', ui-monospace, monospace;
+  font-size: 2.7cqw;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--p-bg);
+  background: var(--p-text);
+}
+
+.poster[data-details='pill'] .poster-badge {
+  padding: 1.6cqw 3.6cqw;
+  border-radius: 999px;
+  font-family: inherit;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: color-mix(in srgb, var(--p-bg) 92%, black);
+  background: var(--p-accent);
+}
+
+.poster[data-details='plain'] .poster-badge {
+  padding: 0 0 1cqw;
+  border-bottom: 2px solid var(--p-accent);
+  color: var(--p-text);
+  background: none;
+}
+
+.poster[data-details='boxed'] .poster-badge::before {
+  content: '';
+  display: inline-block;
+  width: 1.6cqw;
+  height: 1.6cqw;
+  margin-right: 1.6cqw;
+  vertical-align: 0.15em;
+  background: var(--p-accent);
+}
+
+/* ---- the column of words and picture ---- */
+
+.poster-body {
+  position: absolute;
+  inset: 17cqw 7cqw 24% 7cqw;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  /* "safe": words that do not fit run off the bottom, where they are measured and trimmed. */
+  justify-content: safe center;
+  gap: 3.4cqw;
+}
+
+.poster-body {
+  overflow: hidden;
+}
+
+.poster-pitch[data-short='true'] {
+  -webkit-line-clamp: 2;
+}
+
+.poster-body[data-placement='overlay'] {
+  justify-content: safe flex-end;
+}
+
+/* Over a photo whose subject is low, the words go to the top instead, clear of it. */
+.poster[data-subject='low'] .poster-body[data-placement='overlay'] {
+  justify-content: flex-start;
+}
+
+.poster-body[data-placement='top'] {
+  justify-content: flex-start;
+}
+
+.poster-words {
+  display: flex;
+  flex-direction: column;
+  gap: 2.6cqw;
+  min-width: 0;
+}
+
+/* In the details window the frame is taller than a card: what the words and picture do not fill
+   is shared out between them, picture at the top, facts near the bottom. */
+.poster[data-context='details'] .poster-body:not([data-placement='overlay']):not([data-placement='side']) {
+  justify-content: space-between;
+}
+
+/* A tall picture stands beside the words. */
+.poster-side {
+  display: flex;
+  align-items: center;
+  gap: 4cqw;
+}
+
+.poster-side .poster-words {
+  flex: 1;
+}
+
+/* ---- the picture's frame ---- */
+
+.poster-crop {
+  position: relative;
+  flex-shrink: 0;
+  align-self: center;
+  overflow: hidden;
+  border-radius: 2.4cqw;
+  box-shadow: 0 2cqw 6cqw -2cqw rgb(0 0 0 / 0.45);
+}
+
+.poster-crop img {
+  position: absolute;
+  max-width: none;
+}
+
+.poster-crop[data-framed='true'] {
+  outline: 1.4cqw solid color-mix(in srgb, var(--p-text) 92%, transparent);
+  outline-offset: -0.2cqw;
+}
+
+.poster[data-light='true'] .poster-crop {
+  box-shadow: 0 2cqw 6cqw -3cqw rgb(0 0 0 / 0.25);
+}
+
+/* ---- the words ---- */
+
+.poster-kicker {
+  font-family: 'Geist Mono Variable', ui-monospace, monospace;
+  font-size: 3cqw;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  opacity: 0.85;
+}
+
+.poster[data-details='boxed'] .poster-kicker::before {
+  content: '// ';
+}
+
+.poster-headline {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--p-head-font);
+  font-size: var(--p-headline);
+  font-weight: var(--p-head-weight);
+  line-height: var(--p-head-leading);
+  letter-spacing: var(--p-head-track);
+  text-wrap: balance;
+}
+
+.poster[data-upper='true'] .poster-headline {
+  text-transform: uppercase;
+}
+
+.poster-accent {
+  color: var(--p-accent);
+}
+
+.poster-pitch {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: 3.9cqw;
+  font-weight: 500;
+  line-height: 1.32;
+  opacity: 0.92;
+}
+
+.poster-pitch strong {
+  font-weight: 800;
+  color: var(--p-accent);
+}
+
+.poster-stats {
+  display: flex;
+  align-items: flex-end;
+  gap: 4cqw 8cqw;
+}
+
+.poster-stats div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column-reverse;
+}
+
+.poster-stats dd {
+  font-family: var(--p-head-font);
+  font-size: 8cqw;
+  font-weight: var(--p-head-weight);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.poster[data-typeface='serif'] .poster-stats dd {
+  font-family: var(--font-sans);
+  font-weight: 700;
+}
+
+.poster-stats div:first-child dd {
+  color: var(--p-accent);
+}
+
+/* Three stats share the width: smaller, and a long one wraps rather than running off. */
+.poster-stats:has(div:nth-child(3)) {
+  gap: 4cqw 5cqw;
+}
+
+.poster-stats:has(div:nth-child(3)) dd {
+  font-size: 6cqw;
+}
+
+.poster-stats dt {
+  margin-top: 1.4cqw;
+  font-family: 'Geist Mono Variable', ui-monospace, monospace;
+  font-size: 2.5cqw;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.poster-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2cqw;
+}
+
+.poster-chips li {
+  padding: 1.5cqw 2.8cqw;
+  font-size: 3cqw;
+  font-weight: 600;
+}
+
+.poster[data-details='boxed'] .poster-chips li {
+  border: 1px solid color-mix(in srgb, var(--p-text) 35%, transparent);
+}
+
+.poster[data-details='boxed'] .poster-chips li::before {
+  content: '';
+  display: inline-block;
+  width: 1.5cqw;
+  height: 1.5cqw;
+  margin-right: 1.8cqw;
+  vertical-align: 0.15em;
+  background: var(--p-accent);
+}
+
+.poster[data-details='pill'] .poster-chips li {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-text) 12%, transparent);
+}
+
+.poster[data-details='plain'] .poster-chips li {
+  padding: 0;
+  margin-right: 2cqw;
+}
+
+.poster[data-details='plain'] .poster-chips li::before {
+  content: '•';
+  margin-right: 1.4cqw;
+  color: var(--p-accent);
+}
+
+/* Formal: everything centred. */
+.poster[data-layout='formal'] .poster-body,
+.poster[data-layout='formal'] .poster-words {
+  align-items: center;
+  text-align: center;
+}
+
+.poster[data-layout='formal'] .poster-headline {
+  align-items: center;
+}
+
+.poster[data-layout='formal'] .poster-stats,
+.poster[data-layout='formal'] .poster-chips {
+  justify-content: center;
+}
+
+.poster[data-layout='formal'] .poster-stats div {
+  align-items: center;
+}
+
+/* Words over a photo: dark caption boxes. */
+.poster[data-overlay='true'] .poster-kicker {
+  align-self: flex-start;
+  padding: 1.4cqw 2.6cqw;
+  color: #111;
+  background: var(--p-accent);
+  opacity: 1;
+}
+
+.poster[data-overlay='true'] .poster-kicker::before {
+  content: none;
+}
+
+.poster[data-overlay='true'] .poster-headline,
+.poster[data-overlay='true'] .poster-pitch {
+  padding: 3.4cqw 4cqw;
+  border-radius: 2.4cqw;
+  background: rgb(8 10 16 / 0.82);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.poster[data-overlay='true'] .poster-words {
+  gap: 0;
+}
+
+.poster[data-overlay='true'] .poster-kicker {
+  margin-bottom: 2.4cqw;
+}
+
+.poster[data-overlay='true'] .poster-headline:has(+ .poster-pitch) {
+  padding-bottom: 2cqw;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.poster[data-overlay='true'] .poster-headline + .poster-pitch {
+  padding-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.poster[data-overlay='true'] .poster-stats {
+  gap: 2cqw;
+}
+
+.poster[data-overlay='true'] .poster-stats div {
+  padding: 2cqw 3cqw;
+  border-radius: 2cqw;
+  background: rgb(8 10 16 / 0.72);
+}
+
+.poster[data-overlay='true'] .poster-stats dd {
+  font-size: 6cqw;
+}
+
+.poster[data-overlay='true'] .poster-chips li {
+  border: none;
+  background: rgb(8 10 16 / 0.6);
+}
+
+.poster-credit {
+  position: absolute;
+  top: 17cqw;
+  right: 4cqw;
+  z-index: 3;
+  max-width: 60%;
+  overflow: hidden;
+  padding: 0.6cqw 2cqw;
+  border-radius: 999px;
+  font-size: 2.4cqw;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: rgb(255 255 255 / 0.9);
+  background: rgb(0 0 0 / 0.45);
+  pointer-events: auto;
+}

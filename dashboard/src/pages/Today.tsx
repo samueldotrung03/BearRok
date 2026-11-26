@@ -8,7 +8,6 @@ import { AgentsCard, NeedsCard, PipelineCard, ProfileCard, QuickActions, Roadmap
 import { NewForYou } from '../components/today/Sections.tsx';
 import { Details } from '../components/OpportunityCard.tsx';
 import { Page } from '../components/Page.tsx';
-import { opportunities as sampleOpportunities } from '../data/sample.ts';
 import { calendarItems, dayKey, postingPool } from '../lib/calendar.ts';
 import { mergeItems, type PersonalItem } from '../lib/cal/items.ts';
 import { goalNeeds, headline, pipeline, profileStrength, quickReminder, roadmapGlance, upcoming, weekStrip } from '../lib/today/dashboard.ts';
@@ -27,8 +26,8 @@ export function Today() {
   const list = useOpportunities();
   const [details, setDetails] = useState<Opportunity | null>(null);
   const [status, setStatus] = useState<Undoable | null>(null);
-  // Sample cards only in the public showcase. A connected app reads the feed and the saved list.
-  const postings = useMemo(() => (live.sample ? sampleOpportunities : postingPool(false, list, live.savedCards)), [live.sample, live.savedCards, list]);
+  // The page reads the feed and the saved list.
+  const postings = useMemo(() => postingPool(list, live.savedCards), [live.savedCards, list]);
 
   // The student's own reminders are the calendar's: one list, shown and added in both places.
   const [personal, setPersonal] = useLocal<PersonalItem[]>('bearrok.calendar.personal', []);

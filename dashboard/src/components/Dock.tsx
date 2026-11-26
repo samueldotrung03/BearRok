@@ -21,7 +21,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink, useNavigate } from 'react-router';
-import { agentEvents as sampleEvents, agents as sampleAgentTeam, roadmaps } from '../data/sample.ts';
+import { roadmaps } from '../data/sample.ts';
 import { matchesShortcut, useShortcuts } from '../lib/shortcuts.ts';
 import { relativeTime } from '../lib/time.ts';
 import { useLive, useOpportunities, type LiveAgents } from '../state/live.tsx';
@@ -85,7 +85,7 @@ function UsageWindow({ onClose }: { onClose: () => void }) {
   const shown = useOpportunities();
   const ref = useRef<HTMLDialogElement>(null);
   const live = useLive();
-  const team = agentsOf(live);
+  const team = live.agents;
   const all = everyAgent(team);
   const running = all.filter((node) => node.status === 'running');
   const agentEvents = team?.events ?? [];
@@ -119,7 +119,7 @@ function UsageWindow({ onClose }: { onClose: () => void }) {
           <h2 id="usage-title" className="flex items-center gap-2 text-sm font-semibold">
             Your agents
             <span className="font-normal text-white/65">
-              {live.sample ? 'sample mode' : live.status === 'offline' ? 'offline' : all.length === 0 ? 'no search yet' : `${running.length} of ${all.length} working`}
+              {live.status === 'offline' ? 'offline' : all.length === 0 ? 'no search yet' : `${running.length} of ${all.length} working`}
             </span>
           </h2>
           <button type="button" onClick={() => ref.current?.close()} aria-label="Close" className="usage-close">
@@ -184,22 +184,11 @@ function UsageWindow({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** The sample agent team, shown in the public showcase where no backend run exists. */
-const SAMPLE_AGENTS: LiveAgents = {
-  ...sampleAgentTeam,
-  validators: [],
-  presenter: null,
-  events: sampleEvents,
-  running: false,
-  summary: 'Sample search: invented agents and activity, to show what this panel looks like.',
-};
-const agentsOf = (live: { agents: LiveAgents | null; sample: boolean }) => live.agents ?? (live.sample ? SAMPLE_AGENTS : null);
-
 /** A one-line summary in the dock. Clicking it opens the full report in a window. */
 function DockUsage() {
   const [open, setOpen] = useState(false);
   const live = useLive();
-  const all = everyAgent(agentsOf(live));
+  const all = everyAgent(live.agents);
   const running = all.filter((node) => node.status === 'running').length;
 
   return (
@@ -211,7 +200,7 @@ function DockUsage() {
             Your agents
           </span>
           <span className="mt-0.5 text-[11px] text-white/60">
-            {live.sample ? 'Sample mode' : live.status === 'offline' ? 'Offline' : all.length === 0 ? 'No search yet' : running > 0 ? `${running} of ${all.length} working` : 'Latest search finished'}
+            {live.status === 'offline' ? 'Offline' : all.length === 0 ? 'No search yet' : running > 0 ? `${running} of ${all.length} working` : 'Latest search finished'}
           </span>
         </span>
       </button>

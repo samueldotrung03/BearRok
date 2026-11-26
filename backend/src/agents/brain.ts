@@ -3,6 +3,7 @@
 import type { CalendarEventInput, EventAsk, EventVerdict } from './eventSorter.ts';
 import type { AgentGroup } from './types.ts';
 import type { MemorySummary, Assignment, Brief, Candidate, ApplicationInfo, FoundDeadline, Lead, OppType, Profile, ReviewFocus, ScoutSpec, Verdict, Opportunity } from './types.ts';
+import type { ArtReview, PosterDraft } from './poster.ts';
 
 export interface MasterInput {
   profile: Profile;
@@ -65,6 +66,23 @@ export interface Brain {
    * Null when the agents cannot draw (the simulated agents never do).
    */
   illustrate(candidate: Candidate): Promise<string | null>;
+  /**
+   * Presentation agent: designs the For You poster for one card (poster.ts). `flyer` is the
+   * organizer's flyer saved on this computer, when the card's picture is one. Null when the agents
+   * cannot design (the simulated agents never do; the dashboard then builds one from the facts).
+   */
+  designPoster(o: Opportunity, flyer: string | null): Promise<PosterDraft | null>;
+  /**
+   * Presentation agent, second look: checks the part of the picture a poster shows (`part`, cut
+   * out of `full` at `box`) for printed words, a cut-through subject or empty background, and
+   * gives a better box. Null when the agents cannot look at pictures.
+   */
+  reviewPosterArt(full: string, part: string, box: { x: number; y: number; w: number; h: number }): Promise<ArtReview | null>;
+  /**
+   * Presentation agent: draws the Feed tab's icon (SVG) for a card with no logo, in the flyer's
+   * style when `flyer` is given, else in `palette`. Null when the agents cannot draw.
+   */
+  drawIcon(o: Opportunity, palette: { background: string; text: string; accent: string } | null, flyer: string | null): Promise<string | null>;
   /** Sort the student's own calendar events into career-related and personal. */
   sortEvents(events: CalendarEventInput[]): Promise<EventVerdict[]>;
   /** Turn a sentence such as "interview with Stripe Friday at 2" into an event, or ask for what is missing. */

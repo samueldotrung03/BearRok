@@ -6,6 +6,9 @@ import { remindersFor } from '../lib/applications.ts';
 import { CalendarStatus } from './CalendarStatus.tsx';
 import { buildOpportunityRoadmap } from '../lib/roadmap.ts';
 import { daysUntil, dueLabel, relativeTime, shortDate } from '../lib/time.ts';
+import { useLogoBackdrop } from '../lib/logoBackdrop.ts';
+import { posterFor } from '../lib/poster.ts';
+import { ReelPoster } from './feed/ReelPoster.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import type { Opportunity } from '../types.ts';
 import { FACTOR_LABEL, matchLevel, matchPercent } from '../lib/match.ts';
@@ -39,9 +42,34 @@ function LikeButton({ id }: { id: string }) {
  * has no empty bars. A logo gets room around it on a light panel. Stock photos and AI
  * illustrations carry their credit. Without a picture, or if it fails to load, a tinted icon panel.
  */
-export function Cover({ opportunity: o, className = '', box = 'absolute inset-0' }: { opportunity: Opportunity; className?: string; box?: string }) {
+export function Cover({
+  opportunity: o,
+  className = '',
+  box = 'absolute inset-0',
+  plain = false,
+}: {
+  opportunity: Opportunity;
+  className?: string;
+  box?: string;
+  /**
+   * No blurred copy round the picture: a photo fills the cover edge to edge (cropped to fit), and
+   * a logo sits large and centred on its own edge colour, or on white. Used by the Feed tab.
+   */
+  plain?: boolean;
+}) {
   const [failed, setFailed] = useState(false);
   const meta = typeMeta[o.type];
+  // The Feed tab shows a card's logo, or, for a card with no logo, the icon the agents drew for it.
+  const icon = plain && o.imageKind !== 'logo' && o.icon ? o.icon : null;
+  const edge = useLogoBackdrop(icon ?? (plain && o.imageKind === 'logo' && !failed ? o.image : null));
+  if (icon) {
+    const frame = /\babsolute\b/.test(className) ? '' : 'relative';
+    return (
+      <div className={`${frame} overflow-hidden ${className}`} style={{ background: edge?.kind === 'solid' ? edge.colour : posterFor(o).palette.background }}>
+        <img src={icon} alt="" aria-hidden="true" className="cover-icon absolute inset-0 m-auto aspect-square h-[78%] rounded-[22%] shadow-[0_10px_28px_-10px_rgb(0_0_0/0.45)]" />
+      </div>
+    );
+  }
   if (!o.image || failed) {
     return (
       <div className={`grid place-items-center ${meta.tint} ${className}`}>
@@ -51,7 +79,42 @@ export function Cover({ opportunity: o, className = '', box = 'absolute inset-0'
   }
   // A class list that already places the cover keeps it; otherwise the layers need a frame.
   const frame = /\babsolute\b/.test(className) ? '' : 'relative';
-  const logo = o.imageKind === 'logo';
+  // A "logo" whose edge is mixed is really a photo, and fills the cover like one.
+  const logo = o.imageKind === 'logo' && !(plain && edge?.kind === 'mixed');
+  if (plain) {
+    return (
+      <div className={`${frame} overflow-hidden ${className}`} style={logo ? { background: edge?.kind === 'solid' ? edge.colour : 'white' } : undefined}>
+        {logo ? (
+          <img
+            src={o.image}
+            alt={`${o.organizer} logo`}
+            loading="lazy"
+            onError={() => setFailed(true)}
+            // Held inside the tile's padding, and never shown at more than twice its own size, so a small logo is not blurred.
+            onLoad={(event) => {
+              const img = event.currentTarget;
+              if (img.naturalWidth) img.style.maxWidth = `${img.naturalWidth * 2}px`;
+              if (img.naturalHeight) img.style.maxHeight = `${img.naturalHeight * 2}px`;
+            }}
+            className="cover-logo absolute inset-[12%] m-auto h-[76%] w-[76%] object-contain"
+          />
+        ) : (
+          <img src={o.image} alt="" loading="lazy" onError={() => setFailed(true)} className="cover-whole absolute inset-0 size-full object-cover" />
+        )}
+        {o.imageCredit && o.imageKind === 'stock' && (
+          <span className="absolute right-2 bottom-2 z-10 max-w-[80%] truncate rounded-full bg-black/45 px-2 py-0.5 text-[10px] text-white/90 backdrop-blur">
+            {o.imageCreditUrl ? (
+              <a href={o.imageCreditUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+                {o.imageCredit}
+              </a>
+            ) : (
+              o.imageCredit
+            )}
+          </span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className={`${frame} overflow-hidden ${logo ? 'bg-white' : 'bg-slate-800'} ${className}`}>
       <img src={o.image} alt="" aria-hidden="true" loading="lazy" className={`cover-fill absolute inset-0 size-full object-cover ${logo ? 'opacity-25' : ''}`} />
@@ -344,42 +407,40 @@ export function Details({ opportunity: o, onClose }: { opportunity: Opportunity;
       </button>
 
       <div className="detail-grid">
-        <div className="detail-photo">
-          <Cover opportunity={o} className="absolute inset-0 size-full" />
-          <div className="detail-photo-shade" aria-hidden="true" />
-          <div className="relative mt-auto p-6 text-white">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink">
-              <meta.icon className="size-3.5" aria-hidden="true" />
-              {meta.label}
-            </span>
-            <h2 id={`${o.id}-dialog-title`} className="mt-3 font-display text-[34px] leading-[1.1] text-balance">
-              {o.title}
-            </h2>
-            <p className="mt-2 font-semibold text-white/90">{o.organizer}</p>
-            <div className="mt-3 flex flex-col gap-1.5 text-sm text-white/85">
-              {place && <Fact icon={MapPin}>{place}</Fact>}
-              {o.deadline ? (
-                <Fact icon={Clock}>{dueLabel(o.deadline)}</Fact>
-              ) : (
-                o.startTime && <Fact icon={CalendarDays}>{`Starts ${shortDate(o.startTime)}`}</Fact>
-              )}
-              {o.unknowns.map((unknown) => (
-                <Fact key={unknown.field} icon={CircleDashed}>
-                  {unknown.label}
-                </Fact>
-              ))}
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <span className="text-sm font-semibold">{o.match ? 'Match' : 'Fit'}</span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/25">
-                <div className="h-full rounded-full bg-white" style={{ width: `${fit}%` }} />
-              </div>
-              <span className="text-sm text-white/80">{o.match ? `${fit}%` : `${fit} of 100`}</span>
-            </div>
-          </div>
+        {/* The same poster as the card on For you, given the whole panel; its frame stretches to the panel's shape. */}
+        <div className="detail-photo detail-poster">
+          <ReelPoster opportunity={o} context="details" titleId={`${o.id}-dialog-title`} />
         </div>
 
         <div className="detail-col">
+          {/* What used to sit on the photo: the kind, place and date, what is not known, and the fit. */}
+          <div className="mb-4">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-2">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${meta.tint}`}>
+                <meta.icon className="size-3.5" aria-hidden="true" />
+                {meta.label}
+              </span>
+              {place && <Fact icon={MapPin}>{place}</Fact>}
+              {o.deadline ? <Fact icon={Clock}>{dueLabel(o.deadline)}</Fact> : o.startTime && <Fact icon={CalendarDays}>{`Starts ${shortDate(o.startTime)}`}</Fact>}
+            </div>
+            {o.unknowns.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1 text-sm text-ink-3">
+                {o.unknowns.map((unknown) => (
+                  <Fact key={unknown.field} icon={CircleDashed}>
+                    {unknown.label}
+                  </Fact>
+                ))}
+              </div>
+            )}
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-sm font-semibold">{o.match ? 'Match' : 'Fit'}</span>
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-brand-soft">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${fit}%` }} />
+              </div>
+              <span className="text-sm text-ink-3">{o.match ? `${fit}%` : `${fit} of 100`}</span>
+            </div>
+          </div>
+
           <div className="flex gap-3 rounded-2xl bg-brand-soft/70 p-4">
             <Sparkles className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden="true" />
             <p className="text-[15px] leading-relaxed text-ink-2">
@@ -498,12 +559,15 @@ export function OpportunityRow({
   onDismiss,
   onRoadmap = false,
   actions,
+  plainCover = false,
 }: {
   opportunity: Opportunity;
   onDismiss: (o: Opportunity) => void;
   onRoadmap?: boolean;
   /** More controls at the end of the row's button line, such as the application status on a Saved row. */
   actions?: React.ReactNode;
+  /** The picture without a blurred copy round it, logos fitted to the tile (the Feed tab). */
+  plainCover?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // A click still opens the details. A double-click likes, and closes the details if the
@@ -518,7 +582,7 @@ export function OpportunityRow({
     <article className="feed-row" aria-labelledby={`${o.id}-row`}>
       <div className="feed-row-layout">
       <div className="feed-row-media feed-row-photo photo-like-target" {...photoHandlers}>
-        <Cover opportunity={o} className="absolute inset-0 size-full" />
+        <Cover opportunity={o} className="absolute inset-0 size-full" plain={plainCover} />
         <PhotoLikeBurst tick={burst} />
       </div>
       {/* Positioned so the title's stretched hit target covers the text, not the photo. */}

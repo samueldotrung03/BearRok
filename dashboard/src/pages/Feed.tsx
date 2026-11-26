@@ -24,6 +24,7 @@ import { formatLabel, typeMeta } from '../components/meta.ts';
 import { Cover, Details, MatchChip, OpportunityRow } from '../components/OpportunityCard.tsx';
 import { PhotoLikeBurst, usePhotoLike } from '../components/PhotoLike.tsx';
 import { emptyFeedCopy } from '../state/feedCopy.ts';
+import { ReelPoster } from '../components/feed/ReelPoster.tsx';
 import { DataBadge, useLive, useOpportunities } from '../state/live.tsx';
 import { WhyThis } from '../components/WhyThis.tsx';
 import { ProfileMenu } from '../components/ProfileMenu.tsx';
@@ -195,7 +196,8 @@ function Slide({
     <section className="reel-slide" aria-labelledby={`${o.id}-title`}>
       <div className="reel-stage">
         <article className="reel-card">
-          <ReelVideo opportunity={o} active={active} near={near} />
+          {o.video && <ReelVideo opportunity={o} active={active} near={near} />}
+          <ReelPoster opportunity={o} overVideo={Boolean(o.video)} />
           <div className="reel-shade" aria-hidden="true" />
 
           <div className="reel-body">
@@ -217,14 +219,11 @@ function Slide({
               </li>
             </ul>
 
-            <h2 id={`${o.id}-title`} className="mt-3 font-display text-[34px] leading-[1.05] text-balance">
-              {o.title}
-            </h2>
-            <p className="mt-1.5 text-[15px] font-semibold text-white/90">{o.organizer}</p>
+            <p className="mt-3 text-[15px] font-semibold text-white">{o.organizer}</p>
 
-            <p className="mt-3 flex gap-2 text-sm leading-relaxed text-white/90">
+            <p className="mt-1.5 flex gap-2 text-sm leading-relaxed text-white/90">
               <Sparkle weight="fill" className="mt-1 size-3.5 shrink-0" aria-hidden="true" />
-              <span className="line-clamp-3">{o.fitExplanation}</span>
+              <span className="line-clamp-2">{o.fitExplanation}</span>
             </p>
 
             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px] font-medium text-white/85">
@@ -355,13 +354,7 @@ export function Feed() {
   // The ranking runs again on every save, like and dislike, but only for cards the student has
   // not reached yet: cards already scrolled past keep their place, so nothing moves under the thumb.
   const [seen, setSeen] = useState<string[]>([]);
-  const live = useMemo(() => {
-    const ranked = rankFeedDetailed(opportunities, state);
-    // The public showcase leads with the real postings Grok found, in rank order, then the samples.
-    if (!agentsLive.sample) return ranked;
-    const real = (r: RankedOpportunity) => r.opportunity.origin === 'live';
-    return [...ranked.filter(real), ...ranked.filter((r) => !real(r))];
-  }, [opportunities, state, agentsLive.sample]);
+  const live = useMemo(() => rankFeedDetailed(opportunities, state), [opportunities, state]);
   const slides = useMemo(() => {
     const byId = new Map(live.map((r) => [r.opportunity.id, r]));
     const kept = seen.map((id) => byId.get(id)).filter((r): r is RankedOpportunity => r !== undefined);
@@ -568,7 +561,6 @@ export function Feed() {
                 </h2>
                 <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-ink-2">
                   {emptyFeedCopy({
-                    sample: agentsLive.sample,
                     offline: agentsLive.status === 'offline',
                     searching: agentsLive.searching,
                     shown: slides.length,
@@ -857,6 +849,7 @@ export function Feed() {
                       <li key={o.id}>
                         <OpportunityRow
                           opportunity={o}
+                          plainCover
                           onDismiss={dismiss}
                           onRoadmap={plan.steps.some((step) => step.opportunityId === o.id && !state.doneSteps.includes(step.id))}
                         />

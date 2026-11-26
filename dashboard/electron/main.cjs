@@ -44,6 +44,11 @@ function createWindow() {
   });
 
   window.once('ready-to-show', () => window.show());
+  // In full screen macOS hides the window buttons, so the page can stop leaving room for them.
+  const sendFullScreen = () => window.webContents.send('window:fullscreen', window.isFullScreen());
+  window.on('enter-full-screen', sendFullScreen);
+  window.on('leave-full-screen', sendFullScreen);
+  window.webContents.on('did-finish-load', sendFullScreen);
   mainWindow = window;
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;

@@ -14,7 +14,7 @@ import { Details } from '../components/OpportunityCard.tsx';
 import { Page } from '../components/Page.tsx';
 import { pathExtras, quizQuestions } from '../data/discover-extra.ts';
 import { pathGroups } from '../data/fields.ts';
-import { careerPaths, opportunities as sampleOpportunities } from '../data/sample.ts';
+import { careerPaths } from '../data/sample.ts';
 import type { AnswerAction } from '../lib/discover/ask.ts';
 import { askerId, useCareerGuide, useGuideList, type StudentContext } from '../lib/discover/guide.ts';
 import { rankPaths, type PathMatch, type QuizAnswers } from '../lib/discover/match.ts';
@@ -23,7 +23,7 @@ import { useLocal } from '../lib/useLocal.ts';
 import { useAuth } from '../auth/AuthProvider.tsx';
 import { inCareerInterests, withCareerInterest, withoutCareerInterest } from '../lib/discover/careerMemory.ts';
 import { careerKey } from '../lib/discover/names.ts';
-import { SAMPLE_FEED, useLive } from '../state/live.tsx';
+import { useLive } from '../state/live.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import '../styles/discover.css';
 
@@ -53,8 +53,8 @@ export function Discover() {
 
   const auth = useAuth();
   const live = useLive();
-  // The quiz and its details use the student's postings. The sample set is only the public showcase.
-  const cards = live.sample ? sampleOpportunities : live.opportunities;
+  // The quiz and its details use the student's postings.
+  const cards = live.opportunities;
   const by = useMemo(() => askerId(auth.user?.uid), [auth.user?.uid]);
   // What the agents may know about the student when they add to a part for them; their notes come first.
   const student: StudentContext = useMemo(
@@ -85,10 +85,6 @@ export function Discover() {
     const next = added ? withoutCareerInterest(state.profile.careerInterests, guide) : withCareerInterest(state.profile.careerInterests, guide.title);
     if (!next) return;
     dispatch({ type: 'setProfile', profile: { careerInterests: next } });
-    if (SAMPLE_FEED) {
-      setInterestNote('Kept on this device. This public sample copy has no agents to search for it.');
-      return;
-    }
     const saved = await auth.saveProfile({ careerInterests: next });
     // The roadmap ranks a path first only when this career is one of its paths.
     const path = pathByKey[careerKey(guide.title)] ?? pathByKey[careerKey(guide.slug)];
@@ -126,11 +122,8 @@ export function Discover() {
       keys.forEach((k) => seen.add(k));
       out.push(title);
     };
-    // The public showcase offers only the careers it has sample guides for.
-    if (!SAMPLE_FEED) {
-      add(titles[state.goalId]);
-      ranked.slice(0, 3).forEach((m) => add(titles[m.pathId]));
-    }
+    add(titles[state.goalId]);
+    ranked.slice(0, 3).forEach((m) => add(titles[m.pathId]));
     kept.forEach((g) => add(g.title, g.slug));
     return out;
   }, [state.goalId, ranked, kept]);
@@ -310,7 +303,7 @@ export function Discover() {
               onSearchAgain={searchAgain}
               onRetryPart={retryPart}
               offline={offline}
-              interest={SAMPLE_FEED && guide.provider === 'simulated' ? undefined : { added: inCareerInterests(state.profile.careerInterests, guide), onToggle: () => void toggleInterest(), note: interestNote }}
+              interest={{ added: inCareerInterests(state.profile.careerInterests, guide), onToggle: () => void toggleInterest(), note: interestNote }}
               onAddMore={addMore}
               onSuggest={suggest}
               goalAction={guidePath && guidePath !== state.goalId ? () => act({ kind: 'setGoal', pathId: guidePath, label: '' }) : undefined}

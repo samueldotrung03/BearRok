@@ -21,7 +21,7 @@ type Turn = { from: 'student'; text: string } | { from: 'assistant'; reply: Assi
 export function Assistant() {
   const { state, dispatch } = useStore();
   const live = useLive();
-  const pool = useMemo(() => postingPool(live.sample, live.opportunities, live.savedCards), [live.sample, live.opportunities, live.savedCards]);
+  const pool = useMemo(() => postingPool(live.opportunities, live.savedCards), [live.opportunities, live.savedCards]);
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);

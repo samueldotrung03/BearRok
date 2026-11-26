@@ -143,7 +143,7 @@ export function rankTodayActions(candidates: TodayAction[], limit = 3): TodayAct
   return result;
 }
 
-/** The cards the page passed in. A page includes the sample set only in the public showcase. */
+/** The cards the page passed in, by id. */
 function lookup(list: Opportunity[]): Map<string, Opportunity> {
   return new Map(list.map((o) => [o.id, o]));
 }

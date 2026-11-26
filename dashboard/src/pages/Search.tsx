@@ -21,8 +21,6 @@ import {
   searchOwn,
   searchWeb,
   SearchError,
-  SAMPLE_SOURCE,
-  SAMPLE_WRITER,
   shortDate,
   TIMES,
   type Origin,
@@ -100,10 +98,7 @@ export function Search() {
       own = local.results;
       contextParts = local.contextParts;
       if (!local.ai) {
-        const note =
-          local.writer === SAMPLE_WRITER
-            ? 'Sample search: this public copy has no agents behind it, so only the sample postings were searched, not the web.'
-            : 'Grok is not connected, so only your own postings were searched. Connect Grok in Settings to search the web.';
+        const note = 'Grok is not connected, so only your own postings were searched. Connect Grok in Settings to search the web.';
         setRun({ ...EMPTY, q, phase: 'done', own, contextParts, offline: true, note });
         return;
       }
@@ -516,7 +511,7 @@ function ResultList({ list, ranked, tab, setTab }: { list: SearchResult[]; ranke
       )}
       {!ranked && (
         <h2 className="srch-h2 srch-sub">
-          {list.length > 0 && list.every((r) => r.source === SAMPLE_SOURCE) ? 'Sample postings that match' : 'From your postings, while the web search runs'}
+          From your postings, while the web search runs
         </h2>
       )}
       <ol className="srch-list">

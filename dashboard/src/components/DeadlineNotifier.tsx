@@ -16,7 +16,7 @@ export function DeadlineNotifier() {
   const { state } = useStore();
   const live = useLive();
   const navigate = useNavigate();
-  const pool = useMemo(() => postingPool(live.sample, live.opportunities, live.savedCards), [live.sample, live.opportunities, live.savedCards]);
+  const pool = useMemo(() => postingPool(live.opportunities, live.savedCards), [live.opportunities, live.savedCards]);
   const items = useMemo(() => calendarItems(state, Date.now(), pool), [state, pool]);
 
   const check = useCallback(() => {

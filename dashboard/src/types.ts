@@ -50,6 +50,16 @@ export interface Opportunity {
   /** Shown on the card for stock photos (photographer and licence) and generated illustrations. */
   imageCredit?: string | null;
   imageCreditUrl?: string | null;
+  /**
+   * The For You poster the presentation agent designed for this card (backend agents/poster.ts).
+   * Null or absent until it is designed; the reel then builds one from the card's facts.
+   */
+  poster?: Poster | null;
+  /**
+   * The Feed tab's icon for a card whose picture is not a logo: an SVG the presentation agent
+   * drew, in the flyer's style when there is one. Null or absent until drawn.
+   */
+  icon?: string | null;
   /** Short looping clip the For you reel plays. The photo is its poster and its fallback. */
   video: string | null;
   /** Width divided by height the cover is shown at, so the grid has varied tile heights. */
@@ -75,6 +85,36 @@ export interface Match {
   score: number;
   factors: { factor: MatchFactor; score: number; note: string }[];
   reason: string;
+}
+
+/** What goes on a card's For You poster. Every fact on it is from the posting or its flyer. */
+export interface Poster {
+  /** bold: dark or brand backdrop with big type; photo: picture full-bleed with a caption box; formal: centred serif; flyer: the organizer's flyer remade in portrait. */
+  layout: 'bold' | 'photo' | 'formal' | 'flyer';
+  typeface: 'sans' | 'grotesk' | 'serif' | 'bold-serif' | 'condensed';
+  /** Headline in capitals. Absent on posters designed before 2026-11-26 evening. */
+  uppercase?: boolean;
+  /** How chips and the badge look. */
+  details?: 'boxed' | 'pill' | 'plain';
+  /** Where the picture goes: above the words, below them, framed between them, or under them. */
+  arrangement?: 'image-top' | 'image-bottom' | 'image-middle' | 'overlay';
+  /** The part of the picture to show, as fractions of its width and height; null for the whole picture. */
+  art?: { x: number; y: number; w: number; h: number } | null;
+  palette: { background: string; text: string; accent: string };
+  /** Small hook line above the headline, in capitals. */
+  kicker: string;
+  headline: string;
+  /** Second part of the headline, set in the accent colour. */
+  headlineAccent: string | null;
+  pitch: string;
+  /** Words of the pitch set in bold accent colour. */
+  highlight: string | null;
+  stats: { value: string; label: string }[];
+  chips: string[];
+  /** A pill such as "FULLY FUNDED". */
+  badge: string | null;
+  /** Where the picture's main subject is, for cropping. */
+  focus: 'top' | 'center' | 'bottom' | 'left' | 'right';
 }
 
 export type StepKind = 'learn' | 'build' | 'join' | 'attend' | 'apply';

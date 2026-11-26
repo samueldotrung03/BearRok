@@ -1,0 +1,18 @@
+{
+  "id": "second-page-deadline",
+  "covers": "second-page-deadline",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Remote software internships are fine."
+  },
+  "pages": {
+    "https://cedarforge.example/careers/software-intern": "second-page.html",
+    "https://cedarforge.example/careers/software-intern/apply": "second-page-apply.html"
+  },
+  "expected": {
+    "required": [{ "title": "Software Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

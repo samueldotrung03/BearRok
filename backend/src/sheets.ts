@@ -3,8 +3,8 @@
 // connection for each call; it is never stored here or sent to a page.
 import type { Application, Opportunity } from './agents/types.ts';
 
-/** Saved is the first stage of an application (status "interested"); the sheet uses the app's words. */
-export const STATUS_LABEL: Record<Application['status'], string> = { interested: 'Saved', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
+/** The status "interested" is shown as Interested. The stored value stays "interested". */
+export const STATUS_LABEL: Record<Application['status'], string> = { interested: 'Interested', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' };
 const HEADER = ['Opportunity', 'Organizer', 'Status', 'Deadline', 'Next reminder', 'Apply at', 'Materials', 'Prompts'];
 
 export function sheetRows(applications: Application[]): string[][] {
@@ -80,6 +80,26 @@ export const TRACKER_HEADER = [
 const TYPE_LABEL: Record<string, string> = { internship: 'Internship', event: 'Event', club: 'Club', hackathon: 'Hackathon', research: 'Research', scholarship: 'Scholarship' };
 const FORMAT_LABEL: Record<string, string> = { online: 'Online', in_person: 'In person', hybrid: 'Hybrid' };
 
+const LATER_STATUS: ReadonlySet<Application['status']> = new Set(['to_apply', 'applying', 'applied']);
+
+/**
+ * The Saved tab: every posting the student saved, at whatever status it has now, plus an Interested
+ * record that is still tracked. To apply and later stay here only while the posting is saved.
+ */
+export function savedTrackerItems(items: TrackerItem[], savedIds: ReadonlySet<string>): TrackerItem[] {
+  return items.filter((item) => {
+    const id = item.opportunity?.id ?? item.application?.opportunityId;
+    if (!id) return false;
+    if (savedIds.has(id)) return true;
+    return item.application?.status === 'interested';
+  });
+}
+
+/** The Applications tab: To apply, Applying and Applied. Interested stays on the Saved tab only. */
+export function applicationTrackerItems(items: TrackerItem[]): TrackerItem[] {
+  return items.filter((item) => item.application != null && LATER_STATUS.has(item.application.status));
+}
+
 /** The tracker as rows of text, header first. The same rows feed the app's sheet and the Google Sheet. */
 export function trackerRows(items: TrackerItem[], now: Date): string[][] {
   const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : '');
@@ -114,10 +134,21 @@ export function trackerRows(items: TrackerItem[], now: Date): string[][] {
   ];
 }
 
-/** The tab BearRok writes in a sheet it makes or one the student picks. */
+/** The Applications tab. Sheets linked when this was the only tab BearRok added still name it. */
 export const SHEET_TAB = 'Applications';
-/** Sheets linked before Saved joined Applications were written to this tab; they keep it. */
+/** The Saved tab. Sheets linked before Applications existed were written here, and keep that file. */
 export const LEGACY_TAB = 'Saved';
+
+/** Both tabs of the one linked spreadsheet, written together. Each matrix includes its header row. */
+export interface TrackerSheets {
+  saved: string[][];
+  applications: string[][];
+}
+
+const TRACKER_TABS: { title: string; key: keyof TrackerSheets }[] = [
+  { title: LEGACY_TAB, key: 'saved' },
+  { title: SHEET_TAB, key: 'applications' },
+];
 
 const API = 'https://sheets.googleapis.com/v4/spreadsheets';
 const sheetUrl = (id: string) => `https://docs.google.com/spreadsheets/d/${id}`;
@@ -142,9 +173,9 @@ const addTab = (fetchImpl: typeof fetch, headers: Record<string, string>, id: st
   });
 
 /**
- * Open a sheet the student picked, to link it: its name, and the tab BearRok writes, added when it
- * is not there yet. Nothing already in the sheet is changed. A sheet that cannot be opened is an
- * error in words the student can act on.
+ * Open a sheet the student picked, to link it. Whichever of the Saved and Applications tabs is
+ * missing is added; nothing already in the sheet is changed, and no new file is made. A sheet that
+ * cannot be opened is an error in words the student can act on.
  */
 export async function openSheet(accessToken: string, spreadsheetId: string, fetchImpl: typeof fetch = fetch): Promise<{ spreadsheetId: string; url: string; title: string | null; tab: string }> {
   const headers = { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' };
@@ -155,53 +186,65 @@ export async function openSheet(accessToken: string, spreadsheetId: string, fetc
   if (!res.ok) throw await fail(res);
   const body = (await res.json()) as { spreadsheetId: string; spreadsheetUrl?: string; properties?: { title?: string }; sheets?: { properties?: { title?: string } }[] };
   const tabs = (body.sheets ?? []).map((t) => t.properties?.title);
-  if (!tabs.includes(SHEET_TAB)) {
-    const add = await addTab(fetchImpl, headers, id, SHEET_TAB);
+  for (const { title } of TRACKER_TABS) {
+    if (tabs.includes(title)) continue;
+    const add = await addTab(fetchImpl, headers, id, title);
     if (!add.ok) throw await fail(add);
   }
   return { spreadsheetId: body.spreadsheetId, url: body.spreadsheetUrl ?? sheetUrl(body.spreadsheetId), title: body.properties?.title ?? null, tab: SHEET_TAB };
 }
 
 /**
- * Write the tracker to the student's linked Google Sheet, replacing what was on its tab, or make a
- * new sheet when none is linked or the linked one was deleted. A linked sheet that lost its tab
- * gets it back. Uses the access token for this call only.
+ * Write both tabs to the student's linked Google Sheet, or make one sheet with both when none is
+ * linked or the linked file was deleted. A sheet stored as "Saved" or "Applications" keeps that
+ * file and gains whichever tab is missing. A tab that was renamed or deleted is added back. Uses
+ * the access token for this call only.
  */
 export async function writeTracker(
   accessToken: string,
   linked: { spreadsheetId: string; tab?: string; title?: string | null } | null,
-  rows: string[][],
+  rows: TrackerSheets,
   today: Date,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ spreadsheetId: string; url: string; title: string | null; tab: string }> {
   const headers = { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' };
+  const writeOne = async (id: string, tab: string, values: string[][]): Promise<Response> => {
+    const clear = await fetchImpl(`${API}/${id}/values/${encodeURIComponent(`${tab}!A1:Z`)}:clear`, { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(20_000) });
+    if (!clear.ok) return clear;
+    const put = await fetchImpl(`${API}/${id}/values/${encodeURIComponent(`${tab}!A1`)}?valueInputOption=RAW`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ values }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!put.ok) throw await fail(put);
+    return put;
+  };
   if (linked) {
-    const tab = linked.tab ?? LEGACY_TAB;
     const id = encodeURIComponent(linked.spreadsheetId);
-    const write = async (): Promise<Response> => {
-      const clear = await fetchImpl(`${API}/${id}/values/${encodeURIComponent(`${tab}!A1:Z`)}:clear`, { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(20_000) });
-      if (!clear.ok) return clear;
-      const put = await fetchImpl(`${API}/${id}/values/${encodeURIComponent(`${tab}!A1`)}?valueInputOption=RAW`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ values: rows }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      if (!put.ok) throw await fail(put);
-      return put;
-    };
-    let res = await write();
-    // 400: the tab was renamed or deleted. It is added back and written, so the student's file stays linked.
-    if (res.status === 400) {
-      const add = await addTab(fetchImpl, headers, id, tab);
-      if (!add.ok) throw await fail(add);
-      res = await write();
+    let missing = false;
+    for (const { title: tab, key } of TRACKER_TABS) {
+      let res = await writeOne(id, tab, rows[key]);
+      // 400: that tab was renamed or deleted. It is added back and written, so the file stays linked.
+      if (res.status === 400) {
+        const add = await addTab(fetchImpl, headers, id, tab);
+        if (!add.ok) throw await fail(add);
+        res = await writeOne(id, tab, rows[key]);
+      }
+      if (res.ok) continue;
+      // 404: the sheet was deleted. 403: it belongs to another Google account than the one now
+      // connected (the student switched). Either way a new sheet is made below, and Settings shows
+      // its name and link, so the change is in plain sight.
+      if (res.status === 404 || res.status === 403) {
+        missing = true;
+        break;
+      }
+      throw await fail(res);
     }
-    if (res.ok) return { spreadsheetId: linked.spreadsheetId, url: sheetUrl(linked.spreadsheetId), title: linked.title ?? null, tab };
-    // 404: the sheet was deleted. 403: it belongs to another Google account than the one now
-    // connected (the student switched). Either way a new sheet is made below, and Settings shows
-    // its name and link, so the change is in plain sight.
-    if (res.status !== 404 && res.status !== 403) throw await fail(res);
+    if (!missing) {
+      // Keep the name this link already stored (Saved, from before Applications, or Applications).
+      return { spreadsheetId: linked.spreadsheetId, url: sheetUrl(linked.spreadsheetId), title: linked.title ?? null, tab: linked.tab ?? LEGACY_TAB };
+    }
   }
   const title = `BearRok applications (${today.toISOString().slice(0, 10)})`;
   const cell = (value: string, bold = false) => ({ userEnteredValue: { stringValue: value }, ...(bold ? { userEnteredFormat: { textFormat: { bold: true } } } : {}) });
@@ -211,12 +254,10 @@ export async function writeTracker(
     signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({
       properties: { title },
-      sheets: [
-        {
-          properties: { title: SHEET_TAB, gridProperties: { frozenRowCount: 1 } },
-          data: [{ startRow: 0, startColumn: 0, rowData: rows.map((row, i) => ({ values: row.map((v) => cell(v, i === 0)) })) }],
-        },
-      ],
+      sheets: TRACKER_TABS.map(({ title: tab, key }) => ({
+        properties: { title: tab, gridProperties: { frozenRowCount: 1 } },
+        data: [{ startRow: 0, startColumn: 0, rowData: rows[key].map((row, i) => ({ values: row.map((v) => cell(v, i === 0)) })) }],
+      })),
     }),
   });
   if (!res.ok) throw await fail(res);

@@ -1,0 +1,17 @@
+{
+  "id": "note-rules-out",
+  "covers": "note-rules-out",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Already applied to Lampwick Media, don't show it again. Design internships otherwise are welcome."
+  },
+  "pages": {
+    "https://lampwick.example/careers/design-intern": "note-rules-out.html"
+  },
+  "expected": {
+    "required": [],
+    "forbidden": ["Design Intern"]
+  }
+}

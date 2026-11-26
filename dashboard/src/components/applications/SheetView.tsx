@@ -1,8 +1,9 @@
-// Applications as a spreadsheet: one row per saved posting and application with its stage,
-// deadline, details and every link. This sheet is always here, with its columns set even before
-// anything is saved. The rows come from the backend, so this table and the linked Google Sheet say
-// the same thing. Google itself is connected in Settings > Connections; here the student can make
-// the Google Sheet, write it now, or stop writing it. The backend does every Google call.
+// One spreadsheet, two views of it. Saved shows every saved posting, with its status. Applications
+// shows To apply, Applying and Applied. Both write the same linked Google Sheet, which has a tab
+// for each. This table is always here, with its columns set even before anything is saved. The rows
+// come from the backend, so this table and that Google Sheet say the same thing. Google itself is
+// connected in Settings > Connections; here the student can make the Google Sheet, write it now, or
+// stop writing it. The backend does every Google call. No token reaches this page.
 import { Download, ExternalLink, RefreshCw, Sheet, Unlink } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
@@ -73,19 +74,23 @@ function Cell({ value, column }: { value: string; column: string }) {
 
 const csv = (rows: string[][]) => rows.map((r) => r.map((v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)).join(',')).join('\n');
 
-export function SheetView({ refreshKey }: { refreshKey: string }) {
+/** Which tab of the one linked sheet this view shows. */
+export type SheetTab = 'saved' | 'applications';
+
+export function SheetView({ refreshKey, tab = 'applications' }: { refreshKey: string; tab?: SheetTab }) {
   const live = useLive();
   const [data, setData] = useState<SheetData | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
   // The sheet updates itself (live.tsx); this view writes it on request.
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const savedTab = tab === 'saved';
 
   // Read again whenever what is saved, or where it stands, changes.
   useEffect(() => {
     let stale = false;
     void live
-      .request('/sheet')
+      .request(`/sheet?tab=${tab}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status));
         const body = (await res.json()) as SheetData;
@@ -99,7 +104,7 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
       stale = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, live.status]);
+  }, [refreshKey, live.status, tab]);
 
   const sheets = serviceState(live.google, 'sheets');
   const write = async (create: boolean) => {
@@ -116,16 +121,28 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `bearrok-applications-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `bearrok-${savedTab ? 'saved' : 'applications'}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const sheet = live.sheet;
   const connected = sheets === 'ready';
+  // The server answered, and it has no Google OAuth client. Say that, rather than offering a connect that cannot work.
+  const notConfigured = live.google.server !== null && live.google.server.enabled === false;
   const header = useMemo(() => (data?.header.length ? data.header : SHEET_COLUMNS), [data]);
   const rows = data?.rows ?? [];
   const blanks = Math.max(0, MIN_ROWS - rows.length);
+  const driveLine = notConfigured
+    ? 'Google Sheets is not set up on this server, so this stays in BearRok.'
+    : connected
+      ? 'Create a Google Sheet to have a copy in your own Drive.'
+      : 'Connect Google in Settings to keep a copy in your own Drive.';
+  const liveLine = notConfigured
+    ? 'Not updating: Google Sheets is not set up on this server. Nothing is lost meanwhile.'
+    : connected
+      ? 'Updates on its own whenever you save, unsave or change a status.'
+      : 'Not updating: Google is not connected with Sheets. Reconnect in Settings; nothing is lost meanwhile.';
 
   return (
     <div className="saved-sheet">
@@ -138,16 +155,18 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
             <>
               <p className="text-sm font-semibold text-ink">Also in {sheet.title ? `“${sheet.title}”` : 'your Google Sheet'}</p>
               <p className="text-sm text-ink-2">
-                {connected ? 'Updates on its own whenever you save, unsave or change a status.' : 'Not updating: Google is not connected with Sheets. Reconnect in Settings; nothing is lost meanwhile.'}{' '}
+                {liveLine}{' '}
                 {sheet.syncedAt ? `Last written ${relativeTime(sheet.syncedAt)}.` : 'Not written yet.'}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm font-semibold text-ink">Your applications as a spreadsheet</p>
+              <p className="text-sm font-semibold text-ink">{savedTab ? 'What you saved, as a spreadsheet' : 'Your applications as a spreadsheet'}</p>
               <p className="text-sm text-ink-2">
-                Everything saved and every application is logged here with its details and links.{' '}
-                {connected ? 'Create a Google Sheet to have a copy in your own Drive.' : 'Connect Google in Settings to keep a copy in your own Drive.'}
+                {savedTab
+                  ? 'Every saved posting is logged here with its status, deadline, details and links. '
+                  : 'To apply, Applying and Applied are logged here with their details and links. '}
+                {driveLine}
               </p>
             </>
           )}
@@ -197,13 +216,19 @@ export function SheetView({ refreshKey }: { refreshKey: string }) {
       {(loadError || !data || rows.length === 0) && (
         <p className="border-b border-line px-5 py-2.5 text-sm text-ink-3">
           {loadError
-            ? 'Your applications cannot be loaded right now; they fill in here once the app can reach your account.'
+            ? savedTab
+              ? 'What you saved cannot be loaded right now; it fills in here once the app can reach your account.'
+              : 'Your applications cannot be loaded right now; they fill in here once the app can reach your account.'
             : !data
-              ? 'Loading your applications…'
-              : 'Nothing saved yet. Save cards in the feed and each one is logged here as a row.'}
+              ? savedTab
+                ? 'Loading what you saved…'
+                : 'Loading your applications…'
+              : savedTab
+                ? 'Nothing saved yet. Save cards in the feed and each one is logged here as a row.'
+                : 'Nothing at To apply or later yet. Set a saved posting to To apply and it is logged here.'}
         </p>
       )}
-      <div className="saved-sheet-scroll" tabIndex={0} aria-label="Applications spreadsheet">
+      <div className="saved-sheet-scroll" tabIndex={0} aria-label={savedTab ? 'Saved spreadsheet' : 'Applications spreadsheet'}>
         <table className="saved-sheet-table">
           <thead>
             <tr>

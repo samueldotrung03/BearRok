@@ -1,0 +1,17 @@
+{
+  "id": "closed-event",
+  "covers": "closed-event",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Career mixers near campus that are still open."
+  },
+  "pages": {
+    "https://asterfield.example/events/career-mixer": "closed-event.html"
+  },
+  "expected": {
+    "required": [],
+    "forbidden": ["Asterfield Career Mixer"]
+  }
+}

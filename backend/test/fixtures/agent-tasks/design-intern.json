@@ -1,0 +1,17 @@
+{
+  "id": "design-intern",
+  "covers": "design-intern",
+  "student": {
+    "classYear": "Senior",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Product design internships, remote is welcome."
+  },
+  "pages": {
+    "https://sparrowkit.example/jobs/product-design-intern": "design-intern.html"
+  },
+  "expected": {
+    "required": [{ "title": "Product Design Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

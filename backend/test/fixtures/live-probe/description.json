@@ -1,0 +1,30 @@
+{
+  "clock": "2026-11-25",
+  "note": "Invented pages for a live deadline-quote probe. Not real postings.",
+  "cases": [
+    {
+      "id": "open",
+      "file": "open.html",
+      "kind": "internship",
+      "organizer": "Northwind Labs",
+      "expect": "quoteSupported true; the page states the deadline sentence below",
+      "deadlineSentence": "Applications close on Friday, December 18, 2026 at 5:00 PM Pacific Time."
+    },
+    {
+      "id": "mismatch",
+      "file": "mismatch.html",
+      "kind": "scholarship",
+      "organizer": "Northwind Community Scholarship",
+      "expect": "visible text has no date; claiming a supported deadline is a failure",
+      "deadlineSentence": null
+    },
+    {
+      "id": "closed",
+      "file": "closed.html",
+      "kind": "event",
+      "organizer": "Harbor Student Union",
+      "expect": "event date 2 October 2026 is already past relative to the clock; must not keep a future deadline",
+      "eventDate": "2026-10-02"
+    }
+  ]
+}

@@ -144,7 +144,7 @@ test('calendar page: events are read and written through the backend with the st
 });
 
 test('sheets: export mapping, one row per application with its stage in the appâ€™s words', async () => {
-  assert.deepEqual(STATUS_LABEL, { interested: 'Saved', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' });
+  assert.deepEqual(STATUS_LABEL, { interested: 'Interested', to_apply: 'To apply', applying: 'Applying', applied: 'Applied' });
   const s = await student();
   const [a, b, c, d] = s.student().feed.map((f) => f.opportunity);
   s.interact(a!.id, 'save');
@@ -155,7 +155,7 @@ test('sheets: export mapping, one row per application with its stage in the appâ
   const col = (name: string) => TRACKER_HEADER.indexOf(name);
   assert.deepEqual(header, TRACKER_HEADER);
   const byTitle = new Map(rows.map((r) => [r[col('Opportunity')], r]));
-  assert.equal(byTitle.get(a!.title)![col('Status')], 'Saved');
+  assert.equal(byTitle.get(a!.title)![col('Status')], 'Interested');
   assert.equal(byTitle.get(b!.title)![col('Status')], 'To apply');
   assert.equal(byTitle.get(d!.title)![col('Status')], 'Applied');
   const applying = byTitle.get(c!.title)!;
@@ -181,6 +181,7 @@ test('sheets: pick an existing sheet (its tab is added), sync now, make a new on
   const requests: string[] = [];
   let tabs = ['Budget'];
   let made = 0;
+  let createdTabs: string[] = [];
   const { google } = fakeGoogle(async (url, init) => {
     const path = url.replace('https://sheets.googleapis.com/v4/spreadsheets', '');
     requests.push(`${init?.method ?? 'GET'} ${path.split('?')[0]}`);
@@ -190,9 +191,15 @@ test('sheets: pick an existing sheet (its tab is added), sync now, make a new on
       tabs = [...tabs, JSON.parse(String(init!.body)).requests[0].addSheet.properties.title];
       return Response.json({});
     }
-    if (path.includes(':clear')) return new Response('{}', { status: tabs.includes('Applications') ? 200 : 400 });
+    if (path.includes(':clear')) {
+      const tab = decodeURIComponent(path.split('/values/')[1]!.split('?')[0]!.split(':')[0]!).split('!')[0]!;
+      return new Response('{}', { status: tabs.includes(tab) ? 200 : 400 });
+    }
     if (init?.method === 'PUT') return Response.json({});
-    if (path === '' && init?.method === 'POST') return Response.json({ spreadsheetId: `made-${++made}`, properties: { title: 'BearRok applications (2026-11-19)' } });
+    if (path === '' && init?.method === 'POST') {
+      createdTabs = (JSON.parse(String(init.body)) as { sheets: { properties: { title: string } }[] }).sheets.map((sheet) => sheet.properties.title);
+      return Response.json({ spreadsheetId: `made-${++made}`, properties: { title: 'BearRok applications (2026-11-19)' } });
+    }
     return new Response('{}', { status: 500 });
   });
   const { app } = createApp(new LocalStore(null), {}, { demo: s, google });
@@ -211,24 +218,31 @@ test('sheets: pick an existing sheet (its tab is added), sync now, make a new on
   assert.equal(linked.status, 200);
   assert.deepEqual({ ...linked.body.linked, syncedAt: 'x' }, { spreadsheetId: SHEET_ID, url: `https://docs.google.com/spreadsheets/d/${SHEET_ID}`, title: 'My job hunt', tab: 'Applications', syncedAt: 'x' });
   assert.ok(Date.parse(linked.body.linked.syncedAt), 'written straight away, with the time');
-  assert.deepEqual(tabs, ['Budget', 'Applications'], "the student's own tab is left alone; BearRok's is added");
+  assert.deepEqual(tabs, ['Budget', 'Saved', 'Applications'], "the student's own tab is left alone; both of BearRok's are added");
+  assert.ok(requests.includes(`PUT /${SHEET_ID}/values/Saved!A1`));
   assert.ok(requests.includes(`PUT /${SHEET_ID}/values/Applications!A1`));
 
-  // Sync now writes the same sheet again.
+  // Sync now writes both tabs of the same sheet again.
   requests.length = 0;
   const again = await post('/sheet/sync');
   assert.equal(again.body.linked.spreadsheetId, SHEET_ID);
-  assert.deepEqual(requests, [`POST /${SHEET_ID}/values/Applications!A1%3AZ:clear`, `PUT /${SHEET_ID}/values/Applications!A1`]);
+  assert.deepEqual(requests, [
+    `POST /${SHEET_ID}/values/Saved!A1%3AZ:clear`,
+    `PUT /${SHEET_ID}/values/Saved!A1`,
+    `POST /${SHEET_ID}/values/Applications!A1%3AZ:clear`,
+    `PUT /${SHEET_ID}/values/Applications!A1`,
+  ]);
 
-  // The student deleted BearRok's tab: it is added back and written, the sheet stays linked.
+  // The student deleted BearRok's tabs: both are added back and written, the sheet stays linked.
   tabs = ['Budget'];
   const back = await post('/sheet/sync');
   assert.equal(back.body.linked.spreadsheetId, SHEET_ID);
-  assert.deepEqual(tabs, ['Budget', 'Applications']);
+  assert.deepEqual(tabs, ['Budget', 'Saved', 'Applications']);
 
-  // Create a new sheet on purpose.
+  // Create a new sheet on purpose. It has both tabs.
   const fresh = await post('/sheet/sync', { create: true });
   assert.deepEqual([fresh.body.linked.spreadsheetId, fresh.body.linked.title, fresh.body.linked.tab], ['made-1', 'BearRok applications (2026-11-19)', 'Applications']);
+  assert.deepEqual(createdTabs, ['Saved', 'Applications']);
   assert.equal(s.student().sheet?.spreadsheetId, 'made-1');
   // Status for Settings carries the sheet and nothing secret.
   const status = (await (await app.request('/api/students/demo/google')).json()) as any;
@@ -237,20 +251,32 @@ test('sheets: pick an existing sheet (its tab is added), sync now, make a new on
   assert.ok(!JSON.stringify(status).includes('refresh-secret') && !JSON.stringify(status).includes('"tok"'));
 });
 
-test('sheets: writing a linked sheet whose tab is gone adds it back rather than making a new file', async () => {
+test('sheets: writing a linked sheet whose tabs are gone adds both back rather than making a new file', async () => {
   const calls: string[] = [];
-  let hasTab = false;
+  const present = new Set<string>();
+  const tabOf = (u: string) => decodeURIComponent(u.split('/values/')[1]!.split('?')[0]!.split(':')[0]!).split('!')[0]!;
   const fake = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url).replace('https://sheets.googleapis.com/v4/spreadsheets', '');
     calls.push(`${init?.method} ${u.split('?')[0]}`);
     if (u.endsWith(':batchUpdate')) {
-      hasTab = true;
+      present.add(JSON.parse(String(init!.body)).requests[0].addSheet.properties.title as string);
       return Response.json({});
     }
-    if (u.includes(':clear')) return new Response('{}', { status: hasTab ? 200 : 400 });
+    if (u.includes(':clear')) return new Response('{}', { status: present.has(tabOf(u)) ? 200 : 400 });
     return Response.json({});
   }) as typeof fetch;
-  const out = await writeTracker('tok', { spreadsheetId: 'mine', tab: 'Applications', title: 'Mine' }, [TRACKER_HEADER], NOW, fake);
+  const rows = { saved: [TRACKER_HEADER], applications: [TRACKER_HEADER] };
+  const out = await writeTracker('tok', { spreadsheetId: 'mine', tab: 'Applications', title: 'Mine' }, rows, NOW, fake);
   assert.deepEqual(out, { spreadsheetId: 'mine', url: 'https://docs.google.com/spreadsheets/d/mine', title: 'Mine', tab: 'Applications' });
-  assert.deepEqual(calls, ['POST /mine/values/Applications!A1%3AZ:clear', 'POST /mine:batchUpdate', 'POST /mine/values/Applications!A1%3AZ:clear', 'PUT /mine/values/Applications!A1']);
+  assert.deepEqual([...present], ['Saved', 'Applications']);
+  assert.deepEqual(calls, [
+    'POST /mine/values/Saved!A1%3AZ:clear',
+    'POST /mine:batchUpdate',
+    'POST /mine/values/Saved!A1%3AZ:clear',
+    'PUT /mine/values/Saved!A1',
+    'POST /mine/values/Applications!A1%3AZ:clear',
+    'POST /mine:batchUpdate',
+    'POST /mine/values/Applications!A1%3AZ:clear',
+    'PUT /mine/values/Applications!A1',
+  ]);
 });

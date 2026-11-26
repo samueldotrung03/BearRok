@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { SimBrain } from '../src/agents/simBrain.ts';
 import { AgentSystem } from '../src/agents/system.ts';
 import { createApp } from '../src/app.ts';
-import { TRACKER_HEADER, trackerRows, writeTracker } from '../src/sheets.ts';
+import { TRACKER_HEADER, trackerRows, writeTracker, type TrackerSheets } from '../src/sheets.ts';
 import { LocalStore } from '../src/store/local.ts';
 import { connectGoogle, fakeGoogle as fakeGoogleApi } from './googleFake.ts';
 
@@ -38,7 +38,7 @@ test('tracker: every saved posting is a row with its status, deadline, details a
   assert.ok(row[col('Apply link')]!.startsWith('http'));
   assert.equal(row[col('Calendar')], 'Added once Google Calendar is connected');
   assert.equal(row[col('Saved on')], NOW.toISOString().slice(0, 10));
-  assert.equal(rows[0]![col('Status')], 'Saved', 'saving puts it at the first stage, Saved');
+  assert.equal(rows[0]![col('Status')], 'Interested', 'a save with no application is shown as Interested');
   if (undated) assert.equal(rows[2]![col('Deadline')], 'Not stated');
 });
 
@@ -53,34 +53,41 @@ test('tracker: a linked sheet is updated in place, and replaced only if it was d
     return new Response(JSON.stringify({ spreadsheetId: 'new-sheet', spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/new-sheet' }), { status: 200 });
   }) as typeof fetch;
   const rows = [TRACKER_HEADER, ['A']];
+  const both = { saved: rows, applications: [TRACKER_HEADER, ['B']] };
+  const bothTabs = [
+    'POST /mine/values/Saved!A1%3AZ:clear',
+    'PUT /mine/values/Saved!A1?valueInputOption=RAW',
+    'POST /mine/values/Applications!A1%3AZ:clear',
+    'PUT /mine/values/Applications!A1?valueInputOption=RAW',
+  ];
 
-  assert.deepEqual(await writeTracker('tok', null, rows, NOW, fake), { spreadsheetId: 'new-sheet', url: 'https://docs.google.com/spreadsheets/d/new-sheet', title: 'BearRok applications (2026-11-19)', tab: 'Applications' });
+  assert.deepEqual(await writeTracker('tok', null, both, NOW, fake), { spreadsheetId: 'new-sheet', url: 'https://docs.google.com/spreadsheets/d/new-sheet', title: 'BearRok applications (2026-11-19)', tab: 'Applications' });
   assert.deepEqual(calls, ['POST ']);
 
   calls.length = 0;
-  assert.equal((await writeTracker('tok', { spreadsheetId: 'mine' }, rows, NOW, fake)).spreadsheetId, 'mine');
-  assert.deepEqual(calls, ['POST /mine/values/Saved!A1%3AZ:clear', 'PUT /mine/values/Saved!A1?valueInputOption=RAW'], 'a sheet linked before keeps its Saved tab: cleared and rewritten, no new file');
+  assert.equal((await writeTracker('tok', { spreadsheetId: 'mine' }, both, NOW, fake)).spreadsheetId, 'mine');
+  assert.deepEqual(calls, bothTabs, 'a sheet linked before keeps its file: both tabs are cleared and rewritten, no new file');
 
   calls.length = 0;
-  assert.equal((await writeTracker('tok', { spreadsheetId: 'mine', tab: 'Applications' }, rows, NOW, fake)).tab, 'Applications');
-  assert.deepEqual(calls, ['POST /mine/values/Applications!A1%3AZ:clear', 'PUT /mine/values/Applications!A1?valueInputOption=RAW']);
+  assert.equal((await writeTracker('tok', { spreadsheetId: 'mine', tab: 'Applications' }, both, NOW, fake)).tab, 'Applications');
+  assert.deepEqual(calls, bothTabs);
 
   calls.length = 0;
   gone = true;
-  assert.equal((await writeTracker('tok', { spreadsheetId: 'mine' }, rows, NOW, fake)).spreadsheetId, 'new-sheet');
+  assert.equal((await writeTracker('tok', { spreadsheetId: 'mine' }, both, NOW, fake)).spreadsheetId, 'new-sheet');
   assert.equal(calls.at(-1), 'POST ');
 
   // A sheet the connected Google account cannot open (made under another account) is replaced too.
   const forbidden = (async (url: string | URL | Request, init?: RequestInit) =>
     String(url).endsWith(':clear') ? new Response('{}', { status: 403 }) : fake(url, init)) as typeof fetch;
-  assert.equal((await writeTracker('tok', { spreadsheetId: 'someone-elses' }, rows, NOW, forbidden)).spreadsheetId, 'new-sheet');
+  assert.equal((await writeTracker('tok', { spreadsheetId: 'someone-elses' }, both, NOW, forbidden)).spreadsheetId, 'new-sheet');
 });
 
 test('tracker: the app reads the rows, links a sheet on first sync, and keeps writing to it', async () => {
   const s = await student();
   const o = s.student().feed[0]!.opportunity;
   s.interact(o.id, 'save');
-  const written: { linked: unknown; rows: string[][] }[] = [];
+  const written: { linked: unknown; rows: TrackerSheets }[] = [];
   const { app } = createApp(new LocalStore(null), {}, {
     demo: s,
     google: fakeGoogleApi().google,
@@ -110,11 +117,85 @@ test('tracker: the app reads the rows, links a sheet on first sync, and keeps wr
   assert.equal(s.student().sheet, null);
 });
 
-test('status: saving makes a posting Interested; unsaving one that never got further stops tracking it', async () => {
+test('tracker: sync writes both tabs; a legacy Saved or Applications link gains the other; Interested is only on Saved', async () => {
+  const s = await student();
+  const [interested, moving] = s.student().feed.map((f) => f.opportunity);
+  s.interact(interested!.id, 'save');
+  s.interact(moving!.id, 'save');
+  s.setApplication(moving!.id, { status: 'to_apply' });
+  connectGoogle(s);
+  const id = 'legacySheetId00000000000001';
+  const link = (tab: 'Saved' | 'Applications') => s.setSheet({ spreadsheetId: id, url: `https://docs.google.com/spreadsheets/d/${id}`, title: 'Old tracker', tab, syncedAt: '' });
+  link('Saved');
+
+  let tabs = ['Saved'];
+  const values = new Map<string, string[][]>();
+  let created: string[] = [];
+  const tabOf = (path: string) => decodeURIComponent(path.split('/values/')[1]!.split('?')[0]!.split(':')[0]!).split('!')[0]!;
+  const { app } = createApp(new LocalStore(null), {}, {
+    demo: s,
+    google: fakeGoogleApi(async (url, init) => {
+      const path = url.replace('https://sheets.googleapis.com/v4/spreadsheets', '');
+      if (path.endsWith(':batchUpdate')) {
+        tabs = [...tabs, JSON.parse(String(init!.body)).requests[0].addSheet.properties.title as string];
+        return Response.json({});
+      }
+      if (path.includes(':clear')) return new Response('{}', { status: tabs.includes(tabOf(path)) ? 200 : 400 });
+      if (init?.method === 'PUT') {
+        values.set(tabOf(path), JSON.parse(String(init.body)).values as string[][]);
+        return Response.json({});
+      }
+      if (path === '' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { sheets: { properties: { title: string } }[] };
+        created = body.sheets.map((sheet) => sheet.properties.title);
+        return Response.json({ spreadsheetId: 'made-both', properties: { title: 'BearRok applications (2026-11-19)' } });
+      }
+      return new Response('{}', { status: 500 });
+    }).google,
+  });
+  const sync = async () => (await (await app.request('/api/students/demo/sheet/sync', { method: 'POST' })).json()) as { linked: { spreadsheetId: string; tab: string } };
+  const col = TRACKER_HEADER.indexOf('Status');
+  const titles = (tab: string) => (values.get(tab) ?? []).slice(1).map((row) => row[0]);
+
+  const savedOnly = await (await app.request('/api/students/demo/sheet?tab=saved')).json() as { rows: string[][] };
+  const applicationsOnly = await (await app.request('/api/students/demo/sheet?tab=applications')).json() as { rows: string[][] };
+  assert.equal(savedOnly.rows.find((row) => row[0] === interested!.title)?.[col], 'Interested');
+  assert.equal(savedOnly.rows.find((row) => row[0] === moving!.title)?.[col], 'To apply');
+  assert.equal(applicationsOnly.rows.some((row) => row[0] === interested!.title), false, 'Interested stays off the Applications tab');
+  assert.equal(applicationsOnly.rows.find((row) => row[0] === moving!.title)?.[col], 'To apply');
+
+  const first = await sync();
+  assert.equal(first.linked.spreadsheetId, id, 'a sheet stored as Saved keeps that file');
+  assert.equal(first.linked.tab, 'Saved');
+  assert.deepEqual(tabs, ['Saved', 'Applications'], 'the Applications tab is added');
+  assert.deepEqual(titles('Saved').sort(), [interested!.title, moving!.title].sort());
+  assert.deepEqual(titles('Applications'), [moving!.title]);
+  assert.equal(values.get('Saved')!.find((row) => row[0] === interested!.title)![col], 'Interested');
+  assert.equal(values.get('Applications')!.some((row) => row[0] === interested!.title), false);
+  assert.equal(values.get('Saved')!.find((row) => row[0] === moving!.title)![col], 'To apply');
+  assert.equal(values.get('Applications')!.find((row) => row[0] === moving!.title)![col], 'To apply');
+
+  tabs = ['Applications'];
+  values.clear();
+  link('Applications');
+  const second = await sync();
+  assert.equal(second.linked.spreadsheetId, id, 'a sheet stored as Applications keeps that file');
+  assert.equal(second.linked.tab, 'Applications');
+  assert.deepEqual(tabs, ['Applications', 'Saved'], 'the Saved tab is added');
+  assert.deepEqual(titles('Applications'), [moving!.title]);
+  assert.ok(titles('Saved').includes(interested!.title));
+
+  const made = await (await app.request('/api/students/demo/sheet/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ create: true }) })).json() as { linked: { spreadsheetId: string } };
+  assert.equal(made.linked.spreadsheetId, 'made-both');
+  assert.deepEqual(created, ['Saved', 'Applications'], 'a new sheet is created with both tabs');
+});
+
+test('status: saving does not make an application; unsaving an Interested one that never got further stops tracking it', async () => {
   const s = await student();
   const [a, b] = s.student().feed.map((f) => f.opportunity);
   s.interact(a!.id, 'save');
-  assert.equal(s.getApplication(a!.id)?.status, 'interested');
+  assert.equal(s.getApplication(a!.id), null, 'a save is not an application');
+  s.setApplication(a!.id, { status: 'interested' });
   s.interact(a!.id, 'save');
   assert.equal(s.getApplication(a!.id), null, 'unsaved while still only Interested');
   // One the student moved on keeps its status when unsaved.

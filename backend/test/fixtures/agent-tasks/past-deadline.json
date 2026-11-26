@@ -1,0 +1,17 @@
+{
+  "id": "past-deadline",
+  "covers": "past-deadline",
+  "student": {
+    "classYear": "Junior",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Finance internships if they are still open."
+  },
+  "pages": {
+    "https://fogbank.example/careers/analyst-intern": "past-deadline.html"
+  },
+  "expected": {
+    "required": [],
+    "forbidden": ["Analyst Intern"]
+  }
+}

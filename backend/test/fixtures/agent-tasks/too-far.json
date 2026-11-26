@@ -1,0 +1,17 @@
+{
+  "id": "too-far",
+  "covers": "too-far",
+  "student": {
+    "classYear": "Junior",
+    "location": "Berkeley, CA",
+    "remoteOk": false,
+    "notes": "In-person roles I can reach from Berkeley only. No remote."
+  },
+  "pages": {
+    "https://seaglass-biotech.example/careers/lab-intern": "too-far.html"
+  },
+  "expected": {
+    "required": [],
+    "forbidden": ["Lab Intern"]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "closed-posting",
+  "covers": "closed-posting",
+  "student": {
+    "classYear": "Junior",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Software and data internships for next summer."
+  },
+  "pages": {
+    "https://millpond-labs.example/careers/summer-intern": "closed-posting.html"
+  },
+  "expected": {
+    "required": [],
+    "forbidden": ["Summer Intern"]
+  }
+}

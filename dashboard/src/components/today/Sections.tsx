@@ -129,7 +129,7 @@ export function ProgressStrip({ progress }: { progress: ProgressSummary }) {
             <span className="block truncate text-xs text-ink-3">{apps || 'None tracked yet'}</span>
           </span>
         </Link>
-        <Link to="/applications?stage=saved" className="td-stat">
+        <Link to="/saved" className="td-stat">
           <Bookmark className="size-[18px] shrink-0 text-brand" aria-hidden="true" />
           <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2 text-sm">
             <span className="font-semibold text-ink">Saved</span>

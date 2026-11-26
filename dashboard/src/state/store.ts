@@ -53,17 +53,11 @@ export type Action =
   | { type: 'syncReactions'; known: string[]; saved: string[]; liked: string[]; statuses?: Record<string, ApplicationStatus> };
 
 /**
- * Saved and Applications are one list: a saved posting is an application at the first stage,
- * Saved (status "interested"). State kept before saving started tracking can have saves with no
- * application; they get one here. Nothing is removed and no status or draft is changed. Returns the
- * same object when there is nothing to add.
+ * Saving does not create an application. Older saves stay as saves, and any application already
+ * stored is left as it is. Kept so load still calls one function and returns the same state.
  */
 export function migrateSavedState(state: AppState): AppState {
-  const missing = state.saved.filter((id) => !state.applications[id] && !state.dismissed.includes(id));
-  if (missing.length === 0) return state;
-  const applications = { ...state.applications };
-  for (const id of missing) applications[id] = { status: 'interested', drafts: {}, materialsDone: [] };
-  return { ...state, applications };
+  return state;
 }
 
 /** The id a feed opportunity gets when it is added to the roadmap as an extra step. */
@@ -80,17 +74,13 @@ function toggle(list: string[], value: string): string[] {
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'toggleSaved': {
-      // Saving starts tracking it as Interested; unsaving one that never got further stops tracking it.
+      // Saving only records the save. Unsaving an Interested item that has no draft removes that
+      // record, so it leaves Saved. To apply and later stay even when unsaved.
       const saving = !state.saved.includes(action.id);
       const current = state.applications[action.id];
       const { [action.id]: _dropped, ...rest } = state.applications;
-      const applications = saving
-        ? current
-          ? state.applications
-          : { ...state.applications, [action.id]: { status: 'interested' as const, drafts: {}, materialsDone: [] } }
-        : current?.status === 'interested' && Object.keys(current.drafts).length === 0
-          ? rest
-          : state.applications;
+      const applications =
+        !saving && current?.status === 'interested' && Object.keys(current.drafts).length === 0 ? rest : state.applications;
       return { ...state, saved: toggle(state.saved, action.id), applications };
     }
     case 'dismiss':

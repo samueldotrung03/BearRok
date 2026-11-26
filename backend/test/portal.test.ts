@@ -267,7 +267,8 @@ test('portal: a custom application can be marked applied, goes on the tracker an
 test('portal: unsaving a posting keeps its application when the student has written in it', async () => {
   const { s, call } = setup();
   s.interact(ACME.id, 'save');
-  assert.equal(s.getApplication(ACME.id)!.status, 'interested');
+  assert.equal(s.getApplication(ACME.id), null, 'saving does not create an application');
+  s.setApplication(ACME.id, { status: 'interested' });
   await call('PUT', `/applications/${ACME.id}/portal`, { tabs: [tab({ id: 'n', body: 'notes' })] });
   s.interact(ACME.id, 'save');
   assert.ok(s.getApplication(ACME.id), 'kept');

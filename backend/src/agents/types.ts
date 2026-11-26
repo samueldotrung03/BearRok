@@ -537,7 +537,7 @@ export interface ProfileMemory {
   resume: { name: string; type: string; size: number; uploadedAt: string; text: string | null; bytes: string } | null;
   reminderDays: number[];
   scheduleSeconds: number;
-  /** The Google Sheet the student linked for their saved list; their own file, so it sits with what they set. */
+  /** The one Google Sheet linked for Saved and Applications; their own file, so it sits with what they set. */
   sheet?: LinkedSheet | null;
   /**
    * The student's lasting Google connection (Calendar, Sheets): a refresh token the backend trades
@@ -563,7 +563,7 @@ export interface LinkedSheet {
   syncedAt: string;
   /** The spreadsheet's name in Drive, when known. */
   title?: string | null;
-  /** The tab BearRok writes. Sheets linked before this was kept use "Saved". */
+  /** The tab name stored with the link. Older sheets stored "Saved" or "Applications"; both tabs are written either way. */
   tab?: string;
 }
 

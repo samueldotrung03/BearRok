@@ -40,14 +40,12 @@ export const sortLabel: Record<ListSort, string> = {
 };
 
 /**
- * The pipeline, first stage first: Saved (status "interested", what the student kept from the feed),
- * then To apply, Applying and Applied. active: To apply and Applying together, the ones still to
- * send. all: every stage.
+ * Applications lists To apply, Applying and Applied. Interested lives on the Saved page.
+ * active: To apply and Applying together, the ones still to send. all: every application stage.
  */
-export type StatusFilter = 'saved' | 'active' | 'to_apply' | 'applying' | 'applied' | 'all';
-export const STATUS_FILTERS: StatusFilter[] = ['saved', 'active', 'to_apply', 'applying', 'applied', 'all'];
+export type StatusFilter = 'active' | 'to_apply' | 'applying' | 'applied' | 'all';
+export const STATUS_FILTERS: StatusFilter[] = ['active', 'to_apply', 'applying', 'applied', 'all'];
 export const statusFilterLabel: Record<StatusFilter, string> = {
-  saved: 'Saved',
   active: 'All active',
   to_apply: 'To apply',
   applying: 'Applying',
@@ -55,14 +53,10 @@ export const statusFilterLabel: Record<StatusFilter, string> = {
   all: 'Everything',
 };
 
-/** The stage a Saved page link (or an old /saved address) asks for, from ?stage=. */
+/** The stage an Applications link asks for, from ?stage=. "saved" is not a stage here. */
 export function stageFromQuery(value: string | null): StatusFilter | null {
+  if (value === 'saved') return null;
   return STATUS_FILTERS.includes(value as StatusFilter) ? (value as StatusFilter) : null;
-}
-
-/** Where the old /saved address goes: Sheet view when that was open, otherwise the Saved stage. */
-export function savedPageTarget(search: string): string {
-  return new URLSearchParams(search).get('view') === 'sheet' ? '/applications?view=sheet' : '/applications?stage=saved';
 }
 
 export interface ListPrefs {
@@ -114,23 +108,22 @@ export function progressLabel(p: { done: number; total: number }): string {
 }
 
 /**
- * One row per application, Saved ones included. The live stream's statuses are the freshest, the
- * GET /applications records carry the title, the custom flag and the portal, and the postings fill
- * in the kind and anything a record leaves out. A posting saved a moment ago that the account has
- * not echoed yet (`saved`, with its card in `postings`) is shown as Saved straight away, so a
- * save never seems to vanish.
+ * One row per application the student is actually working on. The live stream's statuses are the
+ * freshest, the GET /applications records carry the title, the custom flag and the portal, and the
+ * postings fill in the kind and anything a record leaves out. Interested records and bare saves
+ * stay on the Saved page, so they are not rows here.
  */
-export function mergeApplications(live: Record<string, TrackedApplication>, records: ApplicationRecord[] | null, postings: Opportunity[], saved: string[] = []): ListApplication[] {
+export function mergeApplications(live: Record<string, TrackedApplication>, records: ApplicationRecord[] | null, postings: Opportunity[]): ListApplication[] {
   const byRecord = new Map((records ?? []).map((r) => [r.opportunityId, r]));
   const byPosting = new Map(postings.map((o) => [o.id, o]));
-  const ids = [...new Set([...Object.keys(live), ...byRecord.keys(), ...saved.filter((id) => byPosting.has(id))])];
+  const ids = [...new Set([...Object.keys(live), ...byRecord.keys()])];
   const rows: ListApplication[] = [];
   for (const id of ids) {
     const tracked = live[id];
     const record = byRecord.get(id);
     const posting = byPosting.get(id);
-    const status = tracked?.status ?? record?.status ?? (saved.includes(id) ? 'interested' : undefined);
-    if (!status) continue;
+    const status = tracked?.status ?? record?.status;
+    if (!status || status === 'interested') continue;
     const custom = record?.custom ?? id.startsWith('custom-');
     rows.push({
       opportunityId: id,
@@ -180,8 +173,8 @@ export function sortApplications(list: ListApplication[], sort: ListSort): ListA
 }
 
 export function matchesStatus(a: ListApplication, status: StatusFilter): boolean {
+  if (a.status === 'interested') return false;
   if (status === 'all') return true;
-  if (status === 'saved') return a.status === 'interested';
   return status === 'active' ? a.status === 'to_apply' || a.status === 'applying' : a.status === status;
 }
 

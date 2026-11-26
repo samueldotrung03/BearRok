@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { addToCalendarUrl, type DeadlineEvent } from '../calendar.ts';
 import { resumeInfo, type Resume, type ResumeInfo } from '../resume.ts';
 import { canonicalUrl } from '../validate.ts';
+import { gateLiveCard, quoteOnPage } from './evidence.ts';
 import type { Brain, DraftedApplication } from './brain.ts';
 import { cleanDraft, cleanTabs, emptyPortal, mergeTabs, PORTAL_LIMITS, portalBytes, tabsFromDraft, tabsFromPosting } from './portal.ts';
 import { Fleet, limiter } from './fleet.ts';
@@ -75,6 +76,8 @@ export interface SystemOptions {
   typingPauseMs: number;
   /** Cards the feed should hold. While it has fewer, the agents search again on their own. */
   feedTarget: number;
+  /** Cap on leads each scout may return. Live CLI sets 2; API and simulated stay at 4. */
+  scoutMaxLeads: number;
   /** Searches in a row the agents may start to fill the feed before they stop and wait for the student. */
   maxFillRuns: number;
   /** Finds each posting's picture. Without it postings keep whatever picture the reader gave, unchecked. */
@@ -83,6 +86,8 @@ export interface SystemOptions {
   imageBackfill?: number;
   /** Which model family a live brain talks to, for labelling. */
   provider?: 'grok' | 'claude' | 'gpt';
+  /** Used by the live evidence gate to open posting pages. Defaults to global fetch. */
+  fetch?: typeof fetch;
   now: () => Date;
 }
 
@@ -94,6 +99,7 @@ export const DEFAULT_OPTIONS: SystemOptions = {
   managerStaggerMs: 0,
   typingPauseMs: 4000,
   feedTarget: 12,
+  scoutMaxLeads: 4,
   maxFillRuns: 4,
   now: () => new Date(),
 };
@@ -801,19 +807,11 @@ export class AgentSystem {
   }
 
   /**
-   * Saved and Applications are one list: a saved posting is an application at the first stage,
-   * Saved (status "interested"). Saves made before saving started tracking, or whose application
-   * was lost, get that application here, so nothing saved goes missing from Applications. Nothing
-   * is removed and no status is changed. Returns how many were added.
+   * Saving does not create an application. Existing records are left as they are, including ones
+   * already stored as Interested. Returns how many were added, which is always none.
    */
   migrateSaved(): number {
-    const memory = this.memory();
-    let added = 0;
-    for (const id of memory.saved) {
-      if (this.applications.has(id) || !this.opportunities.has(id) || memory.reaction.get(id) === 'dislike') continue;
-      if (this.setApplication(id, { status: 'interested' })) added++;
-    }
-    return added;
+    return 0;
   }
 
   /**
@@ -892,12 +890,11 @@ export class AgentSystem {
     if (!this.opportunities.has(opportunityId)) return null;
     this.interactions.push({ opportunityId, action, at: this.opts.now().toISOString() });
     if (action !== 'open') this.feedbackSinceRun++;
-    // Saving starts tracking it as Interested. Unsaving one that never got further stops tracking it.
+    // Saving does not create an application. Unsaving an Interested one that has nothing written removes it.
     if (action === 'save') {
       const nowSaved = this.memory().saved.has(opportunityId);
       const app = this.applications.get(opportunityId);
-      if (nowSaved && !app) this.setApplication(opportunityId, { status: 'interested' });
-      else if (!nowSaved && app?.status === 'interested' && Object.keys(app.drafts).length === 0 && !portalHasWork(app.portal)) this.removeApplication(opportunityId);
+      if (!nowSaved && app?.status === 'interested' && Object.keys(app.drafts).length === 0 && !portalHasWork(app.portal)) this.removeApplication(opportunityId);
     }
     this.emitStudent();
     if (this.feedbackSinceRun >= this.opts.feedbackThreshold) void this.trigger('feedback');
@@ -1013,7 +1010,7 @@ export class AgentSystem {
 
   /**
    * Everything saved, and anything with an application status, one entry each: soonest deadline
-   * first, with no deadline after, as the tracker sheet lists them.
+   * first, with no deadline after. The Saved and Applications sheet tabs are this list, split.
    */
   trackerItems(): TrackerItem[] {
     const memory = this.memory();
@@ -1595,6 +1592,8 @@ export class AgentSystem {
           return { value: usable ? value : null, summary: usable ? `${value.deadline.slice(0, 10)} on another listing` : value ? 'only a date that cannot be used' : 'no listing states one' };
         });
         if (!hit) return;
+        // Live runs: the quote must appear on the listing page before it is stored.
+        if (this.brain.mode === 'live' && !(await quoteOnPage(hit.quote, hit.url, this.opts.fetch ?? fetch))) return;
         o.deadline = new Date(hit.deadline).toISOString();
         o.deadlineSource = 'listing';
         o.unknowns = o.unknowns.filter((u) => u.field !== 'deadline');
@@ -1604,7 +1603,7 @@ export class AgentSystem {
       };
 
       /** Decide one posting once its last review is in. */
-      const settle = (key: string, f: Found) => {
+      const settle = async (key: string, f: Found) => {
         const v = run.validations.find((x) => x.id === idFor(key))!;
         const both = verdicts.get(key) ?? {};
         // The status reviewer read the official page, so its version of the facts is the one kept;
@@ -1659,18 +1658,39 @@ export class AgentSystem {
           return;
         }
         this.lowMatch.delete(key);
+        let record = c;
+        let host: 'ok' | 'blocked' = 'ok';
+        if (this.brain.mode === 'live') {
+          const gated = await gateLiveCard(c, this.opts.fetch ?? fetch);
+          if (!gated.keep) {
+            v.status = 'rejected';
+            v.reason = gated.reason;
+            Object.assign(v.reviews.find((r) => r.focus === 'status')!, { status: 'rejected', reason: gated.reason, fit: null });
+            run.stats.rejected++;
+            this.pending.delete(key);
+            this.opportunities.delete(v.id);
+            this.lowMatch.delete(key);
+            this.rejected.set(key, gated.reason);
+            this.rejectedUrls.add(f.candidate.sourceUrl);
+            log('Validation agents', `Rejected "${f.candidate.title}". ${gated.reason}`.replace(/\.?$/, '.'), 'bad');
+            this.emitStudent();
+            return;
+          }
+          record = gated.record;
+          host = gated.host;
+        }
         v.status = 'kept';
         v.reason = match.reason;
         const id = v.id;
         const previous = this.opportunities.get(id);
-        const unknowns: Unknown[] = c.deadline ? [] : [{ field: 'deadline', label: UNKNOWN_DEADLINE[CATEGORY_OF[c.type]] }];
+        const unknowns: Unknown[] = record.deadline ? [] : [{ field: 'deadline', label: UNKNOWN_DEADLINE[CATEGORY_OF[record.type]] }];
         const o: Opportunity = {
-          ...c,
+          ...record,
           id,
           origin: this.brain.mode === 'live' ? 'live' : 'prepared',
           fitExplanation: v.reason,
           unknowns,
-          deadlineSource: c.deadline ? (c.deadlineSource ?? 'official') : null,
+          deadlineSource: record.deadline ? (record.deadlineSource ?? 'official') : null,
           foundAt: previous?.foundAt ?? now().toISOString(),
           lastCheckedAt: now().toISOString(),
           baseScore: fit,
@@ -1687,7 +1707,7 @@ export class AgentSystem {
         run.stats.kept = kept.length;
         run.stats.added = this.newIds.size;
         this.emitStudent();
-        if (!o.deadline) working.push(findDeadline(o).catch((e) => log('Worker fleet', `Deadline finder failed for "${o.title}": ${errorText(e)}`, 'bad')));
+        if (!o.deadline && host !== 'blocked') working.push(findDeadline(o).catch((e) => log('Worker fleet', `Deadline finder failed for "${o.title}": ${errorText(e)}`, 'bad')));
         // A re-found posting keeps the picture it already has.
         if (previous?.imageKind && previous.image) Object.assign(o, { image: previous.image, imageKind: previous.imageKind, imageCredit: previous.imageCredit, imageCreditUrl: previous.imageCreditUrl, imageTriedAt: previous.imageTriedAt, poster: previous.poster, posterTriedAt: previous.posterTriedAt, icon: previous.icon, iconTriedAt: previous.iconTriedAt });
         else if (finder) working.push(findImage(o).catch((e) => log('Worker fleet', `Picture finder failed for "${o.title}": ${errorText(e)}`, 'bad')));
@@ -1811,7 +1831,7 @@ export class AgentSystem {
             const readers = Math.max(scouts.length, a.budget - scouts.length);
             const specs = scouts.map((s, i) => ({
               ...s,
-              maxLeads: Math.min(4, Math.floor(readers / scouts.length) + (i < readers % scouts.length ? 1 : 0)),
+              maxLeads: Math.min(this.opts.scoutMaxLeads, Math.floor(readers / scouts.length) + (i < readers % scouts.length ? 1 : 0)),
             }));
             set(manager, { detail: `Covering: ${a.focus.join(', ')}` });
             log(a.name, `Sent ${specs.length} scouts: ${specs.map((s) => s.label).join(' / ')}`);

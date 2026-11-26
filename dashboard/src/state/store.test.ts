@@ -107,21 +107,30 @@ describe('saved migration', () => {
     },
   });
 
-  it('adds a Saved application for each save that has none, and changes nothing else', () => {
+  it('leaves existing saves and applications alone', () => {
     const before = legacy();
     const next = migrateSavedState(before);
-    expect(next).not.toBe(before);
+    expect(next).toBe(before);
     expect(next.saved).toEqual(['keep', 'already', 'gone']);
-    expect(next.dismissed).toEqual(['gone']);
-    expect(next.applications.keep).toEqual({ status: 'interested', drafts: {}, materialsDone: [] });
+    expect(next.applications.keep).toBeUndefined();
     expect(next.applications.already).toEqual(before.applications.already);
-    expect(next.applications.gone).toBeUndefined();
     expect(next.profile).toEqual(before.profile);
-    // A second pass finds nothing to add, so the same object comes back.
-    expect(migrateSavedState(next)).toBe(next);
   });
 
-  it('loadState migrates a saved list that was stored before applications tracked it', () => {
+  it('saving does not create an application, and unsaving Interested drops that record', () => {
+    const saved = reducer({ ...initialState, saved: [], applications: {} }, { type: 'toggleSaved', id: 'opp-bay-hack' });
+    expect(saved.saved).toContain('opp-bay-hack');
+    expect(saved.applications['opp-bay-hack']).toBeUndefined();
+    const interested = reducer(saved, { type: 'setApplication', id: 'opp-bay-hack', status: 'interested' });
+    const unsaved = reducer(interested, { type: 'toggleSaved', id: 'opp-bay-hack' });
+    expect(unsaved.saved).not.toContain('opp-bay-hack');
+    expect(unsaved.applications['opp-bay-hack']).toBeUndefined();
+    const applying = reducer(saved, { type: 'setApplication', id: 'opp-bay-hack', status: 'to_apply' });
+    const still = reducer(applying, { type: 'toggleSaved', id: 'opp-bay-hack' });
+    expect(still.applications['opp-bay-hack']?.status).toBe('to_apply');
+  });
+
+  it('loadState does not turn a stored save into an application', () => {
     const box = new Map<string, string>();
     const previous = globalThis.localStorage;
     Object.assign(globalThis, {
@@ -144,7 +153,7 @@ describe('saved migration', () => {
       }),
     );
     const loaded = loadState({ ...initialState, saved: [], dismissed: [], applications: {} });
-    expect(loaded.applications['legacy-save']).toEqual({ status: 'interested', drafts: {}, materialsDone: [] });
+    expect(loaded.applications['legacy-save']).toBeUndefined();
     expect(loaded.applications.tracked).toMatchObject({ status: 'to_apply', drafts: { 0: 'keep me' } });
     expect(loaded.saved).toEqual(['legacy-save', 'tracked']);
     expect(loaded.profile.name).toBe('Ada Lovelace');

@@ -1,0 +1,17 @@
+{
+  "id": "scholarship",
+  "covers": "scholarship",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Computing scholarships I can apply to this year."
+  },
+  "pages": {
+    "https://brambleton-fellows.example/scholarship": "scholarship.html"
+  },
+  "expected": {
+    "required": [{ "title": "Brambleton Fellows Scholarship", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

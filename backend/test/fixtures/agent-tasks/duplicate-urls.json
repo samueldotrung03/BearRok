@@ -1,0 +1,18 @@
+{
+  "id": "duplicate-urls",
+  "covers": "duplicate-urls",
+  "student": {
+    "classYear": "Sophomore",
+    "location": "Berkeley, CA",
+    "remoteOk": true,
+    "notes": "Product internships, remote is fine."
+  },
+  "pages": {
+    "https://copperfinch.example/careers/product-intern": "duplicate-urls.html",
+    "https://boards.example/copperfinch-product-intern": "duplicate-urls-board.html"
+  },
+  "expected": {
+    "required": [{ "title": "Product Intern", "deadlineRequired": true }],
+    "forbidden": []
+  }
+}

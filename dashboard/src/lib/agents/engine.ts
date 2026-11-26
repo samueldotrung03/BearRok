@@ -1,7 +1,8 @@
-// The simulated agent run behind the Agents page. A run is planned up front as a list of beats
+// Sample-data reducer and graph types for an agent run. A run is planned up front as a list of beats
 // (one beat is one moment in which several agents act in parallel), and a reducer plays them back
 // one tick at a time. Everything is a pure function of the input and a seed, so a run can be
-// replayed, paused and tested; the page only decides how fast ticks arrive.
+// replayed, paused and tested. The Agents page reads the live backend through fromLive.ts; this
+// module still owns the graph types that view uses.
 //
 // The roles and the order follow backend/AGENT_SYSTEM.md: master -> search managers -> scouts and
 // extractors -> validators -> presentation manager -> feed. Only what a worker found can reach a

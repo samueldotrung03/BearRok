@@ -26,10 +26,9 @@ describe('Applications page', { timeout: 120_000 }, () => {
       createElement(MemoryRouter, null, createElement(AuthProvider, null, createElement(StoreProvider, null, createElement(LiveProvider, null, createElement(Applications))))),
     );
     expect(html).toContain('New application');
-    expect(html).toContain('Save a card in the feed and it is kept here as Saved');
-    expect(html).toContain('saving also tells the agents to look for more like it');
-    // Saved is a stage here now, so nothing links to the old page.
-    expect(html).not.toContain('href="/saved"');
+    expect(html).toContain('it stays on Saved until you are ready to apply');
+    expect(html).toContain('href="/saved"');
+    expect(html).toContain('Go to Saved');
     expect(html).toContain('Go to the feed');
     // The old page's sample-driven parts are gone.
     expect(html).not.toContain('Export all deadlines');
@@ -99,7 +98,7 @@ describe('application row', { timeout: 120_000 }, () => {
     expect(html).not.toContain('Start application');
   });
 
-  it('a Saved row is the first stage: it starts the application, opens its details in place, or is removed', async () => {
+  it('an Interested row is not a Saved row: it opens the portal and has no start, details or remove', async () => {
     const { ApplicationListRow } = await import('./ApplicationListRow.tsx');
     const { opportunities } = await import('../../../data/sample.ts');
     const now = Date.parse('2026-11-19T12:00:00Z');
@@ -112,12 +111,10 @@ describe('application row', { timeout: 120_000 }, () => {
       }),
     );
     expect(html).toContain('data-status="interested"');
-    expect(html).toContain('>Saved<');
-    expect(html).toContain('Start application');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('Details');
-    expect(html).toContain(`aria-label="Remove ${posting.title.replace(/&/g, '&amp;')} from Saved"`);
-    // Only one primary action on the row.
-    expect(html.match(/btn-primary/g)?.length ?? 0).toBeLessThanOrEqual(1);
+    expect(html).toContain('>Interested<');
+    expect(html).toContain('Open application');
+    expect(html).not.toContain('Start application');
+    expect(html).not.toContain('aria-expanded');
+    expect(html).not.toContain('Remove');
   });
 });

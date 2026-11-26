@@ -1,15 +1,17 @@
 # BearRok
 
-**BearRok brings internships, events, clubs, programs, and career paths to one student, then keeps a roadmap and the applications.**
+**BearRok** brings internships, events, clubs, programs, and career paths to one student, then keeps a roadmap and the applications.
+
+**Bold** is an agent or a part of BearRok. *Italic* is a limit. <u>Underline</u> is a rule you must not miss.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-24%2B-339933?style=flat&logo=nodedotjs&logoColor=white)
 
-There is no license file in this repo, and there are no GitHub workflows.
+<u>There is no license file</u> in this repo, and there are no GitHub workflows.
 
 ![The For you reel](docs/screenshots/feed.png)
 
-The For you reel for the demo student. The badge says Simulated agents. These cards were read from organizer pages on 2026-11-25. They are not the result of a live agent run.
+The For you reel for the demo student. The badge says Simulated agents. These cards were read from organizer pages on 2026-11-25. <u>These cards are not a live agent run</u>.
 
 > **One minute.** Node 24 or newer. Two terminals, from a clone of this repo.
 >
@@ -47,7 +49,7 @@ The For you reel for the demo student. The badge says Simulated agents. These ca
 
 ## The problem
 
-A student hears about internships, events, clubs, research, scholarships, and careers in different places. Deadlines live on organizer pages, and a closed posting is easy to miss. BearRok keeps one feed, one roadmap, and a list of applications for that student.
+A student hears about internships, events, clubs, research, scholarships, and careers in different places. Deadlines live on organizer pages, and a closed posting is easy to miss. **BearRok** keeps one feed, one roadmap, and a list of applications for that student.
 
 ## The answer
 
@@ -58,42 +60,58 @@ Gold nodes are the **Host**. Blue nodes are one model call.
 1. Plan
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "16px"}}}%%
 flowchart LR
-  h1["Host<br/>Plans four slots and names them"] --> m["Master<br/>Writes the brief, lenses, and focus"] --> h2["Host<br/>Writes kind, name, and category back"] --> sm["Search manager<br/>At most three jobs"]
+  h1["Host<br/>Plans four slots"] --> m["Master<br/>Writes the brief"] --> h2["Host<br/>Writes the kind back"]
   classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
   classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
   class h1,h2 host
-  class m,sm agent
+  class m agent
 ```
 
-2. Find
+2. Search
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "16px"}}}%%
 flowchart LR
-  sc["Scout<br/>Returns title and URL"] --> h3["Host<br/>Slices the lead list"] --> ex["Extractor<br/>Opens the lead"] --> st["Status reviewer<br/>May reject"]
+  sm["Search manager<br/>At most three jobs"] --> sc["Scout<br/>Returns title and URL"] --> h3["Host<br/>Slices the leads"]
   classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
   classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
   class h3 host
-  class sc,ex,st agent
+  class sm,sc agent
 ```
 
-3. Check
+3. Read
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "16px"}}}%%
 flowchart LR
-  cr["Criteria reviewer<br/>Scores the match. Does not reject"] --> h4["Host<br/>Drops, scores, and gates"] --> df["Deadline finder<br/>Only when no deadline remains"] --> pr["Presentation manager<br/>Writes one reason"]
+  ex["Extractor<br/>Opens the lead"] --> st["Status reviewer<br/>May reject"] --> cr["Criteria reviewer<br/>Scores, no reject"]
+  classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
+  classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
+  class ex,st,cr agent
+```
+
+4. Keep
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "16px"}}}%%
+flowchart LR
+  h4["Host<br/>Drops and gates"] --> df["Deadline finder<br/>If no deadline"] --> pr["Presentation<br/>Writes one reason"]
   classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
   classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
   class h4 host
-  class cr,df,pr agent
+  class df,pr agent
 ```
 
-4. Order
+5. Order
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "16px"}}}%%
 flowchart LR
-  h5["Host<br/>Ranks the feed and can stop the run"]
+  h5["Host<br/>Ranks the feed"]
   classDef host fill:#fff6d8,stroke:#b08900,color:#1a1a1a
+  classDef agent fill:#eef2ff,stroke:#3b4cca,color:#1a1a1a
   class h5 host
 ```
 
@@ -110,79 +128,79 @@ Each live agent is one model call checked against a schema. **SimBrain** fills t
 
 ## Why you can trust it
 
-```
+<pre>
 Trust
-├── Host
-│   ├── plans kinds and names before the Master (`planLineup` in `lineup.ts`)
+├── <b>Host</b>
+│   ├── plans kinds and names before the <b>Master</b> (`planLineup` in `lineup.ts`)
 │   ├── writes kind, name, and category back (`system.ts`)
 │   ├── slices leads after the model answers (`data.leads.slice`)
-│   ├── CLI target 8, and `FEED_MIN` does not change it (`engine()` in `server.ts`)
-│   ├── API and simulated target 12, scout cap 4, at most four fills (`config.feed`, `DEFAULT_OPTIONS`)
+│   ├── CLI target <i>8</i>, and `FEED_MIN` does not change it (`engine()` in `server.ts`)
+│   ├── API and simulated target <i>12</i>, scout cap <i>4</i>, <i>at most four fills</i> (`config.feed`, `DEFAULT_OPTIONS`)
 │   ├── parses every live call (`grokJson` calls `schema.parse`)
 │   ├── stops with `withSignal` and `StoppedError` (`stop.ts`)
 │   ├── drops closed, expired, or unlinkable cards before the score (`hardCheck` in `match.ts`)
-│   ├── keeps the criteria verdict, then applies the minimum, default 30 (`meetsThreshold`)
+│   ├── keeps the criteria verdict, then applies the minimum, <i>default 30</i> (`meetsThreshold`)
 │   ├── overrules a groundless rejection (`groundlessReject` in `reviewGuard.ts`)
 │   ├── live gate (`gateLiveCard` in `evidence.ts`)
 │   │   ├── unreachable link drops the card
 │   │   ├── blocked fetch keeps the card and clears the deadline
 │   │   └── a quote stays only if each sentence of 12 or more characters is on the page
 │   └── stores another listing's deadline only after `quoteOnPage`, and not if the date has passed
-├── Search manager
-│   └── at most three jobs (`planJobs` keeps `data.jobs.slice(0, 3)`)
-├── Scout
-│   ├── the CLI **Scout** is told not to open pages, but that call omits maxTurns, so grokCli.ts also says to open them. The Host still slices to two leads
-│   ├── when `scoutMaxLeads` is set, that string also says to run the query once and return at most two title-and-URL pairs
+├── <b>Search manager</b>
+│   └── <i>at most three jobs</i> (`planJobs` keeps `data.jobs.slice(0, 3)`)
+├── <b>Scout</b>
+│   ├── <u>the CLI <b>Scout</b> is told not to open pages, but that call omits maxTurns, so grokCli.ts also says to open them. The <b>Host</b> still slices to <i>two leads</i></u>
+│   ├── when `scoutMaxLeads` is set, that string also says to run the query once and return <i>at most two title-and-URL pairs</i>
 │   ├── tools are `web_search`, plus `x_search` when `XAI_X_SEARCH=1`
 │   └── the API prompt does not say to skip opening pages
-├── Criteria reviewer
+├── <b>Criteria reviewer</b>
 │   └── scores the match and does not reject
-├── Deadline finder
+├── <b>Deadline finder</b>
 │   └── its prompt says to open pages, and it also omits maxTurns, so those two lines agree
-├── Search
+├── <b>Search</b>
 │   ├── web off: `tools: []`, and the prompt says to rank only the student's own postings
-│   └── web on: one lookup (`web_search` only, `maxTurns` 2), then a fill with no tools that says not to search
-├── Roadmap
+│   └── web on: one lookup (`web_search` only, <i>maxTurns 2</i>), then a fill with no tools that says not to search
+├── <b>Roadmap</b>
 │   ├── one search, then a fill with no tools (`writeRoadmap`)
 │   ├── a thin draft is filled again with no tools
 │   └── `x_search` only when `XAI_X_SEARCH=1`
-└── Career
-    ├── one search (`careerSearch`, `maxTurns` 2), then writers with no tools
+└── <b>Career</b>
+    ├── one search (`careerSearch`, <i>maxTurns 2</i>), then writers with no tools
     └── `x_search` only when the harness provider is Grok, not from `XAI_X_SEARCH`
-```
+</pre>
 
 `GROK_CLI_ALWAYS_APPROVE` stays unset. `1` would pass `--always-approve`, which also approves shell and file tools.
 
 ## What one run does
 
-```
+<pre>
 One run
 ├── Starts
 │   ├── manual request, profile change, schedule, or automode
-│   ├── the fifth save, like, or dislike (`feedbackThreshold` 5)
+│   ├── the fifth save, like, or dislike (`feedbackThreshold` <i>5</i>)
 │   ├── a fill when the feed is under its target
 │   ├── a first visit only when `runCount` is 0
 │   └── the demo student is stored with `runCount` 1, so opening that feed does not search
 ├── CLI size
-│   ├── about 8 cards
-│   ├── 2 leads per scout
-│   ├── `GROK_CLI_CONCURRENCY` 3
-│   └── `LIVE_MAX_JOBS` 12
+│   ├── about <i>8</i> cards
+│   ├── <i>2 leads</i> per <b>Scout</b>
+│   ├── `GROK_CLI_CONCURRENCY` <i>3</i>
+│   └── `LIVE_MAX_JOBS` <i>12</i>
 ├── API and simulation size
-│   ├── target `FEED_MIN` 12
-│   ├── scout cap 4
-│   └── up to `FEED_FILL_MAX_RUNS` 4
+│   ├── target `FEED_MIN` <i>12</i>
+│   ├── scout cap <i>4</i>
+│   └── up to `FEED_FILL_MAX_RUNS` <i>4</i>
 ├── Kept card
 │   ├── stored as it is kept, origin `live` or `prepared`
 │   ├── the presentation reason is stored beside it
-│   ├── the four strongest new cards, by match, go to the **Application reader**
+│   ├── the <i>four strongest new cards</i>, by match, go to the <b>Application reader</b>
 │   ├── when the shared opportunities table is open, saving memory copies postings into it
 │   └── the search does not read that table
 └── Reminders
-    ├── default 7, 2, and 0 days before a deadline
-    ├── the app records them and sends no email
+    ├── default <i>7, 2, and 0 days</i> before a deadline
+    ├── the app records them and <u>sends no email</u>
     └── with Google Calendar connected, the same offsets are popup minutes
-```
+</pre>
 
 ## A look inside
 
@@ -212,34 +230,34 @@ Applications (`/applications`) and Saved (`/saved`) were empty for this guest: n
 
 ## Meet the agents
 
-Opportunity search roles that the host actually calls:
+Opportunity search roles that the **Host** actually calls:
 
 | Role | May | May never |
 | --- | --- | --- |
-| Master | Write the brief, lenses, and focus. Read the profile, résumé text, and memory | Assign manager kinds or names. The host overwrites those |
-| Search manager | Turn one assignment into at most three search jobs | Cover another manager's kind. The host set the kind |
-| Scout | Return title-and-URL leads, sliced to the cap | Invent a URL the host will trust without the later checks. On the CLI, the system string says not to open pages; the CLI wrapper still says to open them when `maxTurns` is omitted |
-| Extractor | Open the lead and fill a record with quotes from that page | Search other listings for a deadline. That is the deadline finder's job |
-| Deadline finder | Run the three named queries and return a date, a URL, and a quote | Store the date by itself. The host checks the quote and drops past dates |
-| Status reviewer | Keep or reject from the posting's own page | Set the match score |
-| Criteria reviewer | Score the match | Reject the card. The host applies the minimum |
-| Presentation manager | Write one reason sentence per card | Order the feed or write the roadmap. The on-screen role string still says it orders the feed. `present()` does not |
-| Application reader | Read prompts and required materials on the apply page, for up to four new cards | Decide whether the card stays in the feed |
+| **Master** | Write the brief, lenses, and focus. Read the profile, résumé text, and memory | Assign manager kinds or names. The **Host** overwrites those |
+| **Search manager** | Turn one assignment into *at most three* search jobs | Cover another manager's kind. The **Host** set the kind |
+| **Scout** | Return title-and-URL leads, sliced to the cap | Invent a URL the **Host** will trust without the later checks. On the CLI, the system string says not to open pages; the CLI wrapper still says to open them when `maxTurns` is omitted |
+| **Extractor** | Open the lead and fill a record with quotes from that page | Search other listings for a deadline. That is the **Deadline finder**'s job |
+| **Deadline finder** | Run the three named queries and return a date, a URL, and a quote | Store the date by itself. The **Host** checks the quote and drops past dates |
+| **Status reviewer** | Keep or reject from the posting's own page | Set the match score |
+| **Criteria reviewer** | Score the match | Reject the card. The **Host** applies the minimum |
+| **Presentation manager** | Write one reason sentence per card | Order the feed or write the roadmap. The on-screen role string still says it orders the feed. `present()` does not |
+| **Application reader** | Read prompts and required materials on the apply page, for up to *four* new cards | Decide whether the card stays in the feed |
 
 Career discovery, when a student asks for a guide:
 
 | Role | May | May never |
 | --- | --- | --- |
-| Career master | Name the career and set each part's angle (`career_plan`). On "Add more", decide whether the ask stays on the guide or belongs on the feed (`career_ask`) | Search. Those calls set no tools |
-| Career manager | Nothing as a model. `managerBrief` writes the researcher's job as text | Call a model. `CAREER_TIERS.manager` is `none` |
-| Career search | One search, `maxTurns` 2. `x_search` only when the harness provider is Grok | Look for internships or postings. The prompt forbids that |
-| Researcher, validator, presentation | Write or check one part from the notes already gathered. No tools are set | Search. Voices on a harness that is not Grok are sample stories, and the code labels them that way |
+| **Career master** | Name the career and set each part's angle (`career_plan`). On "Add more", decide whether the ask stays on the guide or belongs on the feed (`career_ask`) | Search. Those calls set no tools |
+| **Career manager** | Nothing as a model. `managerBrief` writes the **Researcher**'s job as text | Call a model. `CAREER_TIERS.manager` is `none` |
+| **Career search** | One search, *maxTurns 2*. `x_search` only when the harness provider is Grok | Look for internships or postings. The prompt forbids that |
+| **Researcher**, **validator**, **presentation** | Write or check one part from the notes already gathered. No tools are set | Search. Voices on a harness that is not Grok are sample stories, and the code labels them that way |
 
-SimBrain implements the same opportunity-search brain when no model is connected. Other model calls in `grokBrain.ts`: calendar event, calendar sorter, illustrator, poster designer, poster art review, icon drawer, and application drafter.
+**SimBrain** implements the same opportunity-search brain when no model is connected. Other model calls in `grokBrain.ts`: **calendar event**, **calendar sorter**, **illustrator**, **poster designer**, **poster art review**, **icon drawer**, and **application drafter**.
 
 ## Why now
 
-The listings already exist on organizer pages, department sites, and event listings. What a student still does by hand is keep the ones that fit, notice the deadline, and remember where an application stands. BearRok is that list, a roadmap toward a career goal, and a tracker. Order comes from this student's history. An older draft of this README described the feed as the X For You algorithm. That was a plan. This code does not do that, and no pass^k evaluation has been run.
+The listings already exist on organizer pages, department sites, and event listings. What a student still does by hand is keep the ones that fit, notice the deadline, and remember where an application stands. **BearRok** is that list, a roadmap toward a career goal, and a tracker. Order comes from this student's history. An older draft of this README described the feed as the X For You algorithm. That was a plan. <u>This is not the X For You algorithm</u>. <u>No pass^k evaluation has been run</u>.
 
 ## Try it
 
@@ -247,7 +265,7 @@ The listings already exist on organizer pages, department sites, and event listi
 
 Start the backend with no `XAI_API_KEY` and no harness connected in Settings. Start the dashboard. Sign-in stays off unless `FIREBASE_WEB_API_KEY` and `FIREBASE_PROJECT_ID` are set, and the app enters as the guest. Today greets John. The feed is his preloaded postings (`origin` `live`, found by a web check on 2026-11-25). The badge says Simulated agents because no model is connected.
 
-The Agents page hides Run now until a model is connected. The backend still builds a SimBrain when nothing is connected. A run that does start, such as `POST /api/students/:id/runs`, searches the invented catalog in `backend/src/agents/catalog.ts` (those links are `example.org`) and stores cards with origin `prepared`. That catalog is not the feed in the screenshot.
+The Agents page hides Run now until a model is connected. The backend still builds a **SimBrain** when nothing is connected. A run that does start, such as `POST /api/students/:id/runs`, searches the invented catalog in `backend/src/agents/catalog.ts` (those links are `example.org`) and stores cards with origin `prepared`. That catalog is not the feed in the screenshot.
 
 `VITE_NO_SIGNIN` and `VITE_SAMPLE_FEED` are not read by the app. The only dashboard flag is `VITE_API_URL`.
 
@@ -265,25 +283,25 @@ npm run dev
 
 ### Live model
 
-Connect Claude, ChatGPT, or Grok in Settings, or set `XAI_API_KEY` for the xAI API. A feed run, a career guide, or a roadmap spends model time. Leave `GROK_CLI_ALWAYS_APPROVE` unset.
+Connect Claude, ChatGPT, or Grok in Settings, or set `XAI_API_KEY` for the xAI API. A feed run, a career guide, or a roadmap spends model time. <u>Leave GROK_CLI_ALWAYS_APPROVE unset</u>.
 
-The model does not open this app. The dashboard is a page on your machine. Grok cannot open `127.0.0.1`.
+The model does not open this app. The dashboard is a page on your machine. <u>Grok cannot open 127.0.0.1</u>.
 
-On the CLI, a run is the smaller one: feed target 8 and at most two leads per scout. On the API, the target stays 12.
+On the CLI, a run is the smaller one: *feed target 8* and at most *two leads on the CLI* per **Scout**. On the API, the *feed target 12*.
 
 ## How it works
 
 The dashboard is a React app on Vite, port 5173. It calls the backend at `VITE_API_URL`, default `http://localhost:8787`. The feed on screen is the backend's cards only. If the backend is down, the pages say so and stay empty. `Feed.tsx` then reorders those cards with `rankFeedDetailed`.
 
-Search from the search page is separate from a feed run. With a model and the web toggle on, `writeSearch` does one lookup (`web_search` only, `maxTurns` 2) and then fills the answer with no tools. The fill is told not to search. With a model and the web toggle off, the tool list is empty and the prompt says to rank only the student's own postings. `x_search` is not on this path. With no model, the local search marks `ai` false, and the page says: "Grok is not connected, so only your own postings were searched." It does not call the web route. That route, `POST /api/students/:id/search`, answers 503 if it is called with no model.
+Search from the search page is separate from a feed run. With a model and the web toggle on, `writeSearch` does one lookup (`web_search` only, *maxTurns 2*) and then fills the answer with no tools. The fill is told not to search. With a model and the web toggle off, the tool list is empty and the prompt says to rank only the student's own postings. `x_search` is not on this path. With no model, the local search marks `ai` false, and the page says: "Grok is not connected, so only your own postings were searched." It does not call the web route. That route, `POST /api/students/:id/search`, answers 503 if it is called with no model.
 
-A career guide is one search (`maxTurns` 2), then a researcher, a validator, and a presentation writer, each with no tools. `x_search` is included only when `provider()` is `grok`.
+A career guide is one search (*maxTurns 2*), then a **Researcher**, a **validator**, and a **presentation** writer, each with no tools. `x_search` is included only when `provider()` is `grok`.
 
-A roadmap is one search (`maxTurns` 2), then a fill with no tools. If the draft is thin, it is filled once more, still with no tools. `x_search` is included only when `config.xSearch` is on. With no model, the roadmap route answers 503 and the page draws the fixed-rule draft you see in the screenshot.
+A roadmap is one search (*maxTurns 2*), then a fill with no tools. If the draft is thin, it is filled once more, still with no tools. `x_search` is included only when `config.xSearch` is on. With no model, the roadmap route answers 503 and the page draws the fixed-rule draft you see in the screenshot.
 
-Opportunity workers (`tools()` in `grokBrain.ts`) get `web_search`, plus `x_search` when `XAI_X_SEARCH=1`. That includes the scout, the extractor, and the deadline finder.
+Opportunity workers (`tools()` in `grokBrain.ts`) get `web_search`, plus `x_search` when `XAI_X_SEARCH=1`. That includes the **Scout**, the **Extractor**, and the **Deadline finder**.
 
-An older clubs-and-events worker in `workers.ts` is still in the tree, with its own `maxTurns: 2` search. The feed run goes through `AgentSystem`, not that file.
+An older clubs-and-events worker in `workers.ts` is still in the tree, with its own *maxTurns 2* search. The feed run goes through `AgentSystem`, not that file.
 
 Google sign-in, Calendar, and Sheets are optional. Their variables live in `googleOAuth.ts`, not in the table below.
 
@@ -340,7 +358,7 @@ npm test
 npm run typecheck
 ```
 
-`npm test` is `node --test "test/*.test.ts"`. The files cover the host loop, the evidence gate, lineup, match, search, roadmap, careers, the harness, the Grok CLI argument builder, the demo student, and the shared table.
+`npm test` is `node --test "test/*.test.ts"`. The files cover the **Host** loop, the evidence gate, lineup, match, search, roadmap, careers, the harness, the Grok CLI argument builder, the demo student, and the shared table.
 
 ```
 cd dashboard
@@ -376,7 +394,7 @@ Search is already split into a lookup and a tool-free fill, in `search.ts`, `roa
 
 ## Read next
 
-- [backend/AGENT_SYSTEM.md](backend/AGENT_SYSTEM.md) is the design notes. It still says the master decides how many managers each kind gets, and that a card is kept only when both reviewers keep it. `system.ts` does not work that way: the host plans the lineup, and the criteria reviewer does not reject.
+- [backend/AGENT_SYSTEM.md](backend/AGENT_SYSTEM.md) is the design notes. It still says the **Master** decides how many managers each kind gets, and that a card is kept only when both reviewers keep it. `system.ts` does not work that way: the **Host** plans the lineup, and the **Criteria reviewer** does not reject.
 - [backend/src/agents/skills/index.ts](backend/src/agents/skills/index.ts) describes the two skills. Its opportunity-search card repeats those two stale lines. Trust `system.ts`.
 - [dashboard/README.md](dashboard/README.md) lists the routes. Its opening still says everything comes from `src/data/sample.ts` and that nothing calls the backend. The running app calls the backend.
 - [backend/README.md](backend/README.md) is how to run the server.

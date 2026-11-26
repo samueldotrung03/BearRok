@@ -126,7 +126,7 @@ export function wordsHeight(p: Poster, columnWidth = INNER_WIDTH): number {
  * wide one is a band above, between or below them, as large as the words leave room for.
  * `aspect` is the shown part's width over its height.
  */
-export function planArt(p: Poster, aspect: number, room = ROOM): ArtPlan {
+export function planArt(p: Poster, aspect: number, room = ROOM, allowSide = true): ArtPlan {
   if (p.arrangement === 'overlay') return { placement: 'overlay', width: 0, height: 0 };
   // A taller frame (the details window) gives the picture proportionally more room.
   const tall = room / ROOM;
@@ -140,7 +140,7 @@ export function planArt(p: Poster, aspect: number, room = ROOM): ArtPlan {
   const bandWidth = Math.min(INNER_WIDTH, bandHeight * aspect);
   const band: ArtPlan = { placement, width: bandWidth, height: bandWidth / aspect };
   // The agent's arrangement unless the picture would come out much bigger beside the words.
-  return side.width * side.height > 1.4 * band.width * band.height ? side : band;
+  return allowSide && side.width * side.height > 1.4 * band.width * band.height ? side : band;
 }
 
 /** Headline size in card widths, by length, so a long name still fits in a few lines. */

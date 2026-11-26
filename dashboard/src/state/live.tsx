@@ -96,6 +96,8 @@ interface BackendStudent {
   liked?: string[];
   /** The saved postings, whether or not the feed still shows their kind. */
   savedItems?: BackendFeedEntry[];
+  /** The postings the student disliked, most recent first, so a dislike can be taken back. */
+  dislikedItems?: BackendFeedEntry[];
   applications?: TrackedApplication[];
   sheet?: LinkedSheet | null;
   /** The Google connection, never with a token. Older backends leave it out. */
@@ -145,6 +147,10 @@ interface LiveValue {
   opportunities: Opportunity[];
   /** Saved postings the account holds, including ones the feed no longer shows. */
   savedCards: Opportunity[];
+  /** Postings the student disliked, most recent first. Disliking takes a card out of the feed. */
+  dislikedCards: Opportunity[];
+  /** Takes a dislike back: the card returns to the feed, on every device. */
+  undoDislike: (id: string) => void;
   /** Applications the account tracks, by posting: status, deadline, reminders and calendar. */
   applications: Record<string, TrackedApplication>;
   /** The linked Google Sheet, or null when the saved list lives only in the app. */
@@ -492,6 +498,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const simulated = student?.mode !== 'live';
   const liveCards = useMemo(() => (student?.feed ?? []).map((entry) => toCard(entry, simulated)), [student, simulated]);
   const savedCards = useMemo(() => (status === 'connected' ? (student?.savedItems ?? []).map((entry) => toCard(entry, simulated)) : []), [student, simulated, status]);
+  const dislikedCards = useMemo(() => (status === 'connected' ? (student?.dislikedItems ?? []).map((entry) => toCard(entry, simulated)) : []), [student, simulated, status]);
   const usingLive = status === 'connected' && liveCards.length > 0;
 
   // What the application readers collected goes where the pages already look for it.
@@ -532,7 +539,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!before || status !== 'connected') return;
-    const known = new Set([...liveCards, ...savedCards].map((o) => o.id));
+    // A disliked card counts too, so taking the dislike back reaches the agents.
+    const known = new Set([...liveCards, ...savedCards, ...dislikedCards].map((o) => o.id));
     const send = reactionSends(before, now, known);
     if (send.length === 0) return;
     void (async () => {
@@ -557,6 +565,23 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       // Only what the agents found. The sample set is not mixed in: pages show real results or say why they are empty.
       opportunities: liveCards,
       savedCards,
+      dislikedCards,
+      undoDislike: (id: string) => {
+        // Disliked on this device: taking it back here sends the undo with the other reactions.
+        if (state.dismissed.includes(id)) {
+          dispatch({ type: 'restore', id });
+          return;
+        }
+        // Disliked on another device: a second dislike sent to the agents takes the first back.
+        void (async () => {
+          const token = await auth.getToken().catch(() => null);
+          await fetch(`${API_URL}/api/students/${who}/interactions`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            body: JSON.stringify({ opportunityId: id, action: 'dislike' }),
+          }).catch(() => {});
+        })();
+      },
       applications: Object.fromEntries((status === 'connected' ? (student?.applications ?? []) : []).map((a) => [a.opportunityId, a])),
       sheet: status === 'connected' ? (student?.sheet ?? null) : null,
       calendar: { connected: calendarOn, ...calendarSync },
@@ -594,7 +619,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       memoryCounts,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [status, state.saved, usingLive, student, liveCards, savedCards, run, who, google, calendarOn, calendarSync, memoryCounts],
+    [status, state.saved, state.dismissed, usingLive, student, liveCards, savedCards, dislikedCards, run, who, google, calendarOn, calendarSync, memoryCounts],
   );
   return <LiveContext value={value}>{children}</LiveContext>;
 }

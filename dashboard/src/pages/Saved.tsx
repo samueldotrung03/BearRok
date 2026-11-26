@@ -1,11 +1,12 @@
 // What the student saved, kept with their account. Not every saved posting needs an application:
 // anything saved starts as Interested here, and moves to Applications only when its status is
-// To apply, Applying or Applied. A ?view=sheet address from the old combined page is dropped;
-// the spreadsheet stays on Applications.
+// To apply, Applying or Applied. List is the default. /saved?view=sheet opens the Saved tab of
+// the same Google Sheet the Applications page writes.
 import { ChevronDown, LayoutList, Search, X as XSmall } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { SavedDetails } from '../components/applications/SavedDetails.tsx';
+import { SheetView } from '../components/applications/SheetView.tsx';
 import { typeMeta } from '../components/meta.ts';
 import { OpportunityRow } from '../components/OpportunityCard.tsx';
 import { Card, Page } from '../components/Page.tsx';
@@ -19,6 +20,7 @@ import type { ApplicationStatus, Opportunity, OpportunityType } from '../types.t
 import { EmptyKind } from './Feed.tsx';
 
 type StatusFilter = 'all' | ApplicationStatus;
+type View = 'list' | 'sheet';
 
 type Sort = 'deadline' | 'recent' | 'fit';
 const sortLabel: Record<Sort, string> = { deadline: 'Soonest deadline', recent: 'Recently saved', fit: 'Best match' };
@@ -52,8 +54,10 @@ export function Saved() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [open, setOpen] = useState<string[]>([]);
   const [params, setParams] = useSearchParams();
-  // The spreadsheet lives on Applications. An old /saved?view=sheet link just shows this list.
+  const [view, setView] = useState<View>(params.get('view') === 'sheet' ? 'sheet' : 'list');
+  // /saved?view=sheet opens the sheet. The address is then plain /saved, and the choice stays while this page is open.
   useEffect(() => {
+    if (params.get('view') === 'sheet') setView('sheet');
     if (params.has('view')) setParams({}, { replace: true });
   }, [params, setParams]);
 
@@ -97,8 +101,22 @@ export function Saved() {
       ? 'What you decide to pursue, kept with your account.'
       : `${saved.length} saved${closingSoon ? `, ${closingSoon} closing this week` : ''}. Kept with your account, so every device shows the same.`;
 
+  const sheetKey = JSON.stringify([state.saved, Object.entries(live.applications).map(([id, a]) => [id, a.status, a.deadline])]);
+  const views = (
+    <div className="saved-tabs" role="tablist" aria-label="Saved views">
+      {(['list', 'sheet'] as View[]).map((value) => (
+        <button key={value} type="button" role="tab" aria-selected={view === value} onClick={() => setView(value)} className="saved-tab">
+          {value === 'list' ? 'List' : 'Sheet view'}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <Page title="Saved" subtitle={subtitle}>
+    <Page title="Saved" subtitle={subtitle} aside={views}>
+      {view === 'sheet' ? (
+        <SheetView refreshKey={sheetKey} tab="saved" />
+      ) : (
       <div className="feed-layout">
         <nav className="feed-cats" aria-label="Categories">
           {([null, ...kinds] as (OpportunityType | null)[]).map((value) => {
@@ -233,6 +251,7 @@ export function Saved() {
           )}
         </div>
       </div>
+      )}
     </Page>
   );
 }

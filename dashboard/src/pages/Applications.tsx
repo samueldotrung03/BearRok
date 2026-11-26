@@ -1,8 +1,8 @@
 // Applications the student is working on: To apply, Applying and Applied. Saving a card does not
 // put it here; it stays on Saved as Interested until the status moves on. The student can also
 // start one from a saved posting or a blank one. Each row opens the application's portal. Sheet
-// view shows the same list as a spreadsheet. An old ?stage=saved link goes to /saved. The rules
-// live in src/lib/portal/list.ts.
+// view shows the Applications tab of the same Google Sheet the Saved page writes. An old
+// ?stage=saved link goes to /saved. The rules live in src/lib/portal/list.ts.
 import { X as XSmall } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
@@ -133,7 +133,7 @@ export function Applications() {
       }
     >
       {view === 'sheet' ? (
-        <SheetView refreshKey={sheetKey} />
+        <SheetView refreshKey={sheetKey} tab="applications" />
       ) : offline ? (
         <Card className="p-10 text-center">
           <p className="text-lg font-semibold">Your applications cannot be reached</p>

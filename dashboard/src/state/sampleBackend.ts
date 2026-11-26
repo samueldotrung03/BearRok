@@ -57,16 +57,22 @@ function application(o: Opportunity, status: ApplicationStatus, tabs: PortalTab[
 
 const daysLeft = (deadline: string | null) => (deadline ? String(Math.ceil((Date.parse(deadline) - Date.now()) / 86_400_000)) : '');
 
-/** The saved list as the backend's tracker sheet writes it, one row per saved sample posting. */
-function sheet(ctx: SampleContext) {
-  const saved = opportunities.filter((o) => ctx.saved.includes(o.id));
+/** The sample tracker. Saved is every saved posting; Applications is To apply and later. No tab keeps the saved list, as before. */
+function sheet(ctx: SampleContext, tab: 'saved' | 'applications' | null) {
+  const statusOf = (id: string) => ctx.applications[id]?.status;
+  const saved = opportunities.filter((o) => {
+    const status = statusOf(o.id);
+    if (tab === 'applications') return status === 'to_apply' || status === 'applying' || status === 'applied';
+    if (tab === 'saved') return ctx.saved.includes(o.id) || status === 'interested';
+    return ctx.saved.includes(o.id);
+  });
   const rows = saved.map((o) => {
     const info = applicationInfo[o.id];
     const cell: Record<string, string> = {
       Opportunity: o.title,
       Organizer: o.organizer,
       Type: o.type,
-      Status: statusLabel[ctx.applications[o.id]?.status ?? 'interested'],
+      Status: statusLabel[statusOf(o.id) ?? 'interested'],
       Deadline: o.deadline?.slice(0, 10) ?? 'Unknown',
       'Days left': daysLeft(o.deadline),
       'Deadline from': o.deadline ? 'Sample posting' : '',
@@ -91,7 +97,11 @@ function sheet(ctx: SampleContext) {
 /** What the backend would answer for one call under /api/students/:id, in the sample copy. */
 export async function sampleRequest(path: string, init: RequestInit, ctx: SampleContext): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
-  if (path === '/sheet' && method === 'GET') return json(sheet(ctx));
+  if ((path === '/sheet' || path.startsWith('/sheet?')) && method === 'GET') {
+    const asked = new URL(path, 'http://bearrok.local').searchParams.get('tab');
+    const tab = asked === 'saved' || asked === 'applications' ? asked : null;
+    return json(sheet(ctx, tab));
+  }
   const portal = /^\/applications\/([^/]+)\/portal(\/draft)?$/.exec(path);
   if (portal) {
     const id = decodeURIComponent(portal[1] ?? '');

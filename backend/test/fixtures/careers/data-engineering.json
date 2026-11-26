@@ -1,5 +1,9 @@
 {
   "_about": "Answers shaped like the Grok agents' replies for a 'Data Engineering' career guide, written for offline tests. No real people: the posts use role descriptions, not names or handles.",
+  "career_search": {
+    "notes": "Data engineers use SQL, Python, Airflow and dimensional modelling. Hiring uses a SQL screen, a Python round and a pipeline design interview. A student starts with SQL, then one pipeline project.",
+    "urls": ["https://www.bls.gov/ooh/computer-and-information-technology/database-administrators.htm", "https://airflow.apache.org/docs/"]
+  },
   "career_plan": {
     "title": "Data Engineer",
     "oneLine": "Builds the pipelines and storage that move raw data to analysts and models.",

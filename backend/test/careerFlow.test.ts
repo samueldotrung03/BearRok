@@ -187,6 +187,8 @@ test('a restart keeps finished parts, picks up a checked-off answer from its che
   assert.deepEqual(after.resume(), ['data-engineering']);
   const done = (await after.settled('data-engineering'))!;
   for (const id of ['basics', 'voices', 'interview', 'start'] as const) assert.equal(done.sections[id].status, 'done', id);
+  assert.equal(count(first, 'career_search'), 1, 'the first run searches once');
+  assert.equal(count(calls, 'career_search'), 0, 'resume reuses the saved notes');
   assert.equal(count(calls, 'career_basics'), 0, 'finished work is not redone');
   assert.equal(count(calls, 'career_voices'), 0, 'the saved posts go straight to their check');
   assert.equal(count(calls, 'career_review_voices'), 1);

@@ -6,7 +6,7 @@
 // CAREER_SIM_STEP_MS sets how long each call takes (default 1200 ms; researchers take twice that),
 // so the page's per-part progress can be watched. CAREER_SIM_FAULTS makes chosen calls fail the way
 // Grok fails, to see the page's failed states offline: a comma list of `<call>:<fault>[:<times>]`,
-// where call is the agent call without "career_" (plan, basics, voices, interview, start,
+// where call is the agent call without "career_" (search, plan, basics, voices, interview, start,
 // review_basics, ...), fault is timeout, parse or 402, and times (default 2: the first try and its
 // retry) is how many calls fail before it answers again. Example: CAREER_SIM_FAULTS=interview:timeout
 import { z } from 'zod';
@@ -42,6 +42,11 @@ export function simulatedAnswer(name: string, user: string): unknown {
   const c = career.toLowerCase();
   const site = (path: string) => `https://example.org/simulated/${path}`;
   switch (name) {
+    case 'career_search':
+      return {
+        notes: `Simulated notes: ${career} uses its own methods and tools. Hiring is a résumé screen and a technical interview. A student starts with an introductory course.`,
+        urls: [site('notes')],
+      };
     case 'career_plan': {
       const t = title(career);
       return {

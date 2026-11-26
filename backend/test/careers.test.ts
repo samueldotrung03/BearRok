@@ -1,6 +1,6 @@
 // Career guides on a fake model: no network, no Grok, no Claude.
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -25,6 +25,7 @@ const basics = (over = {}) => ({
 });
 
 const answers: Record<string, unknown> = {
+  career_search: { notes: 'Economists use regressions in Stata. Hiring is a résumé screen. A student starts with coursework.', urls: ['https://example.org/econ-methods'] },
   career_plan: { title: 'Economist', oneLine: 'Studies how people and markets use scarce resources.', field: 'economics', angles: { basics: 'b', voices: 'v', interview: 'i', start: 's' } },
   career_basics: basics(),
   career_voices: { posts: [{ author: 'Real Person', role: 'Economist', handle: '@real', text: 'Real post', takeaway: 'Learn R', topic: 'the work', url: 'https://x.com/real/1', date: '2026-11-01' }] },
@@ -36,13 +37,13 @@ const answers: Record<string, unknown> = {
   career_suggest: { prompts: ['Pay in Canada for new graduates', 'Skills for a sophomore in economics', 'Which specialties hire most'] },
 };
 
-type Call = { name: string; tools: string[]; user: string; system: string; at: number };
+type Call = { name: string; tools: string[]; user: string; system: string; at: number; maxTurns?: number };
 
 /** A fake model. Validators echo back what they were given unless `reply` says otherwise. */
 function fakeAsk(calls: Call[], fail: string[] = [], reply: (name: string, n: number, user: string) => unknown = (name) => answers[name]): Ask {
   let clock = 0;
   return (async (opts) => {
-    calls.push({ name: opts.name, tools: (opts.tools ?? []).map((t) => t.type), user: opts.user, system: opts.system, at: clock++ });
+    calls.push({ name: opts.name, tools: (opts.tools ?? []).map((t) => t.type), user: opts.user, system: opts.system, at: clock++, maxTurns: opts.maxTurns });
     await new Promise((r) => setTimeout(r, 1));
     if (fail.includes(opts.name)) throw new Error(`${opts.name} broke`);
     const n = calls.filter((c) => c.name === opts.name).length;
@@ -74,13 +75,28 @@ test('a guide runs master, managers, fleet researchers, validators and presentat
   assert.equal(guide.status, 'ready');
   assert.equal(guide.title, 'Economist');
   assert.equal(calls[0]!.name, 'career_plan');
+  const search = calls.find((c) => c.name === 'career_search')!;
+  assert.equal(calls.filter((c) => c.name === 'career_search').length, 1);
+  assert.equal(calls[1]!.name, 'career_search');
+  assert.deepEqual(search.tools, ['web_search', 'x_search']);
+  assert.equal(search.maxTurns, 2);
+  assert.match(search.system, /methods and tools/);
+  assert.match(search.system, /how hiring works/);
+  assert.match(search.system, /how a student starts/);
+  assert.match(search.system, /Do not look for internships or postings/);
+  assert.doesNotMatch(`${search.system}\n${search.user}`, /keep searching/i);
   for (const id of ['basics', 'voices', 'interview', 'start'] as const) {
     assert.equal(guide.sections[id].status, 'done');
     assert.ok(names(calls).includes(`career_review_${id}`), `${id} was validated`);
+    const wrote = calls.find((c) => c.name === `career_${id}`)!;
+    assert.ok(wrote.at > search.at, `${id} is written after the one search`);
+    assert.deepEqual(wrote.tools, [], `${id} has no tools`);
+    assert.match(wrote.system, /may not invent a URL that is not in the list/);
+    assert.match(wrote.user, /Economists use regressions in Stata/);
+    assert.match(wrote.user, /https:\/\/example\.org\/econ-methods/);
   }
   // Each agent is told it belongs to the career discovery skill, not the opportunity search.
   assert.ok(calls.every((c) => /career discovery skill/.test(c.system)));
-  assert.deepEqual(calls.find((c) => c.name === 'career_voices')!.tools, ['x_search', 'web_search']);
   // How to start begins only once the interviews are validated, and is told their formats.
   const start = calls.find((c) => c.name === 'career_start')!;
   assert.ok(start.at > calls.find((c) => c.name === 'career_review_interview')!.at);
@@ -139,9 +155,67 @@ test('without X search the stories are labelled samples with no links, and still
   const guide = (await guides.settled('economist'))!;
   assert.ok(calls.some((c) => c.name === 'career_voices_sample' && c.tools.length === 0));
   assert.ok(!calls.some((c) => c.name === 'career_voices'));
+  const search = calls.find((c) => c.name === 'career_search')!;
+  assert.equal(calls.filter((c) => c.name === 'career_search').length, 1);
+  assert.deepEqual(search.tools, ['web_search']);
+  assert.equal(search.maxTurns, 2);
+  assert.doesNotMatch(calls.find((c) => c.name === 'career_voices_sample')!.user, /https:\/\/example\.org\/econ-methods/);
+  for (const id of ['basics', 'interview', 'start'] as const) assert.deepEqual(calls.find((c) => c.name === `career_${id}`)!.tools, []);
   assert.equal(guide.sections.voices.sample, true);
   assert.equal(guide.sections.voices.data!.posts[0]!.url, null);
   assert.match(calls.find((c) => c.name === 'career_voices_summary')!.system, /sample stories/);
+  delete (guides.get('economist') as { sources?: unknown }).sources;
+  calls.length = 0;
+  guides.retry('economist', 'voices');
+  await guides.settled('economist');
+  assert.ok(calls.some((c) => c.name === 'career_voices_sample' && c.tools.length === 0));
+  assert.ok(!calls.some((c) => c.name === 'career_search' || c.name === 'career_voices'));
+});
+
+test('a retry with saved notes does not search again, and a retry with none searches once', async () => {
+  const calls: Call[] = [];
+  const guides = new CareerGuides(null, fakeAsk(calls), env(true));
+  guides.start('Economist');
+  await guides.settled('economist');
+  calls.length = 0;
+  guides.retry('economist', 'interview');
+  await guides.settled('economist');
+  assert.deepEqual(names(calls), ['career_interview', 'career_review_interview']);
+  assert.deepEqual(calls[0]!.tools, []);
+
+  delete (guides.get('economist') as { sources?: unknown }).sources;
+  calls.length = 0;
+  guides.retry('economist', 'basics');
+  await guides.settled('economist');
+  assert.deepEqual(names(calls), ['career_search', 'career_basics', 'career_review_basics']);
+  assert.deepEqual(calls[0]!.tools, ['web_search', 'x_search']);
+  assert.equal(calls[0]!.maxTurns, 2);
+  assert.deepEqual(calls[1]!.tools, []);
+  assert.match(calls[1]!.user, /https:\/\/example\.org\/econ-methods/);
+});
+
+test('a resume with no saved notes searches once, then writes that part with no tools', async () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'careers-notes-')), 'guides.json');
+  const guides = new CareerGuides(file, fakeAsk([]), env(true));
+  guides.start('Economist');
+  await guides.settled('economist');
+  const saved = JSON.parse(readFileSync(file, 'utf8')) as { guides: { status: string; slug: string; sources?: unknown; sections: { interview: { status: string; draft: unknown } } }[] };
+  const stored = saved.guides[0]!;
+  stored.status = 'researching';
+  stored.sections.interview.status = 'working';
+  stored.sections.interview.draft = null;
+  delete stored.sources;
+  writeFileSync(file, JSON.stringify(saved));
+  const calls: Call[] = [];
+  const again = new CareerGuides(file, fakeAsk(calls), env(true));
+  assert.deepEqual(again.resume(), [stored.slug]);
+  await again.settled(stored.slug);
+  assert.equal(calls.filter((c) => c.name === 'career_search').length, 1);
+  assert.deepEqual(calls.find((c) => c.name === 'career_search')!.tools, ['web_search', 'x_search']);
+  const wrote = calls.find((c) => c.name === 'career_interview')!;
+  assert.deepEqual(wrote.tools, []);
+  assert.match(wrote.user, /https:\/\/example\.org\/econ-methods/);
+  assert.ok(wrote.at > calls.find((c) => c.name === 'career_search')!.at);
 });
 
 test('opening a guide with no summary, or one too long, has the presentation agent write it once', async () => {

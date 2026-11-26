@@ -244,7 +244,7 @@ function cited(result: GrokResult<Roadmap>, research: { notes: string; urls: str
 }
 
 /**
- * One search (web and X, two turns), then a fill of the roadmap schema with no tools.
+ * One search (web, and X only when X search is on), two turns, then a fill of the roadmap schema with no tools.
  * A thin draft is filled once more from the same notes and urls, plus what is missing. That fill does not search.
  */
 export const writeRoadmap: RoadmapWriter = async (request) => {
@@ -255,7 +255,7 @@ export const writeRoadmap: RoadmapWriter = async (request) => {
     system: SEARCH_SYSTEM,
     user: searchPrompt(request),
     schema: Research,
-    tools: [{ type: 'web_search' }, { type: 'x_search' }],
+    tools: config.xSearch ? [{ type: 'web_search' }, { type: 'x_search' }] : [{ type: 'web_search' }],
     maxTurns: 2,
     model,
   });

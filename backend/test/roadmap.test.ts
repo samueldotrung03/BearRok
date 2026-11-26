@@ -7,8 +7,10 @@ import { after, describe, test } from 'node:test';
 
 process.env.XAI_API_KEY = 'test-key-not-live';
 process.env.XAI_BASE_URL = 'https://api.x.ai/v1';
+delete process.env.XAI_X_SEARCH;
 
 const { cached, RoadmapRequest, writeRoadmap } = await import('../src/roadmap.ts');
+const { config } = await import('../src/config.ts');
 const { setHarnessStateForTest } = await import('../src/harness.ts');
 
 const originalFetch = globalThis.fetch;
@@ -111,7 +113,7 @@ describe('writeRoadmap', { concurrency: false }, () => {
 
     const search = calls[0]!;
     assert.equal(search.text.format.name, 'roadmap_search');
-    assert.deepEqual(search.tools, [{ type: 'web_search' }, { type: 'x_search' }]);
+    assert.deepEqual(search.tools, [{ type: 'web_search' }]);
     assert.equal(search.max_turns, 2);
     assert.match(JSON.stringify(search.text.format.schema), /"notes"/);
     assert.match(JSON.stringify(search.text.format.schema), /"urls"/);
@@ -276,6 +278,39 @@ process.stdout.write(readFileSync(join(dir, 'reply-' + n)));
       setHarnessStateForTest({ connected: [], active: null });
       delete process.env.GROK_CLI_BIN;
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('x search is included only when config.xSearch is true, and a thin draft is still filled with no tools', async () => {
+    const previous = config.xSearch;
+    config.xSearch = true;
+    try {
+      let fills = 0;
+      install((body) => {
+        if (body.text.format.name === 'roadmap_search') return answered(research, ['https://example.com/cited']);
+        fills += 1;
+        return answered(fills === 1 ? thin : full);
+      });
+      const result = await writeRoadmap(career);
+      assert.equal(result.data.summary, 'A full board');
+      assert.equal(calls.length, 3);
+
+      const search = calls[0]!;
+      assert.deepEqual(search.tools, [{ type: 'web_search' }, { type: 'x_search' }]);
+      assert.equal(search.max_turns, 2);
+
+      for (const fill of [calls[1]!, calls[2]!]) {
+        assert.equal(fill.text.format.name, 'roadmap');
+        assert.equal(Object.hasOwn(fill, 'tools'), false);
+        assert.equal(Object.hasOwn(fill, 'max_turns'), false);
+        assert.equal(JSON.stringify(fill).includes('web_search'), false);
+        assert.equal(JSON.stringify(fill).includes('x_search'), false);
+      }
+      assert.match(userOf(calls[2]!), /What is missing: at least 5 phases \(this draft has 1\); at least 20 steps \(this draft has 1\)\./);
+      assert.match(userOf(calls[2]!), /People built projects and then interned\./);
+      assert.match(userOf(calls[2]!), /https:\/\/example\.com\/path/);
+    } finally {
+      config.xSearch = previous;
     }
   });
 });

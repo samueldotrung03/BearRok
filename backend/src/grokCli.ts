@@ -206,7 +206,10 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
   tools?: GrokTool[];
   model?: string;
   timeoutMs?: number;
-  /** When set, the CLI is started with --max-turns. When omitted, the flag is not added. */
+  /**
+   * When set, the CLI is started with --max-turns and the prompt uses at most that many tool turns.
+   * When omitted, the flag is not added and a tool call may still open a page.
+   */
   maxTurns?: number;
   /** The Grok CLI is not known to read pictures; the poster designer works from the posting alone. */
   images?: string[];
@@ -214,16 +217,21 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
   const schema = z.toJSONSchema(opts.schema) as Record<string, unknown>;
   delete schema.$schema;
   const schemaJson = JSON.stringify(schema);
+  const toolsOn = Boolean(opts.tools?.length);
+  // A host turn cap is spent if this line tells the model to open pages. Capped calls run the named search and stop once the notes and urls are known.
+  const toolParagraph = !toolsOn
+    ? 'Answer from the information given. Do not use any tools.'
+    : opts.maxTurns !== undefined
+      ? `Use at most ${opts.maxTurns} tool turns. Run the search the system prompt names. Do not open further pages once the notes and urls are known. Do not read, write or run anything on this computer, and do not use any other tool.`
+      : 'Use web search and open the pages (web fetch). Both are already allowed. Do not read, write or run anything on this computer, and do not use any other tool. If a page cannot be opened, say so in the JSON; do not invent the page.';
   const prompt = [
     opts.system,
-    opts.tools?.length
-      ? 'Use web search and open the pages (web fetch). Both are already allowed. Do not read, write or run anything on this computer, and do not use any other tool. If a page cannot be opened, say so in the JSON; do not invent the page.'
-      : 'Answer from the information given. Do not use any tools.',
+    toolParagraph,
     `Reply with one JSON object and nothing else: no explanation, no code fence. Write it once, after your research is done, never as an empty placeholder and never with the word "placeholder" as a value. It must match this JSON Schema:\n${schemaJson}`,
     `---\n${opts.user}`,
   ].join('\n\n');
   const timeoutMs = opts.timeoutMs ?? config.grokCli.timeoutMs;
-  const base = { prompt, model: opts.model, tools: Boolean(opts.tools?.length), effort: config.grokCli.effort, alwaysApprove: config.grokCli.alwaysApprove, maxTurns: opts.maxTurns, cwd: sandboxDir() };
+  const base = { prompt, model: opts.model, tools: toolsOn, effort: config.grokCli.effort, alwaysApprove: config.grokCli.alwaysApprove, maxTurns: opts.maxTurns, cwd: sandboxDir() };
 
   let lastError: unknown;
   // One retry, without the schema option in case the CLI turned the schema down: the prompt still asks for the JSON.

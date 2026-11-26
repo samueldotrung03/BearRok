@@ -33,15 +33,10 @@ function describe(worker: WorkerBrief, brief: Brief): string {
     .join('\n');
 }
 
-/** One search worker: find candidate clubs or events for its brief. */
+/** One search for this brief: two turns, then stop. Clubs and events keep their own fields. */
 export async function discover(worker: WorkerBrief, brief: Brief, today: Date): Promise<Candidate[]> {
-  const where =
-    worker.type === 'club'
-      ? 'public school and club pages, student organization directories, club sites, Discord or community pages, and Reddit threads that point to them'
-      : 'Luma, Devpost, MLH, organizer sites, school event pages, and Reddit or X posts that point to them';
-  const system = `You are a search worker finding ${worker.type}s for a student. Search the web: ${where}.
-
-Return up to ${config.maxResultsPerType + 2} candidates that satisfy every requirement. Prefer ones where you reached the organizer's own page. Skip anything that has already happened, has closed, or that you could not open.
+  const system = `You are a search worker finding ${worker.type}s for a student. Run one search for the student's request. Open a page only to confirm it is still open. Then stop.
+Skip anything that has already happened, has closed, or that you could not open.
 Set type to "${worker.type}" on every candidate. For a ${worker.type === 'club' ? 'club, fill meetingSchedule, membershipIntake (how to join) and acceptingMembers; leave the event fields null' : 'event, fill startTime, endTime, timeZone, registrationDeadline and registrationOpen; leave the club fields null'}.
 fitExplanation: one sentence on why this matches the student's request, mentioning the requirement or preference it meets.
 
@@ -52,6 +47,7 @@ ${EVIDENCE_RULES}`;
     user: `Today is ${isoDate(today)}.\n\n${describe(worker, brief)}`,
     schema: Discovery,
     tools: searchTools(),
+    maxTurns: 2,
   });
   return data.candidates.map((c) => ({ ...c, type: worker.type }));
 }

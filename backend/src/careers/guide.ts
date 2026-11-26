@@ -1,8 +1,9 @@
 // Career guides for the Career discovery page, run by the agent system's career discovery skill
 // (src/agents/skills/careerDiscovery.ts). For any career a student types, the master plans the
-// guide, one manager per part writes its researcher's job, the researchers run on the shared worker
-// fleet, a validator per part checks what they found, and the presentation agent writes the summary
-// over the posts. How to start is researched after the interviews, so every interview format gets a
+// guide, one search gathers notes, and one manager per part writes its researcher's job. The
+// researchers write from those notes with no tools, on the shared worker fleet. A validator per part
+// checks what they wrote, and the presentation agent writes the summary over the posts. How to start
+// is written after the interviews, so every interview format gets a
 // step that prepares for it. "Add more" runs the same levels for one part, starting from the
 // master's reading of what the student asked. Guides are kept and shared by every student; each
 // student sees only their own asks.
@@ -21,7 +22,7 @@ import { tierModels as harnessTiers, transport } from '../harness.ts';
 import { grokJson, type GrokTool } from '../grok.ts';
 import { Fleet } from '../agents/fleet.ts';
 import type { Job, JobKind } from '../agents/types.ts';
-import { managerBrief, master, presentation, researcher, validator, type AgentCall } from '../agents/skills/careerDiscovery.ts';
+import { careerSearch, managerBrief, master, presentation, researcher, validator, type AgentCall } from '../agents/skills/careerDiscovery.ts';
 import type { StudentContext } from '../agents/skills/index.ts';
 import { BALANCE_MESSAGE, BalanceExhaustedError, isBalanceError } from '../quota.ts';
 import { careerKey, keysOf, slugFor } from './names.ts';
@@ -45,7 +46,10 @@ export { mergeSection, SECTION_IDS, type Guide, type SectionId } from './schemas
 export { careerKey, slugFor } from './names.ts';
 
 /** One model call. The default goes through grok.ts (a connected harness or the xAI API), or the simulated agents. `timeoutMs` caps that one call. */
-export type Ask = <S extends z.ZodType>(opts: { name: string; system: string; user: string; schema: S; tools?: GrokTool[]; model?: string; timeoutMs?: number }) => Promise<{ data: z.infer<S> }>;
+export type Ask = <S extends z.ZodType>(opts: { name: string; system: string; user: string; schema: S; tools?: GrokTool[]; model?: string; timeoutMs?: number; maxTurns?: number }) => Promise<{ data: z.infer<S> }>;
+
+/** Notes from the one search, kept on the guide so a later retry or resume can reuse them. */
+type SourceNotes = { notes: string; urls: string[] };
 
 export class CareerError extends Error {
   readonly status: 400 | 404 | 409 | 503;
@@ -109,6 +113,8 @@ export class CareerGuides {
   private guides = new Map<string, Guide>();
   private running = new Set<string>();
   private suggestions = new Map<string, string[]>();
+  /** One in-flight notes search per guide, so parallel parts share it. */
+  private noteFlight = new Map<string, Promise<SourceNotes>>();
   /** Parts a restart cut off, to pick up in resume(). */
   private cutOff = new Map<string, SectionId[]>();
   private readonly file: string | null;
@@ -166,7 +172,9 @@ export class CareerGuides {
     const ids = new Set(mine.map((a) => a.id));
     // Drafts stay on the server: the page shows only checked parts.
     const sections = Object.fromEntries(SECTION_IDS.map((id) => [id, { ...guide.sections[id], draft: null }])) as Guide['sections'];
-    return { ...guide, sections, asks: mine, activity: guide.activity.filter((e) => e.ask === null || ids.has(e.ask)) };
+    const shown = { ...guide, sections, asks: mine, activity: guide.activity.filter((e) => e.ask === null || ids.has(e.ask)) };
+    delete (shown as { sources?: unknown }).sources;
+    return shown;
   }
 
   /** Returns the kept guide, or starts researching one. A refresh keeps the old parts on screen until new ones arrive. */
@@ -343,7 +351,16 @@ export class CareerGuides {
       timer = setTimeout(() => reject(new CallTimeout(`timed out after ${Math.round(this.timeoutMs / 1000)}s`)), this.timeoutMs + this.graceMs);
       timer.unref?.();
     });
-    const answer = this.ask({ name: c.name, system: c.system, user: c.user, schema: c.schema, tools: c.tools, model: c.tier === 'normal' ? models.normal : models.low, timeoutMs: this.timeoutMs }).then((r) => r.data);
+    const answer = this.ask({
+      name: c.name,
+      system: c.system,
+      user: c.user,
+      schema: c.schema,
+      tools: c.tools,
+      model: c.tier === 'normal' ? models.normal : models.low,
+      timeoutMs: this.timeoutMs,
+      ...(c.maxTurns != null ? { maxTurns: c.maxTurns } : {}),
+    }).then((r) => r.data);
     return Promise.race([answer, limit]).finally(() => clearTimeout(timer));
   }
 
@@ -411,7 +428,15 @@ export class CareerGuides {
     const sample = this.writesSamples(section);
     let found = ctx.fromDraft ? (guide.sections[section].draft as unknown) : null;
     if (found === null) {
-      const brief = managerBrief({ guide, section, focus: ctx.focus, holds: ctx.holds, formats: ctx.formats, student: ctx.student });
+      let sources: SourceNotes | null = null;
+      if (this.sectionUsesNotes(section)) {
+        try {
+          sources = await this.notesFor(guide, false);
+        } catch (e) {
+          return { ok: false, ...explain(e, 'search', this.timeoutMs), drafted: false };
+        }
+      }
+      const brief = managerBrief({ guide, section, focus: ctx.focus, holds: ctx.holds, formats: ctx.formats, student: ctx.student, sources });
       this.log(guide, agentName(section, 'manager'), ctx.holds === null ? 'Handed the researcher its job' : 'Handed the researcher a job for new items only', 'info', ctx.ask);
       const got = await this.job(
         ctx.fleet,
@@ -553,8 +578,78 @@ export class CareerGuides {
     this.log(into, 'Master', `"${guide.query}" is this career, so it opens this guide`, 'info', null);
   }
 
+  /** Sample stories are written with no search. Every other part is written from the shared notes. */
+  private sectionUsesNotes(section: SectionId) {
+    return !(section === 'voices' && !this.env.canSearchX());
+  }
+
+  private readNotes(guide: Guide): SourceNotes | null {
+    const raw = (guide as Guide & { sources?: { notes?: unknown; urls?: unknown } }).sources;
+    if (!raw || typeof raw.notes !== 'string' || !Array.isArray(raw.urls)) return null;
+    return { notes: raw.notes, urls: raw.urls.filter((url): url is string => typeof url === 'string') };
+  }
+
+  private rememberNotes(guide: Guide, sources: SourceNotes) {
+    Object.assign(guide, { sources });
+    this.log(guide, 'Master', 'Gathered notes on methods, hiring and how to start', 'info', null);
+  }
+
+  /**
+   * The one search for this guide. A fresh run always searches. A retry or resume reuses saved
+   * notes, and searches again only when none were saved. Parallel callers share one flight.
+   */
+  private notesFor(guide: Guide, fresh: boolean): Promise<SourceNotes> {
+    if (!fresh) {
+      const saved = this.readNotes(guide);
+      if (saved) return Promise.resolve(saved);
+      const inflight = this.noteFlight.get(guide.slug);
+      if (inflight) return inflight;
+    }
+    const flight = (async () => {
+      const found = await this.twice(() => this.call(careerSearch(guide.title, this.env.canSearchX())));
+      const sources = { notes: found.notes, urls: found.urls };
+      this.rememberNotes(guide, sources);
+      return sources;
+    })().finally(() => {
+      if (this.noteFlight.get(guide.slug) === flight) this.noteFlight.delete(guide.slug);
+    });
+    this.noteFlight.set(guide.slug, flight);
+    return flight;
+  }
+
+  private markNoteFailure(guide: Guide, id: SectionId, failure: Failure, reason: string) {
+    const had = guide.sections[id].data !== null;
+    this.setSection(guide, id, {
+      status: had ? 'done' : 'failed',
+      stage: null,
+      mode: null,
+      failure,
+      error: had ? `${reason} This is the earlier version.` : reason,
+    });
+  }
+
+  /** The shared search failed: leave finished parts, and do not write the rest without notes. */
+  private failNotes(guide: Guide, e: unknown) {
+    const { failure, reason } = explain(e, 'search', this.timeoutMs);
+    if (failure === 'balance') this.outOfBalance(guide);
+    this.update(guide, { failure, error: `Could not gather notes: ${lowerFirst(reason)}` });
+    for (const id of SECTION_IDS) {
+      const s = guide.sections[id];
+      if (s.status === 'waiting' || s.status === 'working') {
+        this.setSection(guide, id, { status: s.data ? 'done' : 'failed', stage: null, mode: null, failure, error: s.data ? null : 'Not researched: the notes could not be gathered.' });
+      }
+    }
+    this.update(guide, { status: settledStatus(guide) });
+  }
+
   private async research(guide: Guide) {
     if (!(await this.plan(guide))) return;
+    try {
+      await this.notesFor(guide, true);
+    } catch (e) {
+      this.failNotes(guide, e);
+      return;
+    }
     const fleet = this.fleet(guide, null);
     // How to start waits for the interviews, so its steps can be written to prepare for each format.
     await Promise.all([
@@ -568,8 +663,24 @@ export class CareerGuides {
   /** Runs again the parts a restart stopped; how to start still waits for the interviews. */
   private async resumeGuide(guide: Guide, parts: SectionId[]) {
     if (!guide.angles && !(await this.plan(guide))) return;
+    let pending = parts;
+    const writing = pending.filter((id) => guide.sections[id].draft === null && this.sectionUsesNotes(id));
+    if (writing.length) {
+      try {
+        await this.notesFor(guide, false);
+      } catch (e) {
+        const { failure, reason } = explain(e, 'search', this.timeoutMs);
+        if (failure === 'balance') this.outOfBalance(guide);
+        for (const id of writing) this.markNoteFailure(guide, id, failure, reason);
+        pending = pending.filter((id) => !writing.includes(id));
+      }
+    }
+    if (!pending.length) {
+      this.finish(guide);
+      return;
+    }
     const fleet = this.fleet(guide, null);
-    const run = (id: SectionId) => (parts.includes(id) ? this.part(guide, id, { fleet, formats: id === 'start' ? formatsOf(guide) : [], fromDraft: guide.sections[id].draft !== null }) : Promise.resolve());
+    const run = (id: SectionId) => (pending.includes(id) ? this.part(guide, id, { fleet, formats: id === 'start' ? formatsOf(guide) : [], fromDraft: guide.sections[id].draft !== null }) : Promise.resolve());
     await Promise.all([run('basics'), run('voices'), run('interview').then(() => run('start'))]);
     this.finish(guide);
   }
@@ -578,6 +689,18 @@ export class CareerGuides {
     if (!guide.angles && !(await this.plan(guide))) {
       this.setSection(guide, section, { status: guide.sections[section].data ? 'done' : 'failed', stage: null, mode: null, failure: guide.failure, error: guide.error });
       return;
+    }
+    if (!fromDraft && this.sectionUsesNotes(section)) {
+      try {
+        await this.notesFor(guide, false);
+      } catch (e) {
+        const { failure, reason } = explain(e, 'search', this.timeoutMs);
+        if (failure === 'balance') this.outOfBalance(guide);
+        this.markNoteFailure(guide, section, failure, reason);
+        this.update(guide, { status: settledStatus(guide) });
+        this.log(guide, 'Master', `${SECTION_NAMES[section]} could not be searched again: ${reason}`, 'bad', null);
+        return;
+      }
     }
     await this.part(guide, section, { fleet: this.fleet(guide, null), formats: section === 'start' ? formatsOf(guide) : [], fromDraft });
     this.update(guide, { status: settledStatus(guide) });
@@ -810,6 +933,9 @@ export function mergeDuplicates(guides: Map<string, Guide>): [string, string][] 
     into.asks.push(...g.asks);
     into.oneLine ??= g.oneLine;
     into.angles ??= g.angles;
+    const fromNotes = (g as Guide & { sources?: SourceNotes }).sources;
+    const intoNotes = into as Guide & { sources?: SourceNotes };
+    if (fromNotes && !intoNotes.sources) intoNotes.sources = fromNotes;
     if (into.status === 'failed' && SECTION_IDS.some((id) => into.sections[id].data)) Object.assign(into, { status: 'ready', error: null, failure: null });
     into.activity.push({ at: new Date().toISOString(), agent: 'Master', text: `Merged the guide kept as "${g.slug}": it is the same career`, tone: 'info', ask: null });
     guides.delete(g.slug);

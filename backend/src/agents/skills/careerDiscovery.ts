@@ -3,7 +3,7 @@
 // routed to this skill; the opportunity search keeps its own in grokBrain.ts. A first search and an
 // "Add more" run the same levels in the same order (master, manager, researcher, validator,
 // presentation); an "Add more" runs them for one part only.
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { GrokTool } from '../../grok.ts';
 import {
   AskPlanSchema,
@@ -30,6 +30,8 @@ export interface AgentCall<S extends z.ZodType = z.ZodType> {
   user: string;
   schema: S;
   tools?: GrokTool[];
+  /** Tool turns for this call. Only the one shared search sets it. */
+  maxTurns?: number;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -39,7 +41,13 @@ const BOUNDARY = `You are one agent of BearRok's career discovery skill. Your jo
 
 const STYLE = `Write for a university student who is new to this career. Plain words, short sentences, no emoji, no hype. Never mention yourself, the agents, your search or the pages you opened in the text; the sources list does that. Today is ${today()}.`;
 
-const SOURCED = `Use only pages you actually opened. Every URL must be a real page you visited. If you cannot find something, leave it out or return null; never guess a number, a name or a link.`;
+const FROM_NOTES = `Write from the notes in the brief. You may not invent a URL that is not in the list. If the notes do not support a fact, leave it out or return null; never guess a number, a name or a link.`;
+
+/** What the one shared search must return before any part is written. */
+export const CareerSearchSchema = z.object({
+  notes: z.string(),
+  urls: z.array(z.string()),
+});
 
 /**
  * What every guide holds, whatever the career: a trade, a profession, a science, an art or a job
@@ -149,8 +157,20 @@ THE STUDENT ASKED: "${input.prompt}"`,
  * A part's manager. It writes the researcher's job from the master's angle (first search) or focus
  * ("Add more"), what the part already holds, and, for how to start, the interview formats to cover.
  */
-export function managerBrief(input: { guide: Guide; section: SectionId; focus: string | null; holds: string | null; formats: string[]; student: StudentContext | null }): string {
+export function managerBrief(input: {
+  guide: Guide;
+  section: SectionId;
+  focus: string | null;
+  holds: string | null;
+  formats: string[];
+  student: StudentContext | null;
+  sources?: { notes: string; urls: string[] } | null;
+}): string {
   const lines = [`Career: ${input.guide.title}`, `Part: ${SECTION_NAMES[input.section]}`, `What to look for: ${input.focus ?? input.guide.angles?.[input.section] ?? `the ${SECTION_NAMES[input.section].toLowerCase()} for this career`}`];
+  if (input.sources) {
+    const urls = input.sources.urls.length ? input.sources.urls.map((u) => `- ${u}`).join('\n') : '(none)';
+    lines.push(`NOTES:\n${input.sources.notes}\n\nURLS:\n${urls}\nYou may not invent a URL that is not in this list.`);
+  }
   if (input.section === 'start') {
     lines.push(
       input.formats.length
@@ -170,13 +190,35 @@ export function managerBrief(input: { guide: Guide; section: SectionId; focus: s
 // ---- workers --------------------------------------------------------------------------------
 
 const ROLE: Record<SectionId, string> = {
-  basics: 'You research the basics of a career, in technical terms.',
-  voices: 'You find what people who work in a career share on X.',
-  interview: 'You explain how a career hires and assesses candidates.',
-  start: 'You map how a student starts in a career and gets ready for its interviews.',
+  basics: 'You write the basics of a career, in technical terms, from the notes you are given.',
+  voices: 'You write what people who work in a career share, from the notes you are given.',
+  interview: 'You write how a career hires and assesses candidates, from the notes you are given.',
+  start: 'You write how a student starts in a career and gets ready for its interviews, from the notes you are given.',
 };
 
-/** A part's researcher, one job on the shared worker fleet. */
+/**
+ * One search for the whole guide, before basics, voices and interview are written.
+ * Tools are web search, plus X search only when this harness can read X. Two turns, then stop.
+ */
+export function careerSearch(career: string, canSearchX: boolean): AgentCall<typeof CareerSearchSchema> {
+  const tools: GrokTool[] = [{ type: 'web_search' }];
+  if (canSearchX) tools.push({ type: 'x_search' });
+  return {
+    name: 'career_search',
+    tier: 'low',
+    schema: CareerSearchSchema,
+    tools,
+    maxTurns: 2,
+    system: `${BOUNDARY}
+You gather source notes for one career guide. ${STYLE}
+Find this career's methods and tools, how hiring works, and how a student starts.
+Do not look for internships or postings.
+notes is plain sentences covering those three things. urls is the list of pages the notes came from.`,
+    user: `Career: ${career}`,
+  };
+}
+
+/** A part's researcher, one job on the shared worker fleet. It writes from the shared notes and has no tools. */
 export function researcher(section: SectionId, brief: string, opts: { canSearchX: boolean }) {
   if (section === 'voices' && !opts.canSearchX) {
     return {
@@ -190,14 +232,12 @@ ${SAMPLE_VOICES}`,
       user: brief,
     };
   }
-  const tools: GrokTool[] = section === 'voices' ? [{ type: 'x_search' }, { type: 'web_search' }] : [{ type: 'web_search' }];
   return {
     name: `career_${section}`,
     tier: 'low' as const,
     schema: WORKER_SCHEMAS[section],
-    tools,
     system: `${BOUNDARY}
-${ROLE[section]} ${STYLE} ${SOURCED} ${NOTES_FIRST}
+${ROLE[section]} ${STYLE} ${FROM_NOTES} ${NOTES_FIRST}
 RULES:
 ${PART_RULES[section]}`,
     user: brief,

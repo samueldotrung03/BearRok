@@ -1,6 +1,6 @@
-// The roadmap writer: one Grok call that turns a student's profile, a goal (a career, or one
-// posting they want or have applied to) and what is known about how people got there into an
-// ordered, personal roadmap. The dashboard draws whatever this returns.
+// The roadmap writer: one search for how people get into the path, then one fill of the roadmap
+// schema with no tools. A draft thinner than fullEnough is asked for again, still with no tools.
+// The dashboard draws whatever this returns. One finished answer is cached per distinct request.
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { config } from './config.ts';
@@ -107,10 +107,10 @@ const SYSTEM = `You write one student's roadmap for BearRok, a student opportuni
 Rules, in order:
 1. The student's notes come first and their restrictions are rules. Never suggest something a note or restriction rules out.
 2. Write for this student only. Compare what the goal asks for with what their profile and experience actually show. Do not repeat what they have already done, and do not bring back what they set aside.
-3. No guessed facts. A date, deadline, acceptance rate, pay figure or requirement with no source behind it is left out or called unknown. Resources must be real pages you found; give none rather than invent one.
-4. Ground "how people got in" in search results and in the paths given. Say what people did, not who they were. If you found little, return little.
+3. No guessed facts. A date, deadline, acceptance rate, pay figure or requirement with no source behind it is left out or called unknown. Resources must be real pages from the urls given; give none rather than invent one.
+4. Ground "how people got in" in the notes and urls given and in the paths given. Say what people did, not who they were. If you found little, return little.
 5. A career roadmap is open-ended, never a fixed sequence. Act as an advisor laying out options, not a checklist: each phase is a direction the student could take (for example skills to build, projects, communities, experiences, opportunities to go for), its window is empty, and each step in it is one option with why it might be valuable for this student in particular. Offer real variety, including routes that suit different interests, ranked by how common each was among people who got in. Nothing is required. Also return related paths that connect to this one and to what the student already has.
-6. For any posting, search the web and X for what this organizer's selection process is and what people who went through it say, and report the stages you can source in "process". For a posting the student has not applied to yet: check its qualifications, close the gaps, prepare each material and question, and end with submitting. For one already applied to: do not tell them to apply; write what to do while waiting, how to prepare for the next stage of that organizer's process, and what to keep building.
+6. For any posting, use the notes and urls given for what this organizer's selection process is and what people who went through it say, and report the stages you can source in "process". For a posting the student has not applied to yet: check its qualifications, close the gaps, prepare each material and question, and end with submitting. For one already applied to: do not tell them to apply; write what to do while waiting, how to prepare for the next stage of that organizer's process, and what to keep building.
 7. Plain language, no emoji, second person. For a posting: three to five phases and four to fourteen steps, in the order to do them. For a career: be exhaustive. Six to nine directions and thirty to fifty options in all, covering every kind of thing people did to get in: courses and skills, tools, projects, clubs and communities, events, competitions, research, certifications, jobs and internships, programs and scholarships, people to meet, and habits. It is a long open-ended menu, so do not trim it to a shortlist.`;
 
 const lines = (label: string, items: string[]) => (items.length ? `${label}:\n${items.map((item) => `- ${item}`).join('\n')}` : `${label}: none given`);
@@ -145,11 +145,7 @@ export function roadmapPrompt(r: RoadmapRequest): string {
       lines('Materials asked for', o.materials),
       lines('Application questions', o.prompts),
       o.sourceUrl ? `Source: ${o.sourceUrl}` : '',
-      '',
-      `Search for how people got this role or the same kind of role at ${o.organizer}: what they had done before, and what the process was like.`,
     );
-  } else {
-    out.push('', `Search for how students actually broke into ${r.goal}: what they did, in what order, and what mattered most.`);
   }
   out.push('', lines('Paths the app already holds', r.knownPaths.map((path) => `${path.outcome}: ${path.timeline.join('; ')}`)));
   if (r.chosen.length) out.push('', lines('Chosen by the student (category: option)', r.chosen.map((c) => `${c.category}: ${c.title}`)));
@@ -168,13 +164,33 @@ function shape(r: RoadmapRequest): string {
   return 'Required shape of your answer: three to five phases in the order to do them, ending with submitting. Fill "process" with the stages you could source.';
 }
 
+/** What fullEnough still wants from a draft, so a second fill can supply it without searching. */
+function gaps(request: RoadmapRequest, roadmap: Roadmap): string[] {
+  const steps = roadmap.phases.flatMap((phase) => phase.steps);
+  const missing: string[] = [];
+  if (request.kind === 'career' && request.chosen.length > 0) {
+    const need = Math.ceil(request.chosen.length * 0.8);
+    if (steps.length < need) missing.push(`at least ${need} steps from the chosen options (this draft has ${steps.length})`);
+    if (steps.some((step) => step.actions.length < 2)) missing.push('at least two actions on every step');
+    if (roadmap.phases.some((phase) => phase.more.length < 1)) missing.push('at least one further recommendation in more on every phase');
+    return missing;
+  }
+  if (request.kind === 'career') {
+    if (roadmap.phases.length < 5) missing.push(`at least 5 phases (this draft has ${roadmap.phases.length})`);
+    if (steps.length < 20) missing.push(`at least 20 steps (this draft has ${steps.length})`);
+    return missing;
+  }
+  if (request.posting?.status === 'applied') {
+    if (steps.some((step) => step.kind === 'apply')) missing.push('no step with kind "apply"');
+    return missing;
+  }
+  if (steps.length < 3) missing.push(`at least 3 steps (this draft has ${steps.length})`);
+  return missing;
+}
+
 /** Whether an answer is as full as its form asks, so a thin one can be asked for again. */
 export function fullEnough(request: RoadmapRequest, roadmap: Roadmap): boolean {
-  const steps = roadmap.phases.flatMap((phase) => phase.steps);
-  if (request.kind === 'career' && request.chosen.length > 0) return steps.length >= Math.ceil(request.chosen.length * 0.8) && steps.every((step) => step.actions.length >= 2) && roadmap.phases.every((phase) => phase.more.length >= 1);
-  if (request.kind === 'career') return roadmap.phases.length >= 5 && steps.length >= 20;
-  if (request.posting?.status === 'applied') return steps.every((step) => step.kind !== 'apply');
-  return steps.length >= 3;
+  return gaps(request, roadmap).length === 0;
 }
 
 export type RoadmapWriter = (request: RoadmapRequest) => Promise<GrokResult<Roadmap>>;
@@ -196,22 +212,64 @@ export function cached(write: RoadmapWriter, limit = 200): RoadmapWriter {
   };
 }
 
-/** The live writer. Normal tier, with web search for how people got in. */
-const ask = (request: RoadmapRequest, again = '') =>
-  grokJson({
-    name: 'roadmap',
-    system: SYSTEM,
-    user: roadmapPrompt(request) + again,
-    schema: Roadmap,
-    tools: [{ type: 'web_search' }, { type: 'x_search' }],
-    // The normal tier of whichever transport is in use, as the master agent and managers use.
-    model: tierModels().normal,
-  });
+/** What the one search call brings back. The fills read this; they do not search. */
+const Research = z.object({
+  notes: z.string(),
+  urls: z.array(z.string()),
+});
 
-/** Writes the roadmap, and asks once more when the first answer is thinner than its form asks. */
+const SEARCH_SYSTEM = `You find out how people get into one path. Write notes on what the pages say, and list the urls of the pages that say so.`;
+
+/** The one search: how people get into this path, and which pages say so. */
+function searchPrompt(r: RoadmapRequest): string {
+  const out = [`Path: ${r.goal}.`];
+  if (r.posting) out.push(`Posting: ${r.posting.title} at ${r.posting.organizer} (${r.posting.type}).`);
+  out.push('', 'How do people get into this path, and which pages say so?');
+  if (r.knownPaths.length) out.push('', lines('Paths the app already holds', r.knownPaths.map((path) => `${path.outcome}: ${path.timeline.join('; ')}`)));
+  return out.join('\n');
+}
+
+function evidence(notes: string, urls: string[]): string {
+  const pages = urls.length ? urls.map((url) => `- ${url}`).join('\n') : '- none';
+  return `Notes on how people get in:\n${notes.trim() || 'none'}\n\nPages:\n${pages}`;
+}
+
+/** The search call's citations, plus the page urls it listed. A fill with no tools cites nothing on its own. */
+function cited(result: GrokResult<Roadmap>, research: { notes: string; urls: string[] }, fromSearch: string[]): GrokResult<Roadmap> {
+  const citations: string[] = [];
+  for (const url of [...fromSearch, ...research.urls, ...result.citations]) {
+    if (/^https?:\/\//i.test(url) && !citations.includes(url)) citations.push(url);
+  }
+  return { data: result.data, citations };
+}
+
+/**
+ * One search (web and X, two turns), then a fill of the roadmap schema with no tools.
+ * A thin draft is filled once more from the same notes and urls, plus what is missing. That fill does not search.
+ */
 export const writeRoadmap: RoadmapWriter = async (request) => {
-  const first = await ask(request);
+  // The normal tier of whichever transport is in use, as the master agent and managers use.
+  const model = tierModels().normal;
+  const found = await grokJson({
+    name: 'roadmap_search',
+    system: SEARCH_SYSTEM,
+    user: searchPrompt(request),
+    schema: Research,
+    tools: [{ type: 'web_search' }, { type: 'x_search' }],
+    maxTurns: 2,
+    model,
+  });
+  const fill = (extra: string) =>
+    grokJson({
+      name: 'roadmap',
+      system: SYSTEM,
+      user: [roadmapPrompt(request), evidence(found.data.notes, found.data.urls), extra].filter(Boolean).join('\n\n'),
+      schema: Roadmap,
+      model,
+    }).then((result) => cited(result, found.data, found.citations));
+
+  const first = await fill('');
   if (fullEnough(request, first.data)) return first;
-  const second = await ask(request, '\n\nYour last answer did not have the required shape. Follow it exactly this time.').catch(() => first);
+  const second = await fill(`What is missing: ${gaps(request, first.data).join('; ')}.`).catch(() => first);
   return fullEnough(request, second.data) ? second : first;
 };

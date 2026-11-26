@@ -54,8 +54,9 @@ export function cliModel(model: string | undefined): string | undefined {
  * A headless run cannot ask, so without `--allow WebFetch` the CLI cancels every page open
  * and the reader returns an empty record. `--always-approve` is not used unless the operator
  * sets GROK_CLI_ALWAYS_APPROVE=1; it would also approve shell and file tools.
+ * When maxTurns is set, `--max-turns` is added with that integer. When it is omitted, the flag is not added.
  */
-export function cliArguments(opts: { prompt: string; model?: string; tools: boolean; schema?: string; effort?: string; alwaysApprove?: boolean; cwd: string }): string[] {
+export function cliArguments(opts: { prompt: string; model?: string; tools: boolean; schema?: string; effort?: string; alwaysApprove?: boolean; maxTurns?: number; cwd: string }): string[] {
   const args = ['-p', opts.prompt, '--output-format', 'json', '--cwd', opts.cwd, '--no-subagents'];
   const model = cliModel(opts.model);
   if (model) args.push('-m', model);
@@ -64,6 +65,7 @@ export function cliArguments(opts: { prompt: string; model?: string; tools: bool
   else args.push('--allow', 'WebSearch', '--allow', 'WebFetch');
   if (opts.schema) args.push('--json-schema', opts.schema);
   if (opts.tools && opts.alwaysApprove) args.push('--always-approve');
+  if (opts.maxTurns !== undefined) args.push('--max-turns', String(opts.maxTurns));
   return args;
 }
 
@@ -204,6 +206,8 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
   tools?: GrokTool[];
   model?: string;
   timeoutMs?: number;
+  /** When set, the CLI is started with --max-turns. When omitted, the flag is not added. */
+  maxTurns?: number;
   /** The Grok CLI is not known to read pictures; the poster designer works from the posting alone. */
   images?: string[];
 }): Promise<GrokResult<z.infer<S>>> {
@@ -219,7 +223,7 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
     `---\n${opts.user}`,
   ].join('\n\n');
   const timeoutMs = opts.timeoutMs ?? config.grokCli.timeoutMs;
-  const base = { prompt, model: opts.model, tools: Boolean(opts.tools?.length), effort: config.grokCli.effort, alwaysApprove: config.grokCli.alwaysApprove, cwd: sandboxDir() };
+  const base = { prompt, model: opts.model, tools: Boolean(opts.tools?.length), effort: config.grokCli.effort, alwaysApprove: config.grokCli.alwaysApprove, maxTurns: opts.maxTurns, cwd: sandboxDir() };
 
   let lastError: unknown;
   // One retry, without the schema option in case the CLI turned the schema down: the prompt still asks for the JSON.

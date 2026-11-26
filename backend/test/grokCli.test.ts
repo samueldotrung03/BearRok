@@ -39,7 +39,7 @@ const { config } = await import('../src/config.ts');
 // Tests never read the saved harness choice, so the Grok harness is connected here by hand.
 const { setHarnessStateForTest } = await import('../src/harness.ts');
 setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
-const { answerText, extractJson, structuredAnswer, fullestAnswer } = await import('../src/grokCli.ts');
+const { answerText, extractJson, structuredAnswer, fullestAnswer, cliArguments } = await import('../src/grokCli.ts');
 const { GrokBrain, DEADLINE_RULE, DEADLINE_FINDER_SEARCH } = await import('../src/agents/grokBrain.ts');
 const { readFileSync, rmSync } = await import('node:fs');
 const Schema = z.object({ title: z.string(), url: z.string() });
@@ -81,6 +81,56 @@ test('grokJson goes through the Grok CLI when the Grok harness is connected', as
   assert.match(args, /--allow\nWebSearch\n--allow\nWebFetch/);
   assert.match(args, /--json-schema\n/);
   assert.match(args, /--no-subagents/);
+});
+
+test('cliArguments includes --max-turns 2 only when maxTurns is 2', () => {
+  const base = { prompt: 'Find one.', tools: true, cwd: dir };
+  const open = cliArguments(base);
+  const capped = cliArguments({ ...base, maxTurns: 2 });
+  assert.deepEqual(capped, [...open, '--max-turns', '2']);
+  assert.equal(open.includes('--max-turns'), false);
+  assert.deepEqual(cliArguments({ ...base, maxTurns: undefined }), open);
+  assert.equal(capped.includes('--always-approve'), false);
+});
+
+test('grokJson passes a host maxTurns of 2 to the Grok CLI and omits the flag when unset', async () => {
+  reset();
+  writeFileSync(join(dir, 'reply'), '{"title":"A","url":"https://example.org/a"}');
+  await grokJson({ name: 't', system: 's', user: 'u', schema: Schema, maxTurns: 2 });
+  const capped = readFileSync(join(dir, 'args'), 'utf8');
+  assert.match(capped, /--max-turns\n2\n/);
+  assert.doesNotMatch(capped, /--always-approve/);
+  reset();
+  writeFileSync(join(dir, 'reply'), '{"title":"B","url":"https://example.org/b"}');
+  await grokJson({ name: 't', system: 's', user: 'u', schema: Schema });
+  assert.doesNotMatch(readFileSync(join(dir, 'args'), 'utf8'), /--max-turns/);
+});
+
+test('the xAI Responses body includes max_turns only when maxTurns is set', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = config.xaiApiKey;
+  const originalEnv = process.env.XAI_API_KEY;
+  const bodies: Record<string, unknown>[] = [];
+  setHarnessStateForTest({ connected: [], active: null });
+  process.env.XAI_API_KEY = 'test-key';
+  config.xaiApiKey = 'test-key';
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ output_text: '{"title":"A","url":"https://example.org/a"}' }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await grokJson({ name: 't', system: 's', user: 'u', schema: Schema, maxTurns: 2 });
+    await grokJson({ name: 't', system: 's', user: 'u', schema: Schema });
+  } finally {
+    globalThis.fetch = originalFetch;
+    config.xaiApiKey = originalKey;
+    if (originalEnv === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = originalEnv;
+    setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
+  }
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0]?.max_turns, 2);
+  assert.equal(Object.hasOwn(bodies[1] ?? {}, 'max_turns'), false);
 });
 
 test('a reply that is not valid JSON is asked for once more', async () => {

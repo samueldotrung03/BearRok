@@ -5,7 +5,8 @@ import type { StudentState } from '../src/agents/system.ts';
 import { AgentSystem } from '../src/agents/system.ts';
 import type { Opportunity } from '../src/agents/types.ts';
 import { createApp } from '../src/app.ts';
-import { cachedSearch, mergeAnswer, ownMatches, searchContext, searchPrompt, SearchRequest, type SearchWriter } from '../src/search.ts';
+import { grokJson } from '../src/grok.ts';
+import { cachedSearch, lookupSystem, mergeAnswer, ownMatches, searchContext, searchPrompt, searchSystem, setSearchModelForTest, writeSearch, SearchRequest, type SearchWriter } from '../src/search.ts';
 import { LocalStore } from '../src/store/local.ts';
 
 const NOW = Date.parse('2026-11-19T12:00:00Z');
@@ -89,4 +90,79 @@ test('API: search answers own matches at once, and the web search honestly refus
   assert.equal(seen!.request.kind, 'internship');
   await post(on, 'search', { query: 'software internship', kind: 'internship' });
   assert.equal(calls, 1, 'the same search again is answered from the cache');
+});
+
+test('search: the web path looks up once, then ranks with no tools; web off stays one call', async () => {
+  const on = SearchRequest.parse({ query: 'stripe intern' });
+  const lookup = lookupSystem(on, 't', '2026-11-19');
+  assert.match(lookup, /Search for the student's query once/);
+  assert.match(lookup, /Open a page only to check a date or deadline/);
+  assert.match(lookup, /Then stop/);
+  assert.doesNotMatch(lookup, /several quer/i);
+  assert.doesNotMatch(lookup, /run several/i);
+
+  const ranking = searchSystem(on, 't', '2026-11-19');
+  assert.match(ranking, /Do not search/);
+  assert.match(ranking, /Rank and write the answer/);
+  assert.doesNotMatch(ranking, /several quer/i);
+  assert.doesNotMatch(ranking, /Run several/);
+  assert.doesNotMatch(ranking, /Search for the student's query once/);
+
+  const offReq = SearchRequest.parse({ query: 'stripe intern', web: false });
+  const off = searchSystem(offReq, 't', '2026-11-19');
+  assert.match(off, /Web search is OFF: do not search the web; rank only their own postings/);
+  assert.match(off, /Do not use the web\./);
+  assert.match(off, /find that one first: its official page/);
+  assert.doesNotMatch(off, /several/);
+  assert.doesNotMatch(off, /Do not search\. Rank and write the answer/);
+
+  const seen: Array<Parameters<typeof grokJson>[0]> = [];
+  const answer = { intent: 'stripe intern', answer: 'See [1].', results: [], related: ['more'], contextUsed: ['your major'] };
+  setSearchModelForTest((async (opts: Parameters<typeof grokJson>[0]) => {
+    seen.push(opts);
+    if (opts.tools?.some((tool) => tool.type === 'web_search')) {
+      return { data: { notes: 'Stripe internship closes 2026-12-01.', urls: ['https://stripe.com/jobs/intern', ''] }, citations: ['https://stripe.com/jobs/intern'] };
+    }
+    return { data: answer, citations: [] };
+  }) as typeof grokJson);
+  try {
+    const web = await writeSearch({ request: on, context: 'Student: freshman, EECS', own: [] });
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0]!.name, 'search_lookup');
+    assert.deepEqual(seen[0]!.tools, [{ type: 'web_search' }]);
+    assert.equal(seen[0]!.maxTurns, 2);
+    assert.equal(seen[0]!.schema.safeParse({ notes: 'n', urls: ['https://example.com'] }).success, true);
+    assert.equal(seen[0]!.schema.safeParse({ intent: 'i', answer: 'a', results: [], related: [], contextUsed: [] }).success, false);
+    assert.match(seen[0]!.system, /Search for the student's query once/);
+    assert.match(seen[0]!.system, /Open a page only to check a date or deadline/);
+    assert.match(seen[0]!.user, /Query: stripe intern/);
+    assert.doesNotMatch(seen[0]!.user, /stripe\.com\/jobs\/intern/);
+    assert.doesNotMatch(seen[0]!.system, /several quer/i);
+
+    assert.equal(seen[1]!.name, 'search');
+    assert.deepEqual(seen[1]!.tools, []);
+    assert.equal(seen[1]!.maxTurns, undefined);
+    assert.equal(seen[1]!.schema.safeParse(answer).success, true);
+    assert.equal(seen[1]!.schema.safeParse({ notes: 'n', urls: [] }).success, false);
+    assert.match(seen[1]!.system, /Do not search/);
+    assert.match(seen[1]!.system, /Rank and write the answer/);
+    assert.doesNotMatch(seen[1]!.system, /several quer/i);
+    assert.doesNotMatch(seen[1]!.system, /Search for the student's query once/);
+    assert.match(seen[1]!.user, /Stripe internship closes 2026-12-01/);
+    assert.match(seen[1]!.user, /https:\/\/stripe\.com\/jobs\/intern/);
+    assert.equal(web.data.intent, 'stripe intern');
+    assert.deepEqual(web.citations, ['https://stripe.com/jobs/intern']);
+
+    seen.length = 0;
+    const local = await writeSearch({ request: offReq, context: '', own: [] });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0]!.name, 'search');
+    assert.deepEqual(seen[0]!.tools, []);
+    assert.equal(seen[0]!.maxTurns, undefined);
+    assert.match(seen[0]!.system, /Web search is OFF/);
+    assert.equal(seen[0]!.schema.safeParse(answer).success, true);
+    assert.equal(local.data.intent, 'stripe intern');
+  } finally {
+    setSearchModelForTest(null);
+  }
 });

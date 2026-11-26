@@ -112,9 +112,13 @@ test('search: the web path looks up once, then ranks with no tools; web off stay
   const off = searchSystem(offReq, 't', '2026-11-19');
   assert.match(off, /Web search is OFF: do not search the web; rank only their own postings/);
   assert.match(off, /Do not use the web\./);
-  assert.match(off, /find that one first: its official page/);
+  assert.match(off, /put the matching own posting first/);
+  assert.match(off, /Rank only their own postings/);
+  assert.doesNotMatch(off, /official page/);
+  assert.doesNotMatch(off, /8 to 15/);
   assert.doesNotMatch(off, /several/);
   assert.doesNotMatch(off, /Do not search\. Rank and write the answer/);
+  assert.match(ranking, /8 to 15/);
 
   const seen: Array<Parameters<typeof grokJson>[0]> = [];
   const answer = { intent: 'stripe intern', answer: 'See [1].', results: [], related: ['more'], contextUsed: ['your major'] };

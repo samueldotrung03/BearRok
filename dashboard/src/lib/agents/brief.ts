@@ -28,7 +28,7 @@ const TERMS: Term[] = [
   { key: 'clubs', label: 'clubs', pattern: /\bclubs?\b|\bcommunit(y|ies)\b|\borgs?\b/, category: 'clubs' },
   { key: 'programs', label: 'programs', pattern: /\bprograms?\b/, category: 'programs' },
   { key: 'research', label: 'research', pattern: /\bresearch\b|\blabs?\b/, category: 'programs' },
-  { key: 'hackathon', label: 'hackathons', pattern: /\bhackathons?\b/, category: 'programs' },
+  { key: 'hackathon', label: 'competitions', pattern: /\bhackathons?\b|\bcompetitions?\b|\bcontests?\b|\bolympiads?\b/, category: 'programs' },
   { key: 'scholarship', label: 'scholarships', pattern: /\bscholarships?\b|\bfunding\b|\bgrants?\b/, category: 'programs' },
   { key: 'finance', label: 'finance', pattern: /\bfinanc\w*|\bfintech\b|\bbank\w*|\bquant\w*|\btrading\b/ },
   { key: 'ml', label: 'AI and ML', pattern: /\bml\b|\bai\b|machine learning|\bdeep learning\b/ },

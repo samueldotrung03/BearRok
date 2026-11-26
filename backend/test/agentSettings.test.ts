@@ -105,9 +105,11 @@ test('agent settings: the kinds ticked are the ones searches cover, and they sho
   await s.trigger('first');
   const run = s.currentRun()!;
   assert.deepEqual([...new Set(run.assignments.map((a) => a.category))].sort(), ['event', 'program']);
-  // Only hackathons were ticked among the programs, so the program managers are told so.
-  assert.ok(run.assignments.filter((a) => a.category === 'program').every((a) => a.focus.includes('hackathons') && !a.focus.includes('scholarships')));
-  assert.ok(run.brief!.preferences.some((p) => p === 'Programs: look only for hackathons.'));
+  // Only competitions were ticked among the programs, so the program managers are told so, in words
+  // that cover every kind of competition, not only hackathons.
+  const competitions = 'competitions (hackathons, case, coding, pitch and design competitions)';
+  assert.ok(run.assignments.filter((a) => a.category === 'program').every((a) => a.focus.includes(competitions) && !a.focus.includes('scholarships')));
+  assert.ok(run.brief!.preferences.some((p) => p === `Programs: look only for ${competitions}.`));
   assert.ok(s.student().feed.some((f) => f.opportunity.type === 'event' || f.opportunity.type === 'hackathon'));
   // Unticking every kind goes back to what the profile asks for.
   s.setAgentSettings({ models: {}, minimums: {}, kinds: [] });

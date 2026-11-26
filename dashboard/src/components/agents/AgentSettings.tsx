@@ -35,7 +35,8 @@ const KINDS: { id: Kind; label: string; plural: string }[] = [
   { id: 'internship', label: 'Internships', plural: 'internships' },
   { id: 'event', label: 'Events and networking', plural: 'events' },
   { id: 'club', label: 'Clubs and communities', plural: 'clubs' },
-  { id: 'hackathon', label: 'Hackathons', plural: 'hackathons' },
+  // The `hackathon` kind covers every competition: hackathons, case, coding, pitch and design contests.
+  { id: 'hackathon', label: 'Competitions', plural: 'competitions' },
   { id: 'research', label: 'Research positions', plural: 'research positions' },
   { id: 'scholarship', label: 'Scholarships', plural: 'scholarships' },
 ];

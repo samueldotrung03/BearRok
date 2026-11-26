@@ -1242,3 +1242,25 @@ test('stop: postings cut off mid-review are reviewed first by the next search', 
   assert.equal(s.currentRun()!.status, 'complete');
   assert.equal(s.memorySnapshot().learned.pending?.length ?? 0, 0);
 });
+
+test('disliked cards are listed with the state, most recent first, and a second dislike puts a card back in the feed', async () => {
+  const { AgentSystem } = await import('../src/agents/system.ts');
+  const { SimBrain } = await import('../src/agents/simBrain.ts');
+  let t = Date.parse('2026-11-26T10:00:00Z');
+  const s = new AgentSystem(new SimBrain({ speed: 0, now: () => new Date(t) }), { now: () => new Date(t), feedTarget: 0 });
+  await s.trigger('first');
+  const [a, b] = s.student().feed.map((f) => f.opportunity.id);
+  assert.ok(a && b);
+  s.interact(a, 'dislike');
+  t += 1000;
+  s.interact(b, 'dislike');
+  let st = s.student();
+  assert.deepEqual(st.dislikedItems.map((e) => e.opportunity.id), [b, a], 'most recent first');
+  assert.ok(st.dislikedItems.every((e) => e.reaction === 'dislike'));
+  assert.ok(!st.feed.some((f) => f.opportunity.id === a || f.opportunity.id === b), 'still out of the feed');
+  // Taking the dislike back.
+  s.interact(a, 'dislike');
+  st = s.student();
+  assert.deepEqual(st.dislikedItems.map((e) => e.opportunity.id), [b]);
+  assert.ok(st.feed.some((f) => f.opportunity.id === a), 'back in the feed');
+});

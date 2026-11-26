@@ -2404,9 +2404,12 @@ body {
 /* One window, three columns: the photo and facts, the details, and the roadmap with the
    question box. It is sized to the screen so nothing has to scroll on a laptop. */
 .detail-dialog {
+  /* The For you card's height at this window size (the reel's slide keeps 96px for its bar and
+     margins), so the card in the left panel is the same size as on the For you page. */
+  --card-h: min(860px, calc(100dvh - 96px));
   margin: auto;
-  width: min(1180px, calc(100vw - 2rem));
-  height: min(760px, calc(100dvh - 2rem));
+  width: min(calc(var(--card-h) * 0.625 + 760px), calc(100vw - 2rem));
+  height: var(--card-h);
   padding: 0;
   overflow: hidden;
   border-radius: 28px;
@@ -2450,7 +2453,7 @@ body {
 
 .detail-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-columns: calc(var(--card-h) * 0.625) minmax(0, 1.1fr) minmax(0, 1fr);
   height: 100%;
 }
 
@@ -2461,6 +2464,15 @@ body {
   min-height: 0;
   overflow: hidden;
   background: var(--color-ink);
+}
+
+/* The For you card inside the window: the panel is already its size and shape. */
+.detail-card-slot .reel-card {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .detail-photo-shade {
@@ -2568,8 +2580,8 @@ body {
     min-height: 380px;
   }
 
-  /* Stacked, the poster keeps the card's portrait shape instead of a wide strip. */
-  .detail-poster {
+  /* Stacked, the card keeps its portrait shape instead of a wide strip. */
+  .detail-card-slot {
     width: min(100%, 440px);
     min-height: 0;
     aspect-ratio: 10 / 16;

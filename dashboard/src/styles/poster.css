@@ -106,6 +106,7 @@
 }
 
 .poster-org {
+  min-width: 0;
   overflow: hidden;
   font-size: 3.6cqw;
   font-weight: 700;
@@ -181,8 +182,9 @@
   z-index: 1;
   display: flex;
   flex-direction: column;
-  /* "safe": words that do not fit run off the bottom, where they are measured and trimmed. */
-  justify-content: safe center;
+  /* Room the words and picture do not fill is shared out between them, never left as one empty
+     band; words that do not fit run off the bottom, where they are measured and trimmed. */
+  justify-content: space-between;
   gap: 3.4cqw;
 }
 
@@ -203,21 +205,12 @@
   justify-content: flex-start;
 }
 
-.poster-body[data-placement='top'] {
-  justify-content: flex-start;
-}
 
 .poster-words {
   display: flex;
   flex-direction: column;
   gap: 2.6cqw;
   min-width: 0;
-}
-
-/* In the details window the frame is taller than a card: what the words and picture do not fill
-   is shared out between them, picture at the top, facts near the bottom. */
-.poster[data-context='details'] .poster-body:not([data-placement='overlay']):not([data-placement='side']) {
-  justify-content: space-between;
 }
 
 /* A tall picture stands beside the words. */
@@ -272,6 +265,7 @@
 
 .poster-headline {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   font-family: var(--p-head-font);
   font-size: var(--p-headline);
@@ -319,11 +313,10 @@
 
 .poster-stats dd {
   font-family: var(--p-head-font);
-  font-size: 8cqw;
+  font-size: calc(8cqw * var(--p-stat-scale, 1));
   font-weight: var(--p-head-weight);
   line-height: 1;
   letter-spacing: -0.02em;
-  overflow-wrap: anywhere;
 }
 
 .poster[data-typeface='serif'] .poster-stats dd {
@@ -341,7 +334,7 @@
 }
 
 .poster-stats:has(div:nth-child(3)) dd {
-  font-size: 6cqw;
+  font-size: calc(6cqw * var(--p-stat-scale, 1));
 }
 
 .poster-stats dt {
@@ -476,12 +469,14 @@
   background: rgb(8 10 16 / 0.6);
 }
 
+/* A stock photo's credit: in the photo's own bottom corner, or the card's top corner when the
+   photo lies under the words. */
 .poster-credit {
   position: absolute;
-  top: 17cqw;
-  right: 4cqw;
+  right: 1.5cqw;
+  bottom: 1.5cqw;
   z-index: 3;
-  max-width: 60%;
+  max-width: 90%;
   overflow: hidden;
   padding: 0.6cqw 2cqw;
   border-radius: 999px;
@@ -491,4 +486,15 @@
   color: rgb(255 255 255 / 0.9);
   background: rgb(0 0 0 / 0.45);
   pointer-events: auto;
+}
+
+.poster-top:has(> .poster-credit) {
+  flex-wrap: wrap;
+}
+
+.poster-top > .poster-credit {
+  position: static;
+  flex-basis: auto;
+  margin-left: auto;
+  max-width: 70%;
 }

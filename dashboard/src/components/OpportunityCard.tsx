@@ -1,4 +1,4 @@
-import { ArrowUpRight, Bell, Bookmark, BookmarkCheck, CalendarDays, CalendarPlus, Check, Route, CircleDashed, Clock, Heart, MapPin, Sparkles, ThumbsDown, X } from 'lucide-react';
+import { ArrowUpRight, Bell, Bookmark, BookmarkCheck, CalendarDays, CalendarPlus, Check, Route, CircleDashed, Clock, Heart, MapPin, Sparkles, ThumbsDown, Undo2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { applicationInfo } from '../data/sample.ts';
@@ -9,6 +9,7 @@ import { daysUntil, dueLabel, relativeTime, shortDate } from '../lib/time.ts';
 import { useLogoBackdrop } from '../lib/logoBackdrop.ts';
 import { posterFor } from '../lib/poster.ts';
 import { ReelPoster } from './feed/ReelPoster.tsx';
+import { ReelCaption } from './feed/ReelCaption.tsx';
 import { useStore } from '../state/StoreProvider.tsx';
 import type { Opportunity } from '../types.ts';
 import { FACTOR_LABEL, matchLevel, matchPercent } from '../lib/match.ts';
@@ -407,24 +408,27 @@ export function Details({ opportunity: o, onClose }: { opportunity: Opportunity;
       </button>
 
       <div className="detail-grid">
-        {/* The same poster as the card on For you, given the whole panel; its frame stretches to the panel's shape. */}
-        <div className="detail-photo detail-poster">
-          <ReelPoster opportunity={o} context="details" titleId={`${o.id}-dialog-title`} />
+        {/* The whole For you card, poster and caption, at the size it has on the For you page. */}
+        <div className="detail-photo detail-card-slot">
+          <article className="reel-card">
+            <ReelPoster opportunity={o} titleId={`${o.id}-dialog-title`} />
+            <div className="reel-shade" aria-hidden="true" />
+            <ReelCaption
+              opportunity={o}
+              chips={
+                <li className="flex">
+                  <MatchChip opportunity={o} />
+                </li>
+              }
+            />
+          </article>
         </div>
 
         <div className="detail-col">
-          {/* What used to sit on the photo: the kind, place and date, what is not known, and the fit. */}
+          {/* The fit and what is not known; the kind, place and dates are on the card's caption. */}
           <div className="mb-4">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-2">
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${meta.tint}`}>
-                <meta.icon className="size-3.5" aria-hidden="true" />
-                {meta.label}
-              </span>
-              {place && <Fact icon={MapPin}>{place}</Fact>}
-              {o.deadline ? <Fact icon={Clock}>{dueLabel(o.deadline)}</Fact> : o.startTime && <Fact icon={CalendarDays}>{`Starts ${shortDate(o.startTime)}`}</Fact>}
-            </div>
             {o.unknowns.length > 0 && (
-              <div className="mt-2 flex flex-col gap-1 text-sm text-ink-3">
+              <div className="mb-2 flex flex-col gap-1 text-sm text-ink-3">
                 {o.unknowns.map((unknown) => (
                   <Fact key={unknown.field} icon={CircleDashed}>
                     {unknown.label}
@@ -432,7 +436,7 @@ export function Details({ opportunity: o, onClose }: { opportunity: Opportunity;
                 ))}
               </div>
             )}
-            <div className="mt-3 flex items-center gap-3">
+            <div className="flex items-center gap-3">
               <span className="text-sm font-semibold">{o.match ? 'Match' : 'Fit'}</span>
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-brand-soft">
                 <div className="h-full rounded-full bg-brand" style={{ width: `${fit}%` }} />
@@ -560,6 +564,7 @@ export function OpportunityRow({
   onRoadmap = false,
   actions,
   plainCover = false,
+  onUndoDislike,
 }: {
   opportunity: Opportunity;
   onDismiss: (o: Opportunity) => void;
@@ -568,6 +573,8 @@ export function OpportunityRow({
   actions?: React.ReactNode;
   /** The picture without a blurred copy round it, logos fitted to the tile (the Feed tab). */
   plainCover?: boolean;
+  /** For a disliked card: the Dislike button becomes "Undo dislike", which calls this. */
+  onUndoDislike?: (o: Opportunity) => void;
 }) {
   const [open, setOpen] = useState(false);
   // A click still opens the details. A double-click likes, and closes the details if the
@@ -614,14 +621,25 @@ export function OpportunityRow({
         <div className="relative z-10 mt-auto flex flex-wrap items-center gap-1 pt-3">
           <SaveButton id={o.id} />
           <LikeButton id={o.id} />
-          <button
-            type="button"
-            onClick={() => onDismiss(o)}
-            className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-ink-3 transition hover:bg-slate-100 hover:text-ink"
-          >
-            <ThumbsDown className="size-4" aria-hidden="true" />
-            Dislike
-          </button>
+          {onUndoDislike ? (
+            <button
+              type="button"
+              onClick={() => onUndoDislike(o)}
+              className="flex h-9 items-center gap-1.5 rounded-lg bg-brand-soft px-3 text-sm font-semibold text-brand transition hover:bg-brand hover:text-white"
+            >
+              <Undo2 className="size-4" aria-hidden="true" />
+              Undo dislike
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onDismiss(o)}
+              className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-ink-3 transition hover:bg-slate-100 hover:text-ink"
+            >
+              <ThumbsDown className="size-4" aria-hidden="true" />
+              Dislike
+            </button>
+          )}
           {actions}
         </div>
       </div>

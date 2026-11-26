@@ -137,6 +137,11 @@ export interface StudentState {
    * the Saved page after the profile changes. Ones disliked since, or ruled out by a note, are left out.
    */
   savedItems: FeedEntry[];
+  /**
+   * The postings the student disliked, most recent first (at most 50), so the app can list them and
+   * take a dislike back. Not in the feed: disliking still takes a card out of it.
+   */
+  dislikedItems: FeedEntry[];
   /** The Google Sheet the saved list is written to, or null for the app's own sheet only. */
   sheet: LinkedSheet | null;
   /** The lasting Google connection as a page may see it: no token, only who and what. Null when not connected. */
@@ -458,6 +463,21 @@ export class AgentSystem {
     return buildMemory(this.interactions, this.opportunities);
   }
 
+  /** The disliked postings as cards, most recently disliked first, ranked as if not disliked. */
+  private dislikedItems(memory: ReturnType<typeof buildMemory>): FeedEntry[] {
+    const when = new Map<string, string>();
+    for (const i of this.interactions) if (i.action === 'dislike') when.set(i.opportunityId, i.at);
+    const ids = [...memory.reaction].filter(([id, r]) => r === 'dislike' && this.opportunities.has(id)).map(([id]) => id);
+    if (!ids.length) return [];
+    // Ranking leaves disliked cards out, so they are ranked with the dislike set aside and marked again after.
+    const plain = { ...memory, reaction: new Map([...memory.reaction].filter(([, r]) => r !== 'dislike')) };
+    const entries = rankFeed(ids.map((id) => this.opportunities.get(id)!), plain, { now: this.opts.now(), reasons: this.reasons, newIds: new Set(), notes: noteSignals([]) });
+    return entries
+      .map((e) => ({ ...e, reaction: 'dislike' as const }))
+      .sort((a, b) => (when.get(b.opportunity.id) ?? '').localeCompare(when.get(a.opportunity.id) ?? ''))
+      .slice(0, 50);
+  }
+
   student(): StudentState {
     const memory = this.memory();
     const threshold = thresholdOf(this.profile);
@@ -489,6 +509,7 @@ export class AgentSystem {
       saved,
       liked: [...memory.reaction].filter(([id, r]) => r === 'like' && this.opportunities.has(id)).map(([id]) => id),
       savedItems: rank(saved.map((id) => this.opportunities.get(id)!)),
+      dislikedItems: this.dislikedItems(memory),
       sheet: this.sheet,
       google: this.google ? { email: this.google.email ?? null, services: [...this.google.services], connectedAt: this.google.connectedAt, allCalendars: this.google.allCalendars === true } : null,
       calendarSync: this.calendarSync,

@@ -868,7 +868,7 @@ export class AgentSystem {
 
   /**
    * Everything saved, and anything with an application status, one entry each: soonest deadline
-   * first, with no deadline after, as the tracker sheet lists them.
+   * first, with no deadline after. The Saved and Applications sheet tabs are this list, split.
    */
   trackerItems(): TrackerItem[] {
     const memory = this.memory();

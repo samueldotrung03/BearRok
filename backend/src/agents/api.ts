@@ -7,7 +7,7 @@ import { streamSSE } from 'hono/streaming';
 import type { AuthUser, Verifier } from '../auth.ts';
 import { createDeadlineEvent, deleteEvent, deleteStudentEvent, expired, insertStudentEvent, readStudentCalendar, updateStudentEvent, type EventDraft } from '../calendar.ts';
 import { readResume, RESUME_MAX_BYTES, RESUME_TYPES } from '../resume.ts';
-import { exportApplications, openSheet, parseSheetId, trackerRows, writeTracker } from '../sheets.ts';
+import { applicationTrackerItems, exportApplications, openSheet, parseSheetId, savedTrackerItems, trackerRows, writeTracker } from '../sheets.ts';
 import type { Store } from '../store/index.ts';
 import { provider } from '../config.ts';
 import * as harness from '../harness.ts';
@@ -947,20 +947,33 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     }
   });
 
-  // The tracker: every saved posting and application with its status, deadline, details and links.
-  // The app shows these rows as its own spreadsheet, and writes the same rows to a linked Google Sheet.
+  // The tracker, split the way the two pages show it. ?tab=saved is every saved posting (and an
+  // Interested record). ?tab=applications is To apply, Applying and Applied. With no tab, the full
+  // tracker is returned so older callers keep working. The same rows are written to the linked sheet.
+  const trackerView = (system: AgentSystem, tab: string | undefined) => {
+    const items = system.trackerItems();
+    if (tab === 'saved') return savedTrackerItems(items, new Set(system.student().saved));
+    if (tab === 'applications') return applicationTrackerItems(items);
+    return items;
+  };
   app.get(`${base}/sheet`, async (c) => {
     const system = await systemOf(c);
-    const [header, ...rows] = trackerRows(system.trackerItems(), new Date());
-    return c.json({ header, rows, ids: system.trackerItems().map((i) => i.opportunity?.id ?? i.application!.opportunityId), linked: system.getSheet() });
+    const items = trackerView(system, c.req.query('tab'));
+    const [header, ...rows] = trackerRows(items, new Date());
+    return c.json({ header, rows, ids: items.map((i) => i.opportunity?.id ?? i.application!.opportunityId), linked: system.getSheet() });
   });
 
-  /** Write the tracker to `target` (or a new sheet when null) and link it. */
+  /** Write both tabs to `target` (or a new sheet when null) and link that one spreadsheet. */
   const writeAndLink = async (c: Context, system: AgentSystem, target: LinkedSheet | null) => {
     try {
       const google = await googleAccess(system, 'sheets');
       const now = new Date();
-      const written = await (opts.tracker ?? ((t, l, r, d) => writeTracker(t, l, r, d, googleFetch)))(google, target, trackerRows(system.trackerItems(), now), now);
+      const items = system.trackerItems();
+      const savedIds = new Set(system.student().saved);
+      const written = await (opts.tracker ?? ((t, l, r, d) => writeTracker(t, l, r, d, googleFetch)))(google, target, {
+        saved: trackerRows(savedTrackerItems(items, savedIds), now),
+        applications: trackerRows(applicationTrackerItems(items), now),
+      }, now);
       system.setSheet({ spreadsheetId: written.spreadsheetId, url: written.url, title: written.title ?? target?.title ?? null, tab: written.tab, syncedAt: now.toISOString() });
       return c.json({ linked: system.getSheet() });
     } catch (e) {
@@ -977,8 +990,8 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     return writeAndLink(c, system, body?.create === true ? null : system.getSheet());
   });
 
-  // Use a sheet the student already has: { sheet: its link or id }. It is opened, given the
-  // Applications tab if it has none, linked, and written straight away.
+  // Use a sheet the student already has: { sheet: its link or id }. It is opened, given whichever
+  // of the Saved and Applications tabs it is missing, linked, and both tabs are written straight away.
   app.post(`${base}/sheet/link`, async (c) => {
     const system = await systemOf(c);
     const body = await c.req.json().catch(() => ({}));

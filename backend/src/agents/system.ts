@@ -156,7 +156,7 @@ type Listener = (event: 'run' | 'student', data: unknown) => void;
 /** An observer also hears when saved memory put a run back, which is not a run update. */
 type Observer = (event: 'run' | 'restored', data: unknown) => void;
 
-const UNKNOWN_DEADLINE: Record<Category, string> = {
+export const UNKNOWN_DEADLINE: Record<Category, string> = {
   internship: 'Application deadline unknown',
   event: 'Registration deadline unknown',
   club: 'Sign-up deadline unknown',

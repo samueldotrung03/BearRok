@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { serve } from '@hono/node-server';
+import { withDemoStudent } from './agents/demoStudent.ts';
 import { GrokBrain } from './agents/grokBrain.ts';
 import { ImageFinder } from './agents/images.ts';
 import { SimBrain } from './agents/simBrain.ts';
@@ -84,7 +85,9 @@ const database = config.opportunitiesDb.off ? null : await openDatabase(config.o
 const catalog = database ? await OpportunityCatalog.open(database).catch(off('shared opportunities table')) : null;
 // Usage tracking: what students do, under a code that is not their account id, in the same database.
 const usage = database && !config.usage.off ? await UsageLog.open(database).catch(off('usage tracking')) : null;
-const withCatalog = catalog ? feedCatalog(memory, catalog) : memory;
+// The demo student is John, with real postings, until a visitor makes the demo profile their own.
+const base = withDemoStudent(memory);
+const withCatalog = catalog ? feedCatalog(base, catalog) : base;
 const remembered = usage ? trackUsage(withCatalog, usage) : withCatalog;
 // A Google connection (account, Calendar, Sheets) needs a "Desktop app" OAuth client:
 // GOOGLE_OAUTH_CLIENT_FILE, or GOOGLE_OAUTH_CLIENT_ID and _SECRET. Without one, Settings says what

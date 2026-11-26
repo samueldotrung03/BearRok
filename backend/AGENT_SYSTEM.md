@@ -332,6 +332,15 @@ Every posting the agents keep for any student is also written once to a shared P
 - **Hosting it.** Create a Postgres database (Neon and Supabase both have a free tier), put its connection string in `backend/.env` as `DATABASE_URL=postgresql://...`, and restart the backend: the table and its indexes are created on start, and the start-up log prints `postings: shared table in Postgres at <host>`. Then run `npm run opportunities:backfill` once to copy in the postings already found. The connection string holds the password, so it stays out of the repo.
 - **Not built.** The agents do not read the table yet: a search still goes to the web for a posting another student already has. The feed is still built from each student's own memory. It has only run on the embedded database, never against a hosted Postgres. Memories kept in Firestore are not backfilled.
 
+## The demo student
+
+A visitor who looks around without an account sees one shared demo student: John, a computer science junior at UC Berkeley (`src/agents/demoStudent.ts`). His feed holds 22 real postings, each read from its own page on 2026-11-25: hackathons on Luma, UC Berkeley research, scholarship, club and event pages, and summer 2027 internships on companies' own careers pages.
+
+- **Nothing in it is invented.** Each posting links to the page it was read from and is stored as `live`. A deadline or start time is there only with the words it was read from; a deadline the page does not give is shown as unknown. The match score and the sentence on why it fits John are a judgement made from his profile, not something the page says.
+- **How it is loaded.** `withDemoStudent` hands John's memory to the demo student when nothing is saved for them, or when what is saved is still the earlier invented student (Maya) unchanged. A demo profile a visitor has renamed is left alone. Signed-in students are never given it.
+- **It counts as one search already made,** so opening the demo does not start a simulated search. With no model connected, a search the visitor starts by hand still adds simulated postings, marked as samples.
+- **It goes out of date.** The list is a snapshot: postings close and events pass. Refresh the file, or connect a model and let the agents search. The postings were gathered by a web check, not by an agent run, and say so in `foundBy`.
+
 ## Usage tracking
 
 What students do in the app is recorded so the team can see whether they come back and act on what the agents find (`src/usage.ts`). The rows go in a `usage_events` table in the same database as the shared opportunities table, so it is shared only when `DATABASE_URL` is set.

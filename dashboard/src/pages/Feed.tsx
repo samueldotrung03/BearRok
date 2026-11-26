@@ -25,6 +25,7 @@ import { Cover, Details, MatchChip, OpportunityRow } from '../components/Opportu
 import { PhotoLikeBurst, usePhotoLike } from '../components/PhotoLike.tsx';
 import { emptyFeedCopy } from '../state/feedCopy.ts';
 import { ReelPoster } from '../components/feed/ReelPoster.tsx';
+import { ReelCaption } from '../components/feed/ReelCaption.tsx';
 import { DataBadge, useLive, useOpportunities } from '../state/live.tsx';
 import { WhyThis } from '../components/WhyThis.tsx';
 import { ProfileMenu } from '../components/ProfileMenu.tsx';
@@ -200,53 +201,24 @@ function Slide({
           <ReelPoster opportunity={o} overVideo={Boolean(o.video)} />
           <div className="reel-shade" aria-hidden="true" />
 
-          <div className="reel-body">
-            <ul className="flex flex-wrap gap-1.5">
-              <li className="reel-chip reel-chip-solid">
-                <meta.icon className="size-3.5" aria-hidden="true" />
-                {meta.label}
-              </li>
-              <li className="flex">
-                <MatchChip opportunity={o} />
-              </li>
-              {ranked.signals.slice(0, 2).map((signal) => (
-                <li key={signal} className="reel-chip">
-                  {signalLabel[signal]}
+          <ReelCaption
+            opportunity={o}
+            chips={
+              <>
+                <li className="flex">
+                  <MatchChip opportunity={o} />
                 </li>
-              ))}
-              <li className="flex">
-                <WhyThis reasons={reasons} active={active} onLess={() => onWhyDismiss(o)} onNotMyField={() => onWhyDismiss(o)} />
-              </li>
-            </ul>
-
-            <p className="mt-3 text-[15px] font-semibold text-white">{o.organizer}</p>
-
-            <p className="mt-1.5 flex gap-2 text-sm leading-relaxed text-white/90">
-              <Sparkle weight="fill" className="mt-1 size-3.5 shrink-0" aria-hidden="true" />
-              <span className="line-clamp-2">{o.fitExplanation}</span>
-            </p>
-
-            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[13px] font-medium text-white/85">
-              {place && (
-                <span className="flex items-center gap-1.5">
-                  <MapPin weight="fill" className="size-3.5" aria-hidden="true" />
-                  {place}
-                </span>
-              )}
-              {o.startTime && (
-                <span className="flex items-center gap-1.5">
-                  <CalendarBlank weight="fill" className="size-3.5" aria-hidden="true" />
-                  Starts {shortDate(o.startTime)}
-                </span>
-              )}
-              {o.deadline && (
-                <span className={`flex items-center gap-1.5 ${urgent ? 'rounded-full bg-orange-600 px-2 py-0.5 text-white' : ''}`}>
-                  <Clock weight="fill" className="size-3.5" aria-hidden="true" />
-                  {dueLabel(o.deadline)}
-                </span>
-              )}
-            </div>
-          </div>
+                {ranked.signals.slice(0, 2).map((signal) => (
+                  <li key={signal} className="reel-chip">
+                    {signalLabel[signal]}
+                  </li>
+                ))}
+                <li className="flex">
+                  <WhyThis reasons={reasons} active={active} onLess={() => onWhyDismiss(o)} onNotMyField={() => onWhyDismiss(o)} />
+                </li>
+              </>
+            }
+          />
         </article>
 
         <div className="reel-rail">
@@ -330,6 +302,8 @@ export function Feed() {
   const [index, setIndex] = useState(0);
   const [details, setDetails] = useState<Opportunity | null>(null);
   const [lastDismissed, setLastDismissed] = useState<Opportunity | null>(null);
+  // The Feed tab's "Disliked" list, where a dislike can be taken back at any time.
+  const [showDisliked, setShowDisliked] = useState(false);
   const opportunities = useOpportunities();
   const agentsLive = useLive();
   const plan = planFor(state, opportunities);
@@ -612,13 +586,23 @@ export function Feed() {
                   const on = value === null ? filters.types.length === 0 : filters.types.length === 1 && filters.types[0] === value;
                   const Icon = value ? typeMeta[value].icon : LayoutList;
                   return (
-                    <button key={value ?? 'all'} type="button" className="feed-cat" aria-pressed={on} onClick={() => patch({ types: value === null ? [] : [value] })}>
+                    <button key={value ?? 'all'} type="button" className="feed-cat" aria-pressed={on && !showDisliked} onClick={() => {
+                      setShowDisliked(false);
+                      patch({ types: value === null ? [] : [value] });
+                    }}>
                       <Icon className="size-4 shrink-0" aria-hidden="true" />
                       <span className="min-w-0 flex-1 truncate text-left">{value === null ? 'All' : typeMeta[value].plural}</span>
                       <span className="feed-cat-count">{countWith({ types: value === null ? [] : [value] })}</span>
                     </button>
                   );
                 })}
+                {(agentsLive.dislikedCards.length > 0 || showDisliked) && (
+                  <button type="button" className="feed-cat feed-cat-disliked" aria-pressed={showDisliked} onClick={() => setShowDisliked((v) => !v)}>
+                    <ThumbsDown className="size-4 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate text-left">Disliked</span>
+                    <span className="feed-cat-count">{agentsLive.dislikedCards.length}</span>
+                  </button>
+                )}
               </nav>
 
               <div className="feed-column">
@@ -823,7 +807,24 @@ export function Feed() {
                   )}
                 </div>
 
-                {results.length === 0 && emptyKind && !loading ? (
+                {showDisliked ? (
+                  agentsLive.dislikedCards.length === 0 ? (
+                    <div className="feed-list-empty">
+                      <div className="reel-end">
+                        <h2 className="font-display text-3xl leading-tight">Nothing disliked</h2>
+                        <p className="mx-auto mt-3 max-w-xs text-[15px] leading-relaxed text-ink-2">Cards you dislike are listed here, so you can bring one back.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <ul className="feed-list">
+                      {agentsLive.dislikedCards.map((o) => (
+                        <li key={o.id}>
+                          <OpportunityRow opportunity={o} plainCover onDismiss={() => {}} onUndoDislike={(x) => agentsLive.undoDislike(x.id)} />
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                ) : results.length === 0 && emptyKind && !loading ? (
                   <div className="feed-list-empty">
                     <EmptyKind type={emptyKind} searching={agentsLive.searching} onSearch={() => void agentsLive.runNow(emptyKind)} />
                   </div>

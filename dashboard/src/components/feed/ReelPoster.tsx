@@ -34,10 +34,12 @@ function usePictureSize(src: string | null): { w: number; h: number } | null | f
 }
 
 /** One part of a picture, cut out and shown at the given size (in card widths). */
-function Crop({ src, box, width, height, framed }: { src: string; box: Box; width: number; height: number; framed: boolean }) {
+function Crop({ src, box, width, height, framed, credit }: { src: string; box: Box; width: number; height: number; framed: boolean; credit?: ReactNode }) {
   return (
-    <div className="poster-crop" data-framed={framed} style={{ width: `${width}cqw`, height: `${height}cqw` }} aria-hidden="true">
+    <div className="poster-crop" data-framed={framed} style={{ width: `${width}cqw`, height: `${height}cqw` }}>
+      {credit}
       <img
+        aria-hidden="true"
         src={src}
         alt=""
         style={{ width: `${100 / box.w}%`, height: `${100 / box.h}%`, left: `${(-box.x / box.w) * 100}%`, top: `${(-box.y / box.h) * 100}%` }}
@@ -80,8 +82,10 @@ export function ReelPoster({
   // not fit, it gives up room step by step (`trim`): chips after the first two, then all chips,
   // then the pitch's third line, then picture size. When a large gap is left, it grows (`grow`):
   // the picture first, then the headline, until the next step would no longer fit.
-  const [fit, setFit] = useState({ trim: 0, grow: 0, done: false });
-  const { trim, grow } = fit;
+  // A word too long for its line (a headline, a stat) never wraps mid-word: the type gets
+  // smaller step by step instead (`narrow`), and a picture beside the words moves above them.
+  const [fit, setFit] = useState<Fit>({ trim: 0, grow: 0, narrow: 0, done: false });
+  const { trim, grow, narrow } = fit;
   const p = { ...full, chips: trim >= 2 ? [] : trim >= 1 ? full.chips.slice(0, 2) : full.chips };
   const bodyRef = useRef<HTMLDivElement>(null);
   const logo = o.image !== null && o.imageKind === 'logo';
@@ -90,7 +94,7 @@ export function ReelPoster({
   const picture = o.image && !logo && size !== false ? o.image : null;
   const box = p.art ?? WHOLE;
   const aspect = size ? (box.w * size.w) / (box.h * size.h) : 1.4;
-  const planned = picture ? planArt(p, aspect, room) : null;
+  const planned = picture ? planArt(p, aspect, room, narrow < 3) : null;
   const shrink = trim >= 4 ? 0.8 ** (trim - 3) : 1;
   // Growing keeps the picture inside the poster's width (86) or, beside the words, under half of it.
   const widest = planned?.placement === 'side' ? 46 : 86;
@@ -102,7 +106,8 @@ export function ReelPoster({
   const overlay = overVideo || plan?.placement === 'overlay';
   const layout = p.layout === 'flyer' && !(picture && o.imageKind === 'event') ? 'bold' : p.layout;
   const headline = [p.headline, p.headlineAccent].filter(Boolean).join(' ');
-  const scale = (plan && !overlay ? 0.9 : 1) * Math.min(textGrow, context === 'details' ? 1.6 : 1.35);
+  // Without a picture the words are the poster, so they may grow further.
+  const scale = (plan && !overlay ? 0.9 : 1) * Math.min(textGrow, context === 'details' || !plan ? 1.6 : 1.35) * 0.9 ** narrow;
 
   const style = {
     '--p-bg': p.palette.background,
@@ -111,6 +116,7 @@ export function ReelPoster({
     '--p-accent': p.palette.accent,
     '--p-focus': picture && p.art ? `${(box.x + box.w / 2) * 100}% ${(box.y + box.h / 2) * 100}%` : FOCUS[p.focus],
     '--p-headline': `${headlineSize(headline, p.typeface) * scale}cqw`,
+    '--p-stat-scale': 0.9 ** narrow,
   } as CSSProperties;
 
   const words = (
@@ -146,7 +152,19 @@ export function ReelPoster({
         ))}
       </ul>
     ) : null;
-  const crop = picture && plan && !overlay ? <Crop src={picture} box={box} width={plan.width} height={plan.height} framed={plan.placement === 'middle'} /> : null;
+  const credit =
+    o.imageCredit && picture && o.imageKind === 'stock' ? (
+      <span className="poster-credit">
+        {o.imageCreditUrl ? (
+          <a href={o.imageCreditUrl} target="_blank" rel="noreferrer">
+            {o.imageCredit}
+          </a>
+        ) : (
+          o.imageCredit
+        )}
+      </span>
+    ) : null;
+  const crop = picture && plan && !overlay ? <Crop src={picture} box={box} width={plan.width} height={plan.height} framed={plan.placement === 'middle'} credit={credit} /> : null;
 
   // The parts of the poster from top to bottom, by where the picture goes.
   const placement = picture && !size ? 'loading' : overlay ? 'overlay' : (plan?.placement ?? 'none');
@@ -196,7 +214,7 @@ export function ReelPoster({
     const next = fitPoster(body, fit, placement);
     if (next) setFit(next);
   });
-  useEffect(() => setFit({ trim: 0, grow: 0, done: false }), [o.id, fontsReady, size, captionTick, frameHeight]);
+  useEffect(() => setFit({ trim: 0, grow: 0, narrow: 0, done: false }), [o.id, fontsReady, size, captionTick, frameHeight]);
 
   return (
     <div
@@ -211,6 +229,8 @@ export function ReelPoster({
       data-overlay={overlay}
       data-subject={(p.art ? p.art.y + p.art.h / 2 : p.focus === 'bottom' ? 0.8 : 0.4) > 0.6 ? 'low' : 'high'}
       data-video={overVideo}
+      // The measuring steps taken (trim/grow/narrow), for checking a poster's layout.
+      data-fit={`${trim}/${grow}/${narrow}${fit.done ? '/settled' : ''}`}
       style={style}
     >
       {/* A remade flyer keeps a faint, blurred trace of the flyer behind it, so its colours run on. */}
@@ -227,6 +247,8 @@ export function ReelPoster({
           <span className="poster-org">{o.organizer}</span>
         )}
         {p.badge && <span className="poster-badge">{p.badge}</span>}
+        {/* A photo under the words carries its credit in the top row, which the words always start below. */}
+        {overlay && credit}
       </div>
 
       <div ref={bodyRef} className="poster-body" data-placement={placement}>
@@ -235,22 +257,12 @@ export function ReelPoster({
         ))}
       </div>
 
-      {o.imageCredit && picture && o.imageKind === 'stock' && (
-        <span className="poster-credit">
-          {o.imageCreditUrl ? (
-            <a href={o.imageCreditUrl} target="_blank" rel="noreferrer">
-              {o.imageCredit}
-            </a>
-          ) : (
-            o.imageCredit
-          )}
-        </span>
-      )}
+
     </div>
   );
 }
 
-type Fit = { trim: number; grow: number; done: boolean };
+type Fit = { trim: number; grow: number; narrow: number; done: boolean };
 
 /**
  * One measuring step after the poster is drawn. First the column is moved clear of the top row
@@ -284,7 +296,16 @@ export function fitPoster(body: HTMLElement, fit: Fit, placement: string): Fit |
     // Not drawn by a browser (tests): no gap.
   }
   const used = parts.reduce((sum, part) => sum + part.getBoundingClientRect().height, 0) + gap * (parts.length - 1);
-  const overflow = body.scrollHeight > body.clientHeight + 1 || used > body.clientHeight + 1;
+  // A word wider than its line spills sideways, under the picture or off the edge.
+  const lines = typeof body.querySelectorAll === 'function' ? [...body.querySelectorAll<HTMLElement>('.poster-headline > span, .poster-stats dd, .poster-kicker, .poster-chips li')] : [];
+  if (lines.some((line) => line.scrollWidth > line.clientWidth + 1)) {
+    if (fit.grow > 0) return { ...fit, grow: fit.grow - 1, done: true };
+    // Smaller type leaves the picture free to grow again afterwards.
+    return fit.narrow < 8 ? { ...fit, narrow: fit.narrow + 1 } : null;
+  }
+  // The parts' heights decide; the scroll height only counts beyond a small margin, since letters
+  // that hang below their line (g, p, y in a big stat) add a few pixels without anything overlapping.
+  const overflow = used > body.clientHeight + 1 || body.scrollHeight > body.clientHeight + Math.max(8, 2 * unit);
   if (overflow) {
     if (fit.grow > 0) return { ...fit, grow: fit.grow - 1, done: true };
     return fit.trim < 6 ? { ...fit, trim: fit.trim + 1, done: true } : null;

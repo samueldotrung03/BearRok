@@ -65,6 +65,16 @@ export const config = {
   preparedStepMs: Number(env.PREPARED_STEP_MS ?? 1200),
   // fileURLToPath, not URL.pathname: on Windows pathname gives "/C:/..." and file writes fail.
   localDataFile: env.LOCAL_DATA_FILE ?? fileURLToPath(new URL('../.data/store.json', import.meta.url)),
+  /**
+   * The shared opportunities table. DATABASE_URL is the connection string of a hosted Postgres
+   * that every copy of the backend shares; without it the table is kept in a folder on this
+   * computer. OPPORTUNITIES_DB=off switches the table off.
+   */
+  opportunitiesDb: {
+    off: env.OPPORTUNITIES_DB === 'off',
+    url: env.DATABASE_URL?.trim() || null,
+    dir: env.OPPORTUNITIES_DB_DIR ?? fileURLToPath(new URL('../.data/opportunities-db', import.meta.url)),
+  },
   careerGuidesFile: env.CAREER_GUIDES_FILE ?? fileURLToPath(new URL('../.data/career-guides.json', import.meta.url)),
 };
 

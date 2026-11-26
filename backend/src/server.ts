@@ -10,6 +10,7 @@ import { CareerGuides } from './careers/guide.ts';
 import { firebaseVerifier, webConfig } from './auth.ts';
 import { config, liveAvailable, provider } from './config.ts';
 import { oauthSetup } from './googleOAuth.ts';
+import { feedCatalog, mountOpportunities, openCatalog } from './opportunities/index.ts';
 import { HARNESSES, modelLabel, onHarnessChange, tierModels, transport } from './harness.ts';
 import { openStore } from './store/index.ts';
 import { cached, writeRoadmap } from './roadmap.ts';
@@ -42,6 +43,7 @@ onHarnessChange(() => {
     const { brain, opts } = engine();
     system.useEngine(brain, opts);
   }
+  console.log(`  postings: ${catalog ? `shared table in ${catalog.where}` : 'no shared table'}`);
   console.log(`  agents: ${agentsLine()}`);
 });
 const connection = () => {
@@ -71,6 +73,15 @@ const memory = account
       deleteStudent: (id: string) => (isGuest(id) ? store : account).deleteStudent(id),
     }
   : store;
+// The shared opportunities table: every posting the agents keep for any student, once, under its
+// link. The backend runs without it when the database cannot be opened.
+const catalog = config.opportunitiesDb.off
+  ? null
+  : await openCatalog(config.opportunitiesDb.url, config.opportunitiesDb.dir).catch((e) => {
+      console.error(`shared opportunities table is off: ${e instanceof Error ? e.message : e}`);
+      return null;
+    });
+const remembered = catalog ? feedCatalog(memory, catalog) : memory;
 // A Google connection (account, Calendar, Sheets) needs a "Desktop app" OAuth client:
 // GOOGLE_OAUTH_CLIENT_FILE, or GOOGLE_OAUTH_CLIENT_ID and _SECRET. Without one, Settings says what
 // to set and offers nothing Google. Google sends the student back to the loopback address on this
@@ -82,7 +93,7 @@ const careers = new CareerGuides();
 const resumed = careers.resume();
 if (resumed.length) console.log(`career guides: picked up ${resumed.join(', ')} after the restart`);
 const { app } = createApp(store, {}, {
-  memory,
+  memory: remembered,
   google: oauthClient ? { client: oauthClient, redirectBase } : null,
   googleProblem,
   onToken: (uid, token) => tokens.set(uid, token),
@@ -101,9 +112,12 @@ const { app } = createApp(store, {}, {
   grok: connection,
 }, careers, { activityFile: process.env.ACTIVITY_FILE ?? join(dirname(config.localDataFile), 'agent-activity.json') });
 
+if (catalog) mountOpportunities(app, catalog);
+
 serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
   console.log(`backend listening on http://localhost:${port}`);
   console.log(`  store:  ${store.kind === 'firestore' ? 'Firestore' : account ? `Firestore under each student's own sign-in; guests in a local file (${config.localDataFile})` : `local file (${config.localDataFile})`}`);
+  console.log(`  postings: ${catalog ? `shared table in ${catalog.where}` : 'no shared table'}`);
   console.log(`  agents: ${agentsLine()}`);
   console.log(`  google: ${oauthClient ? `OAuth client set; Google sends students back to ${redirectBase}/auth/google/callback` : (googleProblem ?? 'not set up (set GOOGLE_OAUTH_CLIENT_FILE, or GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET)')}`);
   console.log(`  sign-in: ${verify ? `Google and email, Firebase project ${config.firebaseWeb.projectId}` : 'off (set FIREBASE_WEB_API_KEY and FIREBASE_PROJECT_ID)'}`);

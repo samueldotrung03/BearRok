@@ -118,6 +118,8 @@ export interface Candidate {
   location: string | null;
   field: string | null;
   tags: string[];
+  /** One or two sentences on what it is, written from the page. Absent on records from before descriptions, and on samples. */
+  description?: string | null;
   eligibility: string | null;
   eligibleYears: ClassYear[] | null;
   deadline: string | null;

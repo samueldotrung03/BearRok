@@ -52,6 +52,7 @@ const CandidateSchema = z.object({
   location: z.string().nullable(),
   field: z.string().nullable(),
   tags: z.array(z.string()),
+  description: z.string().nullable(),
   eligibility: z.string().nullable(),
   eligibleYears: z.array(Year).nullable(),
   deadline: z.string().nullable(),
@@ -61,7 +62,7 @@ const CandidateSchema = z.object({
   evidence: z.array(z.object({ field: z.string(), quote: z.string(), url: z.string() })),
 });
 
-const EVIDENCE = `Rules: every fact needs an evidence entry with a short quote copied from the page and that page's URL. If the page does not state something, return null. Never guess a deadline or date. Dates are ISO 8601. sourceUrl is the organizer's own page; actionUrl is where the student applies or registers. field is one lowercase word for the area (software, data, ai, design, security, hardware, bio, finance, product). tags are at most four short labels.`;
+const EVIDENCE = `Rules: every fact needs an evidence entry with a short quote copied from the page and that page's URL. If the page does not state something, return null. Never guess a deadline or date. Dates are ISO 8601. sourceUrl is the organizer's own page; actionUrl is where the student applies or registers. field is one lowercase word for the area (software, data, ai, design, security, hardware, bio, finance, product). tags are at most four short labels. description is one or two plain sentences on what the opportunity is and what the student would do, using only what the page says; null when the page does not say.`;
 
 /** A reader result that is a real posting, not the empty shape the CLI fills in when a page was not opened. */
 export function readablePosting(record: { title: string; sourceUrl: string }): boolean {

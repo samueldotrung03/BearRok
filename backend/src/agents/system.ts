@@ -186,7 +186,7 @@ const MORE_OF: Record<OppType, string> = {
   internship: 'internships',
   event: 'events',
   club: 'clubs',
-  hackathon: 'hackathons',
+  hackathon: 'competitions (hackathons, case, coding, pitch and design competitions)',
   research: 'research positions',
   scholarship: 'scholarships',
 };
@@ -1514,7 +1514,7 @@ export class AgentSystem {
         const planned = skeleton.find((x) => x.managerId === a.managerId);
         if (planned) Object.assign(a, { kind: planned.kind, also: planned.also, name: planned.name, category: planned.category });
       }
-      // Programs cover hackathons, research and scholarships: each program manager is told its own kind.
+      // Programs cover competitions, research and scholarships: each program manager is told its own kind.
       for (const a of assignments) {
         const kind = a.kind ?? skeleton.find((s) => s.managerId === a.managerId)?.kind;
         if (!kind || CATEGORY_OF[kind] !== 'program') continue;

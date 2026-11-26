@@ -1,7 +1,7 @@
 // Which kind of opportunity each search manager works on. Every manager has one kind, so the
 // Agents page can show it: one kind ticked means all four managers work on it; more than four
 // kinds means the first four in the list get a manager each, and the rest share the manager of
-// the same category (only programs have more than one kind: hackathons, research, scholarships).
+// the same category (only programs have more than one kind: competitions, research, scholarships).
 import { CATEGORY_OF, type Category, type OppType } from './types.ts';
 
 export const KIND_ORDER: OppType[] = ['internship', 'event', 'club', 'hackathon', 'research', 'scholarship'];
@@ -10,7 +10,8 @@ export const KIND_TITLE: Record<OppType, string> = {
   internship: 'Internships',
   event: 'Events',
   club: 'Clubs',
-  hackathon: 'Hackathons',
+  // The `hackathon` kind covers every competition, not only hackathons.
+  hackathon: 'Competitions',
   research: 'Research',
   scholarship: 'Scholarships',
 };

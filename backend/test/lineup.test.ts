@@ -15,12 +15,12 @@ test('lineup: two kinds share four managers, the one engaged with most gets the 
   const l = planLineup(['scholarship', 'internship'], { ...even, program: 3 }, 4);
   assert.deepEqual(lineupNames(l), ['Internships manager 1', 'Internships manager 2', 'Scholarships manager 1', 'Scholarships manager 2']);
   const l3 = planLineup(['internship', 'event', 'hackathon'], { ...even, event: 5 }, 4);
-  assert.deepEqual(lineupNames(l3), ['Internships manager', 'Events manager 1', 'Events manager 2', 'Hackathons manager']);
+  assert.deepEqual(lineupNames(l3), ['Internships manager', 'Events manager 1', 'Events manager 2', 'Competitions manager']);
 });
 
 test('lineup: more than four kinds shows the first four; the rest share the program manager', () => {
   const l = planLineup(['scholarship', 'research', 'hackathon', 'club', 'event', 'internship'], even, 4);
-  assert.deepEqual(lineupNames(l), ['Internships manager', 'Events manager', 'Clubs manager', 'Hackathons manager']);
+  assert.deepEqual(lineupNames(l), ['Internships manager', 'Events manager', 'Clubs manager', 'Competitions manager']);
   assert.deepEqual(l[3]!.also, ['research', 'scholarship']);
 });
 

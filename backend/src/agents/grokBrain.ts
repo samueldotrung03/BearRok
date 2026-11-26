@@ -45,7 +45,9 @@ const notesBlock = (notes: string[]) => (notes.length ? `STUDENT'S CUSTOM NOTES 
 
 const Year = z.enum(['Freshman', 'Sophomore', 'Junior', 'Senior']);
 const CandidateSchema = z.object({
-  type: z.enum(['internship', 'event', 'club', 'hackathon', 'research', 'scholarship']),
+  type: z
+    .enum(['internship', 'event', 'club', 'hackathon', 'research', 'scholarship'])
+    .describe('"hackathon" means any competition: hackathons, case competitions, coding contests, pitch and startup competitions, design challenges and olympiads.'),
   title: z.string(),
   organizer: z.string(),
   sourceUrl: z.string(),

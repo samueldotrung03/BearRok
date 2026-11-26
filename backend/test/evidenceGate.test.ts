@@ -16,9 +16,7 @@ function posting(slug: string, over: Partial<Candidate> = {}): Candidate {
   const sourceUrl = over.sourceUrl ?? url(slug);
   return {
     type: 'internship',
-    title: slug,
     organizer: 'Example Org',
-    sourceUrl,
     actionUrl: null,
     format: 'online',
     location: null,
@@ -106,6 +104,19 @@ class TinyBrain implements Brain {
 
   async present(kept: Opportunity[]) {
     return new Map(kept.map((o) => [o.id, 'Fits.']));
+  }
+
+  // Posters are not part of what these tests check.
+  async designPoster() {
+    return null;
+  }
+
+  async reviewPosterArt() {
+    return null;
+  }
+
+  async drawIcon() {
+    return null;
   }
 }
 

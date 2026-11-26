@@ -44,7 +44,8 @@ function withoutDeadline(c: Candidate): Candidate {
 
 async function readPage(url: string, fetchImpl: typeof fetch): Promise<{ status: 'ok' | 'blocked' | 'unreachable'; body: string }> {
   const status = await checkLink(url, fetchImpl);
-  if (status !== 'ok') return { status, body: '' };
+  // A link that was not checked is handled like a blocked page: the card stays, its deadline unknown.
+  if (status !== 'ok') return { status: status === 'skipped' ? 'blocked' : status, body: '' };
   try {
     const res = await fetchImpl(url, { redirect: 'follow', signal: AbortSignal.timeout(8000), headers: FETCH_HEADERS });
     return { status: 'ok', body: await res.text() };

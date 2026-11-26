@@ -124,7 +124,7 @@ try {
         title: data.title,
         deadline: data.deadline,
         quote: data.quote,
-        quoteSupported: quoteSupported(data.quote, fixtures[c.file]),
+        quoteSupported: quoteSupported(data.quote, fixtures[c.file] ?? ''),
         elapsedMs: Date.now() - started,
       };
       results[c.id] = row;

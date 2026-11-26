@@ -3,7 +3,6 @@ import { dataBadgeText, isOutOfCredit, type BadgeInput } from './dataBadge.ts';
 
 const base = (over: Partial<BadgeInput> = {}): BadgeInput => ({
   searching: false,
-  sampleFeed: false,
   status: 'connected',
   usingLive: true,
   provider: 'simulated',
@@ -31,11 +30,10 @@ describe('top-bar agent badge', () => {
     expect(isOutOfCredit('grok CLI timed out after 120s')).toBe(false);
   });
 
-  it('searching, offline and the public sample come before the provider', () => {
+  it('searching and offline come before the provider', () => {
     expect(dataBadgeText(base({ searching: true, provider: 'grok' }))).toEqual({ long: 'Grok is searching…', short: 'Grok' });
     expect(dataBadgeText(base({ searching: true })).short).toBe('Searching');
     expect(dataBadgeText(base({ status: 'offline', provider: 'grok' })).long).toBe('Agents offline');
     expect(dataBadgeText(base({ status: 'connecting' })).short).toBe('Connecting');
-    expect(dataBadgeText(base({ sampleFeed: true, status: 'offline' })).long).toBe('Sample postings');
   });
 });

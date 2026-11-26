@@ -2,18 +2,13 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useS
 import { useAuth } from '../auth/AuthProvider.tsx';
 import { API_URL } from '../auth/firebase.ts';
 import { initialState } from '../data/sample.ts';
-import { SAMPLE_FEED } from './live.tsx';
 import { goalForProfile } from '../lib/personalize.ts';
 import { fromBackendProfile, isSampleStudent, loadState, reducer, saveState, startingState, type Action, type AppState } from './store.ts';
 
 const StoreContext = createContext<{ state: AppState; dispatch: Dispatch<Action> } | null>(null);
 
-/**
- * The saved state for this account (or the guest), or a fresh start when there is none. In the
- * public showcase the sample student starts with their tracked postings saved, so Saved has samples.
- */
-const openState = (uid: string | null) =>
-  loadState(startingState(SAMPLE_FEED ? { ...initialState, saved: Object.keys(initialState.applications) } : initialState, uid !== null), uid);
+/** The saved state for this account (or the guest), or a fresh start when there is none. */
+const openState = (uid: string | null) => loadState(startingState(initialState, uid !== null), uid);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
@@ -76,7 +71,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
   useEffect(() => {
-    if (SAMPLE_FEED || auth.signInEnabled !== false || auth.status !== 'guest') return;
+    if (auth.signInEnabled !== false || auth.status !== 'guest') return;
     const current = stateRef.current;
     const sample = isSampleStudent(current);
     const blank = !current.profile.name.trim();

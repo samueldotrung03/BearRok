@@ -9,11 +9,24 @@ import { mountCareers } from './careers/api.ts';
 import type { CareerGuides } from './careers/guide.ts';
 import { config, liveAvailable, provider } from './config.ts';
 import { mountDesktopAuth } from './desktopAuth.ts';
+import { transport } from './harness.ts';
+import { mountHarnesses, type Checker } from './harnessApi.ts';
 import { Engine, UserError, type Deps, type Mode } from './pipeline.ts';
 import type { Store } from './store/index.ts';
 
-/** activityFile: where run reports are kept; without one they last as long as the process. */
-export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: AgentsOptions, careers?: CareerGuides, extras: { activityFile?: string } = {}) {
+/**
+ * activityFile: where run reports are kept; without one they last as long as the process.
+ * checkHarness: proves a command-line app answers before Settings marks it connected.
+ * A checker function is accepted on its own, which is how the harness tests call this.
+ */
+export function createApp(
+  store: Store,
+  deps: Partial<Deps> = {},
+  agents?: AgentsOptions,
+  careers?: CareerGuides,
+  extras: { activityFile?: string; checkHarness?: Checker } | Checker = {},
+) {
+  const extra = typeof extras === 'function' ? { checkHarness: extras } : extras;
   const engine = new Engine(store, deps);
   const app = new Hono();
   app.use('/api/*', cors());
@@ -25,7 +38,7 @@ export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: Agent
       live: (deps.liveAvailable ?? liveAvailable)(),
       model: config.xaiModel,
       provider: provider(),
-      transport: config.grokTransport,
+      transport: transport(),
     }),
   );
 
@@ -54,7 +67,7 @@ export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: Agent
   // Each student's memory is kept in the same store, under their account.
   if (agents) {
     // The Agents page's live view watches every student's agents from the moment they are made.
-    const hub = new ActivityHub(extras.activityFile ? { history: new FileRunHistory(extras.activityFile) } : {});
+    const hub = new ActivityHub(extra.activityFile ? { history: new FileRunHistory(extra.activityFile) } : {});
     const { systemOf } = mountAgents(app, {
       memory: store,
       ...agents,
@@ -67,6 +80,7 @@ export function createApp(store: Store, deps: Partial<Deps> = {}, agents?: Agent
   }
   if (careers) mountCareers(app, careers);
   mountDesktopAuth(app);
+  mountHarnesses(app, extra.checkHarness);
 
   app.onError((err, c) => {
     if (err instanceof UserError) return c.json({ error: err.message }, err.status as 400);

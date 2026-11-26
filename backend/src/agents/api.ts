@@ -9,7 +9,8 @@ import { createDeadlineEvent, deleteEvent, deleteStudentEvent, expired, insertSt
 import { readResume, RESUME_MAX_BYTES, RESUME_TYPES } from '../resume.ts';
 import { exportApplications, openSheet, parseSheetId, trackerRows, writeTracker } from '../sheets.ts';
 import type { Store } from '../store/index.ts';
-import { config, provider } from '../config.ts';
+import { provider } from '../config.ts';
+import * as harness from '../harness.ts';
 import { extractResumeProfile, type ResumeExtraction } from '../resumeExtract.ts';
 import { cleanTimes, defaultTimes, validTimeZone } from './autoMode.ts';
 import { randomBytes } from 'node:crypto';
@@ -52,9 +53,11 @@ export interface AgentsOptions {
   onToken?: (uid: string, token: string) => void;
   /** How long to wait after a change before saving, so a burst of changes is one write. */
   saveDelayMs?: number;
-  /** How the agents reach Grok, for the settings page. */
-  grok?: { connected: boolean; mode: 'api' | 'cli' | 'simulated'; detail: string };
-  /** Reads an uploaded résumé into profile fields. Tests pass a stand-in; the server uses Grok or the simulated reader. */
+  /** What the agents are connected to, read on every request since it can change while running. */
+  grok?: Connection | (() => Connection);
+  /** Whether a model is connected now, for the roadmap and search writers. */
+  live?: () => boolean;
+  /** Reads an uploaded résumé into profile fields. Tests pass a stand-in; the server uses the connected model or the simulated reader. */
   extractResume?: (text: string) => Promise<ResumeExtraction>;
   /** Told of each student's agent system as it is made, with the key its memory is kept under. */
   onSystem?: (key: string, system: AgentSystem) => void;
@@ -154,14 +157,22 @@ const resumeInfoOf = (r: { name: string; type: string; size: number; uploadedAt:
   r ? { name: r.name, type: r.type, size: r.size, uploadedAt: r.uploadedAt, readable: r.text !== null } : null;
 
 class HttpError extends Error {
-  status: 401 | 404 | 503;
-  constructor(status: 401 | 404 | 503, message: string) {
+  status: 401 | 404 | 409 | 503;
+  constructor(status: 401 | 404 | 409 | 503, message: string) {
     super(message);
     this.status = status;
   }
 }
 
+export interface Connection {
+  connected: boolean;
+  mode: 'api' | 'cli' | 'claude' | 'codex' | 'grok' | 'simulated';
+  detail: string;
+}
+
 export function mountAgents(app: Hono, opts: AgentsOptions) {
+  const conn = (): Connection | undefined => (typeof opts.grok === 'function' ? opts.grok() : opts.grok);
+  const live = () => opts.live?.() ?? true;
   const signedIn = new Map<string, Promise<AgentSystem>>();
   const saving = new Map<string, NodeJS.Timeout>();
   /** Students whose last save did not go through, and how to try it again. */
@@ -248,7 +259,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   // What is connected on the server side, for the settings page. Nothing secret is returned.
   app.get('/api/connections', (c) =>
     c.json({
-      grok: opts.grok ?? { connected: false, mode: 'simulated', detail: 'Agents are simulated on sample data.' },
+      grok: conn() ?? { connected: false, mode: 'simulated', detail: 'Agents are simulated on sample data.' },
       signIn: enabled,
     }),
   );
@@ -283,14 +294,14 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
   // falls back to its own rule-built draft rather than showing invented work as Grok's.
   app.post(`${base}/roadmap`, async (c) => {
     const system = await systemOf(c);
-    if (!opts.roadmap) return c.json({ error: 'no model is connected, so no roadmap can be written' }, 503);
+    if (!opts.roadmap || !live()) return c.json({ error: 'no model is connected, so no roadmap can be written' }, 503);
     const parsed = RoadmapRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'that roadmap request is not valid' }, 400);
     try {
       // The résumé comes from the file this student uploaded, so a request cannot pass one off as theirs.
       const resume = (system.getResume()?.text ?? '').slice(0, 6000);
       const { data, citations } = await opts.roadmap({ ...parsed.data, resume });
-      return c.json({ roadmap: data, citations, writer: opts.grok?.mode ?? 'api' });
+      return c.json({ roadmap: data, citations, writer: conn()?.mode ?? 'api' });
     } catch (error) {
       return c.json({ error: `the roadmap could not be written: ${error instanceof Error ? error.message : 'unknown error'}` }, 502);
     }
@@ -305,18 +316,18 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     if (!parsed.success) return c.json({ error: 'type at least two characters to search for' }, 400);
     const student = system.student();
     const context = parsed.data.personal ? searchContext(student.profile, system.getResume()?.text ?? '') : { parts: [] };
-    return c.json({ results: ownMatches(student, parsed.data), contextParts: context.parts, ai: Boolean(opts.search), writer: opts.grok?.mode ?? 'simulated' });
+    return c.json({ results: ownMatches(student, parsed.data), contextParts: context.parts, ai: Boolean(opts.search) && live(), writer: conn()?.mode ?? 'simulated' });
   });
   app.post(`${base}/search`, async (c) => {
     const system = await systemOf(c);
-    if (!opts.search) return c.json({ error: 'no model is connected, so the web cannot be searched' }, 503);
+    if (!opts.search || !live()) return c.json({ error: 'no model is connected, so the web cannot be searched' }, 503);
     const parsed = SearchRequest.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'type at least two characters to search for' }, 400);
     const student = system.student();
     const context = parsed.data.personal ? searchContext(student.profile, system.getResume()?.text ?? '').text : '';
     try {
       const { data } = await opts.search({ request: parsed.data, context, own: ownMatches(student, parsed.data) });
-      return c.json({ ...data, writer: opts.grok?.mode ?? 'api' });
+      return c.json({ ...data, writer: conn()?.mode ?? 'api' });
     } catch (error) {
       return c.json({ error: `the search could not finish: ${error instanceof Error ? error.message : 'unknown error'}` }, 502);
     }
@@ -395,7 +406,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     const text = resume.text?.trim() ?? '';
     if (!text) return c.json({ error: 'No text could be read from this file. If it is a scan, upload a PDF or Word document with selectable text.' }, 422);
     try {
-      const read = opts.extractResume ?? ((body: string) => extractResumeProfile(body, { live: provider() === 'grok' }));
+      const read = opts.extractResume ?? ((body: string) => extractResumeProfile(body, { live: provider() !== 'simulated' }));
       return c.json(await read(text));
     } catch (e) {
       console.error('résumé extract failed:', e instanceof Error ? e.message : e);
@@ -536,7 +547,7 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     c.json({ enabled: Boolean(oauth), problem: oauth ? null : (opts.googleProblem ?? null), needs: oauth ? [] : OAUTH_ENV, redirectUri: oauth ? redirectUri : null }),
   );
 
-  // ---- agent settings: models per agent group (Grok only) and minimums per kind ------------------
+  // ---- agent settings: models per agent group and minimums per kind ------------------------------
   const GROUP_LABEL: Record<AgentGroup, string> = {
     master: 'Master agent',
     managers: 'Search managers',
@@ -545,29 +556,56 @@ export function mountAgents(app: Hono, opts: AgentsOptions) {
     presentation: 'Presentation manager',
     helpers: 'Helpers (pictures, calendar)',
   };
-  const grokModels = () => [...new Set([config.xaiModels.high, config.xaiModels.normal, config.xaiModels.low, config.xaiModel].filter(Boolean))];
+  // The picker offers the models of the harness the agents run on.
+  const choices = () => harness.modelChoices().map((m) => m.id);
+  const harnessList = () =>
+    harness.HARNESS_IDS.map((id) => {
+      const h = harness.HARNESSES[id];
+      return {
+        id,
+        name: h.name,
+        cli: h.cli,
+        connected: harness.connectedHarnesses().includes(id),
+        models: h.models,
+        defaults: { normal: harness.modelLabel(h.defaults.normal), low: harness.modelLabel(h.defaults.low) },
+      };
+    });
 
   app.get(`${base}/agent-settings`, async (c) => {
     const system = await systemOf(c);
+    const settings = system.getAgentSettings();
+    const allowed = new Set(choices());
+    const tiers = harness.tierModels();
     return c.json({
-      settings: system.getAgentSettings(),
-      groups: AGENT_GROUPS.map((id) => ({ id, label: GROUP_LABEL[id], tier: id === 'workers' || id === 'helpers' ? config.xaiModels.low : config.xaiModels.normal })),
-      models: grokModels(),
+      // A choice for another harness (a Grok model while on Claude) shows as the default.
+      settings: { ...settings, models: Object.fromEntries(Object.entries(settings.models ?? {}).filter(([, m]) => allowed.has(m as string))) },
+      groups: AGENT_GROUPS.map((id) => ({ id, label: GROUP_LABEL[id], tier: harness.modelLabel(id === 'workers' || id === 'helpers' ? tiers.low : tiers.normal) })),
+      models: [...allowed],
+      modelLabels: Object.fromEntries([...allowed].map((m) => [m, harness.modelLabel(m)])),
+      // The harnesses on this computer, and the one the agents run on (null: none connected).
+      harnesses: harnessList(),
+      harness: harness.activeHarness(),
       auto: system.autoStatus(),
       // What searches cover when nothing is ticked.
       profileKinds: system.profileKinds(),
-      // Whether the choices are in use now: only while the agents run on Grok.
-      applied: opts.grok?.mode === 'api' || opts.grok?.mode === 'cli',
+      // Whether the choices are in use now: while any model is connected.
+      applied: harness.liveAvailable(),
     });
   });
 
   app.put(`${base}/agent-settings`, async (c) => {
     const system = await systemOf(c);
     const body = await c.req.json().catch(() => ({}));
-    const allowed = new Set(grokModels());
-    const models = Object.fromEntries(
-      AGENT_GROUPS.flatMap((g) => (typeof body?.models?.[g] === 'string' && allowed.has(body.models[g]) ? [[g, body.models[g]]] : [])),
-    ) as AgentSettings['models'];
+    // The harness is chosen first, for the whole computer; the models are then that harness's.
+    if (body?.harness !== undefined && !(harness.isHarnessId(body.harness) && harness.setActive(body.harness)))
+      throw new HttpError(409, 'connect that model in Settings first');
+    const allowed = new Set(choices());
+    // Choices for other harnesses are kept, so switching between them loses none.
+    const kept = Object.entries(system.getAgentSettings().models ?? {}).filter(([, m]) => !allowed.has(m as string));
+    const models = Object.fromEntries([
+      ...kept,
+      ...AGENT_GROUPS.flatMap((g) => (typeof body?.models?.[g] === 'string' && allowed.has(body.models[g]) ? [[g, body.models[g]]] : [])),
+    ]) as AgentSettings['models'];
     const minimums = Object.fromEntries(
       [...Object.keys(CATEGORY_OF), 'any'].flatMap((t) => {
         const n = Number(body?.minimums?.[t]);

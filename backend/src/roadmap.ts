@@ -4,6 +4,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { config } from './config.ts';
+import { tierModels } from './harness.ts';
 import { grokJson, type GrokResult } from './grok.ts';
 
 const text = (max: number) => z.string().trim().max(max);
@@ -204,7 +205,7 @@ const ask = (request: RoadmapRequest, again = '') =>
     schema: Roadmap,
     tools: [{ type: 'web_search' }, { type: 'x_search' }],
     // The normal tier of whichever transport is in use, as the master agent and managers use.
-    model: (config.grokTransport === 'cli' ? config.grokCli.models : config.xaiModels).normal,
+    model: tierModels().normal,
   });
 
 /** Writes the roadmap, and asks once more when the first answer is thinner than its form asks. */

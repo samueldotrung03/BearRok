@@ -5,11 +5,13 @@ import { SimBrain } from '../src/agents/simBrain.ts';
 import { AgentSystem } from '../src/agents/system.ts';
 import { createApp } from '../src/app.ts';
 import { config } from '../src/config.ts';
+import { activeHarness, setHarnessStateForTest } from '../src/harness.ts';
 import { LocalStore } from '../src/store/local.ts';
 
 const NOW = new Date('2026-11-19T12:00:00Z');
 
 test('agent settings: only listed Grok models and whole-number minimums are kept, with the account', async () => {
+  setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
   const s = new AgentSystem(new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0 }, { categories: ['internship', 'program'] });
   const { app } = createApp(new LocalStore(null), {}, { demo: s, grok: { connected: true, mode: 'cli', detail: '' } });
   const get = (await (await app.request('/api/students/demo/agent-settings')).json()) as any;
@@ -27,15 +29,48 @@ test('agent settings: only listed Grok models and whole-number minimums are kept
   const saved = ((await put.json()) as any).settings;
   assert.deepEqual(saved, { models: { master: config.xaiModels.high }, minimums: { internship: 10, hackathon: 50 }, kinds: [] });
   assert.deepEqual(s.memorySnapshot().profile.agentSettings, saved, 'kept with the account');
+  setHarnessStateForTest({ connected: [], active: null });
 });
 
-test('agent settings: each group uses its chosen Grok model, others their tier', () => {
+test('agent settings: the harness is chosen first, then a model within it', async () => {
+  setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
+  const s = new AgentSystem(new SimBrain({ speed: 0, now: () => NOW }), { now: () => NOW, feedTarget: 0 });
+  const { app } = createApp(new LocalStore(null), {}, { demo: s });
+  const put = (body: unknown) => app.request('/api/students/demo/agent-settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+  // Claude is not connected on this computer, so it cannot be chosen.
+  assert.equal((await put({ harness: 'claude' })).status, 409);
+  assert.equal(activeHarness(), 'grok');
+
+  setHarnessStateForTest({ connected: ['grok', 'claude'], active: 'grok' });
+  assert.equal((await put({ harness: 'claude', models: { master: 'claude-haiku-5-5', workers: 'grok-4.3' } })).status, 200);
+  assert.equal(activeHarness(), 'claude');
+  const get = (await (await app.request('/api/students/demo/agent-settings')).json()) as any;
+  assert.equal(get.harness, 'claude');
+  assert.deepEqual(get.models, ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], 'Claude models only, and no Fable');
+  assert.equal(get.modelLabels['claude-haiku-5-5'], 'Claude Haiku 5.5');
+  assert.deepEqual(get.settings.models, { master: 'claude-haiku-5-5' }, 'a Grok model is not taken while on Claude');
+  assert.deepEqual(
+    get.harnesses.map((h: any) => [h.id, h.connected]),
+    [['claude', true], ['codex', false], ['grok', true]],
+  );
+  setHarnessStateForTest({ connected: [], active: null });
+});
+
+test('agent settings: each group uses its chosen model when it belongs to the harness in use', () => {
   const brain = new GrokBrain();
-  brain.setModels({ master: 'grok-x', workers: 'grok-y' });
+  brain.setModels({ master: 'grok-x', workers: 'claude-sonnet-5-5', managers: 'gpt-6-luna' });
   const model = (brain as any).model.bind(brain);
+  setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
   assert.equal(model('master', 'tier'), 'grok-x');
-  assert.equal(model('workers', 'tier'), 'grok-y');
+  assert.equal(model('workers', 'tier'), 'tier', 'a Claude model is not sent to Grok');
   assert.equal(model('validators', 'tier'), 'tier');
+  setHarnessStateForTest({ connected: ['claude'], active: 'claude' });
+  assert.equal(model('workers', 'tier'), 'claude-sonnet-5-5');
+  assert.equal(model('master', 'tier'), 'tier');
+  setHarnessStateForTest({ connected: ['codex'], active: 'codex' });
+  assert.equal(model('managers', 'tier'), 'gpt-6-luna');
+  setHarnessStateForTest({ connected: [], active: null });
 });
 
 test('agent settings: a minimum keeps the agents searching for that kind until it is met', async () => {

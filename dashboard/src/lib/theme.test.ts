@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { readThemeChoice, resolveTheme, setThemeChoice, THEME_KEY } from './theme.ts';
+import { readThemeChoice, setThemeChoice, THEME_KEY } from './theme.ts';
 
 // The tests run without a browser, so stand in for the few page objects the theme touches.
 const saved = new Map<string, string>();
@@ -21,11 +21,11 @@ describe('theme', () => {
     expect(readThemeChoice()).toBe('light');
   });
 
-  it('follows the system only when the student chose to', () => {
-    expect(resolveTheme('system', true)).toBe('dark');
-    expect(resolveTheme('system', false)).toBe('light');
-    expect(resolveTheme('light', true)).toBe('light');
-    expect(resolveTheme('dark', false)).toBe('dark');
+  it('treats the old "system" choice as light', () => {
+    saved.set(THEME_KEY, 'system');
+    expect(readThemeChoice()).toBe('light');
+    saved.set(THEME_KEY, 'dark');
+    expect(readThemeChoice()).toBe('dark');
   });
 
   it('saves the choice and marks the page so the stylesheets switch', () => {

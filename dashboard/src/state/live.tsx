@@ -87,7 +87,7 @@ interface BackendFeedEntry {
 interface BackendStudent {
   feed: BackendFeedEntry[];
   mode: 'simulated' | 'live';
-  provider: 'grok' | 'simulated';
+  provider: 'grok' | 'claude' | 'gpt' | 'simulated';
   runCount: number;
   /** Cards the feed should hold; the agents keep searching while it has fewer. */
   feedTarget?: number;
@@ -145,8 +145,8 @@ interface LiveValue {
   usingLive: boolean;
   /** Cards the feed should hold; the agents keep searching on their own while it has fewer. */
   feedTarget: number;
-  /** Which model the agents are on. */
-  provider: 'grok' | 'simulated';
+  /** Which model the agents are on. "claude" is a temporary test set-up. */
+  provider: 'grok' | 'claude' | 'gpt' | 'simulated';
   opportunities: Opportunity[];
   /** Saved postings the account holds, including ones the feed no longer shows. */
   savedCards: Opportunity[];

@@ -1,7 +1,6 @@
 // Grok through the Grok Build CLI (`grok -p ...`), signed in with a Grok subscription.
 // Same job as the API client in grok.ts: send one prompt, get one JSON answer back.
 // Usage is counted against the subscription of whoever ran `grok login` on this machine.
-import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,20 +9,13 @@ import { currentSignal, StoppedError } from './agents/stop.ts';
 import { config } from './config.ts';
 import { BALANCE_MESSAGE, BalanceExhaustedError, isBalanceError } from './quota.ts';
 import type { GrokResult, GrokTool } from './grok.ts';
+import { runCli } from './harness.ts';
 
 /** An empty folder for the CLI to run in, so a coding agent has no project files in reach. */
 function sandboxDir(): string {
   const dir = join(tmpdir(), 'bearok-grok-cli');
   mkdirSync(dir, { recursive: true });
   return dir;
-}
-
-/** The real CLI is an executable. Tests point GROK_CLI_BIN at a `.mjs` stand-in, which Node runs. */
-function startCli(args: string[]) {
-  const bin = config.grokCli.bin;
-  const opts = { cwd: sandboxDir(), stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'] };
-  if (/\.mjs$/i.test(bin)) return spawn(process.execPath, [bin, ...args], opts);
-  return spawn(bin, args, opts);
 }
 
 /** Set `AGENT_DEBUG=1` to keep every prompt and the CLI's raw stdout. Off for normal runs. */
@@ -75,49 +67,9 @@ export function cliArguments(opts: { prompt: string; model?: string; tools: bool
   return args;
 }
 
-type CliRun = { stdout: string; stderr: string; code: number | null; timedOut: boolean };
-
-function run(args: string[], timeoutMs: number): Promise<CliRun> {
-  const stop = currentSignal();
-  if (stop?.aborted) return Promise.reject(new StoppedError());
-  return new Promise((resolve, reject) => {
-    const child = startCli(args);
-    let out = '';
-    let err = '';
-    let settled = false;
-    let timedOut = false;
-    const finish = (result: CliRun) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      stop?.removeEventListener('abort', onStop);
-      resolve(result);
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    // The student stopped the search: end this call now rather than when it finishes.
-    const onStop = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      child.kill('SIGKILL');
-      reject(new StoppedError());
-    };
-    stop?.addEventListener('abort', onStop, { once: true });
-    child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', (d) => (err += d));
-    child.on('error', (e: NodeJS.ErrnoException) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      stop?.removeEventListener('abort', onStop);
-      reject(new Error(e.code === 'ENOENT' ? `grok CLI not found at "${config.grokCli.bin}". Install it and run "grok login".` : e.message));
-    });
-    child.on('close', (code) => finish({ stdout: out, stderr: err, code, timedOut }));
-  });
-}
+/** One Grok CLI call through the shared harness runner. A non-zero exit that printed JSON is kept. */
+const run = (args: string[], timeoutMs: number) =>
+  runCli('grok', args, { cwd: sandboxDir(), timeoutMs, signal: currentSignal(), okOnJson: true, onStopError: () => new StoppedError() });
 
 /** The CLI's `json` output wraps the answer in an object; its field names are not documented, so look in the likely places. */
 export function answerText(stdout: string): string {
@@ -271,49 +223,39 @@ export async function grokCliJson<S extends z.ZodType>(opts: {
   // One retry, without the schema option in case the CLI turned the schema down: the prompt still asks for the JSON.
   for (let attempt = 0; attempt < 2; attempt++) {
     const args = cliArguments({ ...base, schema: attempt === 0 ? schemaJson : undefined });
+    let stdout: string;
     try {
-      const result = await run(args, timeoutMs);
-      // Out of credit: every later call fails the same way, so no retry.
-      if (result.code !== 0 && isBalanceError(`${result.stderr}
-${result.stdout}`)) {
-        debugLog({ name: opts.name, event: 'fail', detail: BALANCE_MESSAGE, stdout: result.stdout, stderr: result.stderr });
+      stdout = await run(args, timeoutMs);
+    } catch (e) {
+      if (e instanceof BalanceExhaustedError || e instanceof StoppedError) throw e;
+      const message = e instanceof Error ? e.message : String(e);
+      // Out of credit: every later call fails the same way, so no retry. The runner puts stderr on the error.
+      if (isBalanceError(message)) {
+        debugLog({ name: opts.name, event: 'fail', detail: BALANCE_MESSAGE });
         throw new BalanceExhaustedError();
       }
-      debugLog({
-        name: opts.name,
-        event: 'call',
-        detail: `attempt ${attempt + 1} exit ${result.code ?? 'none'}${result.timedOut ? ' timeout' : ''} stdout ${result.stdout.length}b`,
-        model: cliModel(opts.model) ?? 'cli default',
-        tools: base.tools,
-        prompt,
-        stdout: result.stdout,
-        stderr: result.stderr,
-      });
-      try {
-        const data = fullestAnswer(result.stdout, opts.schema);
-        if (result.timedOut || result.code !== 0) {
-          console.warn(`grok ${opts.name}: kept a JSON answer from a CLI run that ${result.timedOut ? `timed out after ${Math.round(timeoutMs / 1000)}s` : `exited ${result.code}`}`);
-        }
-        return { data, citations: [] };
-      } catch (parseError) {
-        const parsed = parseError instanceof Error ? parseError.message : String(parseError);
-        const why = result.timedOut
-          ? `grok CLI timed out after ${Math.round(timeoutMs / 1000)}s`
-          : result.code !== 0
-            ? `grok CLI exited ${result.code}: ${(result.stderr || result.stdout).trim().slice(0, 400)}`
-            : parsed;
-        lastError = new Error(why);
-        console.warn(`grok ${opts.name}: dropped answer (${why})`);
-        debugLog({ name: opts.name, event: 'fail', detail: why, stdout: result.stdout, stderr: result.stderr });
-        if (result.timedOut || /not found/.test(why)) break;
-      }
-    } catch (e) {
-      if (e instanceof BalanceExhaustedError) throw e;
       lastError = e;
-      const message = e instanceof Error ? e.message : String(e);
-      if (!(e instanceof StoppedError)) console.warn(`grok ${opts.name}: ${message}`);
+      console.warn(`grok ${opts.name}: ${message}`);
       debugLog({ name: opts.name, event: 'fail', detail: message });
-      if (e instanceof StoppedError || /not found|timed out/.test(message)) break;
+      if (/not found|timed out/.test(message)) break;
+      continue;
+    }
+    debugLog({
+      name: opts.name,
+      event: 'call',
+      detail: `attempt ${attempt + 1} stdout ${stdout.length}b`,
+      model: cliModel(opts.model) ?? 'cli default',
+      tools: base.tools,
+      prompt,
+      stdout,
+    });
+    try {
+      return { data: fullestAnswer(stdout, opts.schema), citations: [] };
+    } catch (parseError) {
+      const why = parseError instanceof Error ? parseError.message : String(parseError);
+      lastError = new Error(why);
+      console.warn(`grok ${opts.name}: dropped answer (${why})`);
+      debugLog({ name: opts.name, event: 'fail', detail: why, stdout });
     }
   }
   throw lastError;

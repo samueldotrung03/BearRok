@@ -28,10 +28,17 @@ contextBridge.exposeInMainWorld('bearrokDesktop', {
       };
     },
   },
+  harness: {
+    /** Opens Terminal to install the 'claude', 'codex' or 'grok' app if needed and sign in. { ok, error? }. */
+    setup: (id) => ipcRenderer.invoke('harness:setup', id),
+    /** { state: 'idle' | 'running' | 'done' | 'failed', error? } */
+    setupStatus: (id) => ipcRenderer.invoke('harness:setupStatus', id),
+    setupClear: (id) => ipcRenderer.invoke('harness:setupClear', id),
+  },
   grok: {
-    /** { managed, mode: 'cli' | 'api' | null, cliFound, canStoreKey }. */
+    /** { managed, mode: 'api' | null, canStoreKey }: an xAI API key kept encrypted here. Claude, ChatGPT and Grok apps connect through the backend. */
     status: () => ipcRenderer.invoke('grok:status'),
-    /** { mode: 'cli' } or { mode: 'api', key }. Restarts the agents on the new connection. */
+    /** { mode: 'api', key }. Restarts the backend with the key. */
     connect: (choice) => ipcRenderer.invoke('grok:connect', choice),
     disconnect: () => ipcRenderer.invoke('grok:disconnect'),
   },

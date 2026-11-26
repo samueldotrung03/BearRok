@@ -17,6 +17,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync, exist
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { config, liveAvailable, provider } from '../config.ts';
+import { tierModels as harnessTiers, transport } from '../harness.ts';
 import { grokJson, type GrokTool } from '../grok.ts';
 import { Fleet } from '../agents/fleet.ts';
 import type { Job, JobKind } from '../agents/types.ts';
@@ -43,7 +44,7 @@ import {
 export { mergeSection, SECTION_IDS, type Guide, type SectionId } from './schemas.ts';
 export { careerKey, slugFor } from './names.ts';
 
-/** One model call. The default goes through grok.ts (xAI API or Grok CLI), or the simulated agents. */
+/** One model call. The default goes through grok.ts (a connected harness or the xAI API), or the simulated agents. `timeoutMs` caps that one call. */
 export type Ask = <S extends z.ZodType>(opts: { name: string; system: string; user: string; schema: S; tools?: GrokTool[]; model?: string; timeoutMs?: number }) => Promise<{ data: z.infer<S> }>;
 
 export class CareerError extends Error {
@@ -68,16 +69,29 @@ class CallTimeout extends Error {}
 const emptySection = <T>(): SectionState<T> => ({ status: 'waiting', data: null, sample: false, error: null, added: null, failure: null, stage: null, mode: null, draft: null, unchecked: null, finishedAt: null });
 
 /** The models behind each tier, for the transport in use. */
-function tierModels(): { normal?: string; low?: string } {
-  if (config.grokTransport === 'cli') return config.grokCli.models;
-  return config.xaiModels;
-}
+const tierModels = () => harnessTiers();
 
 const MAX_ACTIVITY = 80;
 /** Two sentences of at most 25 words each, with a little room. */
 const MAX_SUMMARY_WORDS = 60;
 const GROK_ONLY =
   'Grok researched this guide, and your agents are simulated right now. It is kept as it is, so simulated examples never replace what Grok found. Connect Grok in Settings to search it again.';
+
+/** Why a guide a real model wrote is left as it is while the agents are simulated. */
+function keptReal(who: Guide['provider']): string {
+  if (who === 'grok') return GROK_ONLY;
+  const name = who === 'claude' ? 'Claude' : 'ChatGPT';
+  return `${name} researched this guide, and your agents are simulated right now. It is kept as it is, so simulated examples never replace that research. Connect Claude, ChatGPT or Grok in Settings to search it again.`;
+}
+
+/** The time limit of one call on the transport in use. */
+function callLimitMs(): number {
+  const via = transport();
+  if (via === 'claude') return config.claudeCli.timeoutMs;
+  if (via === 'codex') return config.codexCli.timeoutMs;
+  if (via === 'grok') return config.grokCli.timeoutMs;
+  return config.grokTimeoutMs;
+}
 /** What an "Add more" with no words of its own asks for. */
 const DEFAULT_PROMPT = 'Find more of what this part covers.';
 const CUT = 'A restart stopped this part before it finished.';
@@ -85,7 +99,7 @@ const CUT = 'A restart stopped this part before it finished.';
 /** The fleet's job labels, as the activity log names each agent. */
 const agentName = (section: SectionId, role: 'manager' | 'researcher' | 'validator') => `${SECTION_NAMES[section]} ${role}`;
 
-/** The default model: Grok when it is connected, the simulated agents when it is not. */
+/** The default model: the connected harness, or the xAI API, when one is available; otherwise the simulated agents. */
 const defaultAsk = (): Ask => {
   let sim: Ask | null = null;
   return ((opts) => (liveAvailable() ? grokJson(opts) : (sim ??= simulatedAsk())(opts))) as Ask;
@@ -109,15 +123,15 @@ export class CareerGuides {
     env: Env = {
       live: liveAvailable,
       provider,
-      // Grok reads X. Without X search the stories are written as labelled samples.
-      canSearchX: () => true,
+      // Only Grok can read X. On Claude or ChatGPT the stories are written as labelled samples.
+      canSearchX: () => provider() === 'grok',
     },
     opts: Options = {},
   ) {
     this.file = file;
     this.ask = ask;
     this.env = env;
-    this.timeoutMs = opts.timeoutMs ?? (config.grokTransport === 'cli' ? config.grokCli.timeoutMs : config.grokTimeoutMs);
+    this.timeoutMs = opts.timeoutMs ?? callLimitMs();
     this.graceMs = opts.graceMs ?? 15_000;
     this.load();
   }
@@ -165,13 +179,13 @@ export class CareerGuides {
     const existing = this.find(clean);
     if (existing) this.remember(existing, clean);
     if (existing && this.busy(existing.slug)) return existing;
-    // Grok's research is never replaced by simulated examples. Without Grok it is shown as it is.
-    if (existing && existing.provider === 'grok' && this.env.provider() !== 'grok') {
-      if (refresh) throw new CareerError(GROK_ONLY, 503);
+    // Research from a connected model is never replaced by simulated examples. It is shown as it is.
+    if (existing && existing.provider !== 'simulated' && this.env.provider() === 'simulated') {
+      if (refresh) throw new CareerError(keptReal(existing.provider), 503);
       return existing;
     }
     // A guide the simulated agents wrote is kept only while the agents are simulated.
-    const stale = existing?.provider === 'simulated' && this.env.provider() === 'grok';
+    const stale = existing?.provider === 'simulated' && this.env.provider() !== 'simulated';
     if (existing && existing.status === 'ready' && !refresh && !stale) return existing;
 
     const now = new Date().toISOString();
@@ -310,7 +324,7 @@ export class CareerGuides {
 
   /** Only the agents that wrote a guide may change it: simulated examples never land in Grok's research. */
   private assertCanRun(guide: Guide) {
-    if (guide.provider === 'grok' && this.env.provider() !== 'grok') throw new CareerError(GROK_ONLY, 503);
+    if (guide.provider !== 'simulated' && this.env.provider() === 'simulated') throw new CareerError(keptReal(guide.provider), 503);
   }
 
   /** Another name a student asked for this guide by. */
@@ -347,7 +361,7 @@ export class CareerGuides {
   private fleet(guide: Guide, ask: string | null): Fleet {
     return new Fleet({
       // A CLI call is a whole program. Share the same cap as the opportunity search.
-      concurrency: config.grokTransport === 'cli' ? Math.max(1, config.grokCli.concurrency) : 4,
+      concurrency: transport() === null || transport() === 'api' ? 4 : Math.max(1, config.grokCli.concurrency),
       maxJobs: 24,
       onUpdate: (job: Job) => {
         if (job.status === 'running' && job.attempts === 1) this.log(guide, job.label, 'Started', 'info', ask);

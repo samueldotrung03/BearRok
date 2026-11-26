@@ -98,10 +98,12 @@ describe('the roadmap Grok writes', () => {
     expect(written.phases.find((p) => p.id === clubPhase.id)!.more).toEqual([{ id: null, title: 'Run for a club officer role', why: 'Shows leadership.' }]);
   });
 
-  it('says Grok wrote the roadmap', () => {
+  it('names the model that wrote it: Claude, ChatGPT or Grok, never one for another', () => {
     const state = { ...initialState, doneSteps: [] };
-    const journey = aiJourney(state, careerJourney(state, now), answer('api'));
-    expect(journey.analysis.basis).toContain('Written by Grok');
+    const journey = aiJourney(state, careerJourney(state, now), answer('claude'));
+    expect(journey.analysis.basis).toMatch(/\bClaude\b/);
+    expect(journey.analysis.basis).not.toMatch(/grok/i);
+    expect(aiJourney(state, careerJourney(state, now), answer('codex')).analysis.basis).toMatch(/\bChatGPT\b/);
     expect(journey.mode).toBe('career');
   });
 });

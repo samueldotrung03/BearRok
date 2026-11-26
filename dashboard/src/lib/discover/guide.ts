@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_URL } from '../../auth/firebase.ts';
 import { sampleGuideList, sampleGuides } from '../../data/sampleGuides.ts';
 import { SAMPLE_FEED } from '../../state/live.tsx';
+import { modelName } from '../modelName.ts';
 
 /** In reading order: the interviews come before how to start, which is written to prepare for them. */
 export const SECTION_IDS = ['basics', 'voices', 'interview', 'start'] as const;
@@ -97,7 +98,7 @@ export type Guide = {
   oneLine: string | null;
   field: string | null;
   status: 'planning' | 'researching' | 'ready' | 'failed';
-  provider: 'grok' | 'simulated';
+  provider: 'grok' | 'claude' | 'gpt' | 'simulated';
   startedAt: string;
   updatedAt: string;
   error: string | null;
@@ -225,9 +226,9 @@ export function stepLine(guide: Guide): string | null {
   return `${doing ?? 'Putting the guide together'} · ${ready} of ${SECTION_IDS.length} ready`;
 }
 
-/** Who researched the guide, as the page says it. */
+/** Who researched the guide, as the page says it. Claude is a test set-up and is never shown as Grok. */
 export function providerLabel(provider: Guide['provider']): string {
-  return provider === 'grok' ? 'Grok' : 'simulated agents';
+  return modelName(provider) ?? 'simulated agents';
 }
 
 /** offline: the last refresh could not reach the backend, so the guide shown is the last one it sent. */

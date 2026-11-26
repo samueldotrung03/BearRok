@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { throwIfStopped, timeoutOrStop } from './agents/stop.ts';
 import { config } from './config.ts';
+import { transport } from './harness.ts';
 import { BalanceExhaustedError, isBalanceError } from './quota.ts';
 
 export type GrokTool = { type: 'web_search' } | { type: 'x_search' };
@@ -20,11 +21,21 @@ export async function grokJson<S extends z.ZodType>(opts: {
 }): Promise<GrokResult<z.infer<S>>> {
   // A stopped search makes no new calls.
   throwIfStopped();
-  if (config.grokTransport === 'cli') {
+  // Through the harness connected in Settings, else the xAI API when a key is set.
+  const via = transport();
+  if (via === 'claude') {
+    const { claudeCliJson } = await import('./claudeCli.ts');
+    return claudeCliJson(opts);
+  }
+  if (via === 'codex') {
+    const { codexCliJson } = await import('./codexCli.ts');
+    return codexCliJson(opts);
+  }
+  if (via === 'grok') {
     const { grokCliJson } = await import('./grokCli.ts');
     return grokCliJson(opts);
   }
-  if (!config.xaiApiKey) throw new Error('XAI_API_KEY is not set');
+  if (via === null || !config.xaiApiKey) throw new Error('No model is connected. Connect Claude, ChatGPT or Grok in Settings.');
 
   const jsonSchema = z.toJSONSchema(opts.schema) as Record<string, unknown>;
   delete jsonSchema.$schema;

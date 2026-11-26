@@ -4,6 +4,7 @@
 // back empty. Nothing here is guessed.
 import { z } from 'zod';
 import { config, provider } from './config.ts';
+import { tierModels, transport } from './harness.ts';
 import { grokJson, type GrokResult } from './grok.ts';
 
 const confidence = z.number().min(0).max(1);
@@ -68,7 +69,7 @@ export type ResumeEntry = z.infer<typeof entryFact>;
 type TextFact = z.infer<typeof textFact>;
 type ListFact = z.infer<typeof listFact>;
 
-export type ResumeProvider = 'grok' | 'simulated';
+export type ResumeProvider = 'grok' | 'claude' | 'gpt' | 'simulated';
 
 export interface ResumeExtraction {
   extraction: ResumeProfile;
@@ -318,20 +319,22 @@ type Ask = (opts: { name: string; system: string; user: string; schema: typeof R
  * Otherwise the simulated reader. `ask` replaces the Grok call in tests.
  */
 export async function extractResumeProfile(text: string, opts: { live?: boolean; ask?: Ask } = {}): Promise<ResumeExtraction> {
-  const live = opts.live ?? provider() === 'grok';
+  const live = opts.live ?? provider() !== 'simulated';
   if (!live) return { extraction: simulateResume(text), provider: 'simulated' };
   const ask = opts.ask ?? grokJson;
-  const model = config.grokTransport === 'cli' ? config.grokCli.models.normal : config.xaiModels.normal;
-  const timeoutMs = config.grokTransport === 'cli' ? config.grokCli.timeoutMs : config.grokTimeoutMs;
+  const via = transport();
+  const timeoutMs = via === 'claude' ? config.claudeCli.timeoutMs : via === 'codex' ? config.codexCli.timeoutMs : via === 'grok' ? config.grokCli.timeoutMs : config.grokTimeoutMs;
+  const who = provider();
+  const labelled: ResumeProvider = who === 'claude' || who === 'gpt' || who === 'grok' ? who : 'grok';
   const { data } = await ask({
     name: 'resume_profile',
-    model,
+    model: tierModels().normal,
     timeoutMs,
     schema: ResumeProfileSchema,
     system: SYSTEM,
     user: `Résumé:\n"""${text.slice(0, 20_000)}"""`,
   });
-  return { extraction: normalizeResume(ResumeProfileSchema.parse(data)), provider: 'grok' };
+  return { extraction: normalizeResume(ResumeProfileSchema.parse(data)), provider: labelled };
 }
 
 // --- Simulated reader. Labels and section headings only. No inference. -----------------------

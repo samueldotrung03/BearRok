@@ -2,12 +2,14 @@
 export type PermissionKind = 'screen' | 'disk' | 'control';
 export type PermissionState = 'granted' | 'denied' | 'unknown';
 
-/** How this copy of the app reaches Grok. `managed` is false when the app did not start the backend itself. */
+/**
+ * The xAI API key this copy of the app keeps, encrypted, for a student with no subscription. The
+ * apps for the command line (Claude, ChatGPT, Grok) are connected through the backend instead
+ * (src/lib/harnesses.ts). `managed` is false when the app did not start the backend itself.
+ */
 export interface GrokConnection {
   managed: boolean;
-  mode: 'cli' | 'api' | null;
-  /** The Grok app for the command line is installed on this computer. */
-  cliFound: boolean;
+  mode: 'api' | null;
   canStoreKey: boolean;
   error?: string;
 }
@@ -24,10 +26,16 @@ export type MenuBarAction = { type: 'run' } | { type: 'stop' } | { type: 'open';
 
 interface DesktopBridge {
   platform: string;
+  /** One-click set-up of Claude, ChatGPT (codex) or Grok in Terminal. Absent in an older desktop shell. */
+  harness?: {
+    setup: (id: 'claude' | 'codex' | 'grok') => Promise<{ ok: boolean; error?: string }>;
+    setupStatus: (id: 'claude' | 'codex' | 'grok') => Promise<{ state: 'idle' | 'running' | 'done' | 'failed'; error?: string }>;
+    setupClear: (id: 'claude' | 'codex' | 'grok') => Promise<void>;
+  };
   /** Absent in a desktop shell older than the page. */
   grok?: {
     status: () => Promise<GrokConnection>;
-    connect: (choice: { mode: 'cli' } | { mode: 'api'; key: string }) => Promise<GrokConnection>;
+    connect: (choice: { mode: 'api'; key: string }) => Promise<GrokConnection>;
     disconnect: () => Promise<GrokConnection>;
   };
   /** The menu bar icon at the top of the screen (macOS). Absent in an older desktop shell. */
@@ -39,7 +47,9 @@ interface DesktopBridge {
   openPermission: (kind: PermissionKind) => Promise<boolean>;
 }
 
-export const desktopBridge: DesktopBridge | undefined = (window as unknown as { bearrokDesktop?: DesktopBridge }).bearrokDesktop;
+// Undefined when the page is rendered outside a browser (tests render on the server).
+export const desktopBridge: DesktopBridge | undefined =
+  typeof window === 'undefined' ? undefined : (window as unknown as { bearrokDesktop?: DesktopBridge }).bearrokDesktop;
 
 const KEY = 'bearrok.allowed';
 

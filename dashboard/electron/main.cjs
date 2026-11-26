@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const backend = require('./backend.cjs');
 const menuBar = require('./menuBar.cjs');
+const harnessSetup = require('./harnessSetup.cjs');
 
 /** The one app window; closing it on macOS keeps the app (and the menu bar icon) running. */
 let mainWindow = null;
@@ -107,6 +108,7 @@ ipcMain.on('window:focus', (event) => {
 });
 
 backend.mount();
+harnessSetup.mount({ ipcMain, app });
 
 app.whenReady().then(async () => {
   // The page needs the backend from its first request, so it is started before the window opens.

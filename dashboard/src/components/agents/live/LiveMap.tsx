@@ -9,7 +9,7 @@ import type { ActivityState } from '../../../lib/activity/useActivity.ts';
 import type { ActivityAgent, ActivityLevel, LiveActivity } from '../../../lib/activity/types.ts';
 import { actionText, arrowsOf, botLevel, botStatus, kindLabel, layersOf, managerColumns, mapStats, popoverOf, savedCount, type MapArrow, type MapColumn } from '../../../lib/activity/map.ts';
 import { announcements, elapsedMs, formatDuration, OUTCOME_WORD, rowLabel } from '../../../lib/activity/view.ts';
-import { sourceLabel } from '../../../lib/agents/fromLive.ts';
+import { sourceLabel, type Provider } from '../../../lib/agents/fromLive.ts';
 import { AnimatedNumber } from '../AnimatedNumber.tsx';
 import { GrokBot } from '../GrokBot.tsx';
 
@@ -25,6 +25,8 @@ export interface LiveMapProps {
   /** Tell your agents, owned by the page; shown under the request line. */
   tell?: ReactNode;
   onRetry: () => void;
+  /** Which model this run is on. A live run with no provider is Grok, which is the older default. */
+  provider?: Provider;
 }
 
 function Chip({ tone, children }: { tone: string; children: ReactNode }) {
@@ -249,7 +251,7 @@ function GroupScroll({ children }: { children: ReactNode }) {
   );
 }
 
-export function LiveMap({ state, now, reduced, actions, hasHistory, tell, onRetry }: LiveMapProps) {
+export function LiveMap({ state, now, reduced, actions, hasHistory, tell, onRetry, provider }: LiveMapProps) {
   const { live } = state;
   const run = live?.run ?? null;
   const loading = state.status === 'connecting' && !live;
@@ -289,7 +291,8 @@ export function LiveMap({ state, now, reduced, actions, hasHistory, tell, onRetr
           : `${run.request} · ${run.triggerText}`
         : `No search is running. Press Run now, or wait for Automode; every agent appears here as it starts.${hasHistory ? ' The last run is in History below.' : ''}`;
 
-  const honest = !run ? (state.status === 'live' ? 'Connected to your agent server. Nothing is running yet.' : 'Waiting for your agent server.') : sourceLabel(run.mode === 'live' ? 'grok' : 'simulated');
+  const who: Provider = provider && provider !== 'simulated' ? provider : run?.mode === 'live' ? 'grok' : 'simulated';
+  const honest = !run ? (state.status === 'live' ? 'Connected to your agent server. Nothing is running yet.' : 'Waiting for your agent server.') : sourceLabel(who);
 
   const open = (id: string) => setOpenId(id);
   const close = (id: string) => setOpenId((cur) => (cur === id ? null : cur));

@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { StudentState } from './agents/system.ts';
 import type { Opportunity, OppType, Profile } from './agents/types.ts';
 import { config } from './config.ts';
+import { tierModels } from './harness.ts';
 import { grokJson, type GrokResult } from './grok.ts';
 
 export const SEARCH_KINDS = ['all', 'internship', 'research', 'event', 'club', 'hackathon', 'scholarship'] as const;
@@ -334,7 +335,7 @@ export const writeSearch: SearchWriter = async ({ request, context, own }) => {
     user: searchPrompt(request, context, own, tag),
     schema: Answer,
     tools: request.web ? [{ type: 'web_search' }] : [],
-    model: (config.grokTransport === 'cli' ? config.grokCli.models : config.xaiModels).normal,
+    model: tierModels().normal,
   });
   return { data: mergeAnswer(data, own), citations };
 };

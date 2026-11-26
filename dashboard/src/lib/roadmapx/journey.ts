@@ -12,6 +12,7 @@ import { careerKey } from '../discover/names.ts';
 import { evidenceFor } from '../pathways.ts';
 import { buildOpportunityRoadmap, currentRoadmap } from '../roadmap.ts';
 import { buildCoachContext, estimateHours, formatHours, whyStep } from './context.ts';
+import { modelName } from '../modelName.ts';
 
 export type JourneyMode = 'career' | 'job';
 
@@ -462,7 +463,7 @@ export function customCareer(goal: string): Journey {
 export interface GuideStart {
   steps: { title: string; detail: string; when?: string | null; resource: { title: string; url: string } | null; prepares?: string[] }[];
   /** Who researched it, so sample steps are never shown as live research. */
-  provider: 'grok' | 'simulated';
+  provider: 'grok' | 'claude' | 'gpt' | 'simulated';
   sample: boolean;
 }
 
@@ -507,7 +508,7 @@ export function guideJourney(goal: string, guide: GuideStart, doneSteps: string[
       opportunity: null,
     });
   }
-  const who = guide.sample || guide.provider === 'simulated' ? 'sample steps, because no model is connected' : 'researched by Grok';
+  const who = guide.sample || guide.provider === 'simulated' ? 'sample steps, because no model is connected' : `researched by ${modelName(guide.provider) ?? 'Grok'}`;
   const journey = finish(
     'career',
     goal,

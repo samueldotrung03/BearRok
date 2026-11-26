@@ -7,7 +7,7 @@ import type { LiveAgents } from '../../state/live.tsx';
 import { FEED_ID, type AgentLive, type GraphNode, type LogEntry, type NodeStatus, type Tone, type Transfer } from './engine.ts';
 import type { Edge, Hub, MapView, NodeInfo } from './view.ts';
 
-export type Provider = 'grok' | 'simulated';
+export type Provider = 'grok' | 'claude' | 'gpt' | 'simulated';
 
 /** Most nodes drawn in the worker row or the validator row, counting the "+N more" node. */
 export const MAX_ROW = 8;
@@ -22,6 +22,9 @@ const HUBS: Hub[] = [
 export function sourceLabel(provider: Provider | null): string {
   if (provider === null) return 'Simulated run on sample data. With a Grok key the same view shows the real agents.';
   if (provider === 'grok') return 'Live run on Grok';
+  // A Claude run is never presented as Grok.
+  if (provider === 'claude') return 'Live run on Claude';
+  if (provider === 'gpt') return 'Live run on ChatGPT';
   return 'Backend run, simulated agents';
 }
 

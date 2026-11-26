@@ -34,6 +34,9 @@ process.env.GROK_TRANSPORT = 'cli';
 process.env.GROK_CLI_BIN = bin;
 
 const { grokJson } = await import('../src/grok.ts');
+// Tests never read the saved harness choice, so the Grok harness is connected here by hand.
+const { setHarnessStateForTest } = await import('../src/harness.ts');
+setHarnessStateForTest({ connected: ['grok'], active: 'grok' });
 const { answerText, extractJson, structuredAnswer, fullestAnswer } = await import('../src/grokCli.ts');
 const { readFileSync, rmSync } = await import('node:fs');
 const Schema = z.object({ title: z.string(), url: z.string() });
@@ -48,7 +51,7 @@ test('CLI replies are unwrapped from the json envelope, prose and code fences', 
   assert.throws(() => extractJson('no json here'));
 });
 
-test('grokJson goes through the CLI when GROK_TRANSPORT=cli', async () => {
+test('grokJson goes through the Grok CLI when the Grok harness is connected', async () => {
   reset();
   writeFileSync(join(dir, 'reply'), JSON.stringify({ result: '```json\n{"title":"Winter Hack","url":"https://example.org/w"}\n```' }));
   const { data } = await grokJson({ name: 't', system: 'You are a scout.', user: 'Find one.', schema: Schema, tools: [{ type: 'web_search' }], model: 'some-model' });
@@ -82,7 +85,7 @@ test('a failing CLI gives a readable error', async () => {
   reset();
   writeFileSync(join(dir, 'reply'), 'not logged in');
   writeFileSync(join(dir, 'exit'), '1');
-  await assert.rejects(grokJson({ name: 't', system: 's', user: 'u', schema: Schema }), /grok CLI exited 1: not logged in/);
+  await assert.rejects(grokJson({ name: 't', system: 's', user: 'u', schema: Schema }), /grok exited 1: not logged in/);
 });
 
 test('the answer the CLI checked against the schema is used when it returns one', () => {

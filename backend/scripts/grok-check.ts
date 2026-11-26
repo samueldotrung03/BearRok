@@ -4,12 +4,13 @@
 import { z } from 'zod';
 import { config } from '../src/config.ts';
 import { grokJson } from '../src/grok.ts';
+import { transport } from '../src/harness.ts';
 
-if (config.grokTransport === 'api' && !config.xaiApiKey) {
-  console.error('Set XAI_API_KEY, or GROK_TRANSPORT=cli to use the subscription CLI, in backend/.env first.');
+if (transport() === null) {
+  console.error('No model is connected. Connect Claude, ChatGPT or Grok in Settings, or set GROK_TRANSPORT in backend/.env.');
   process.exit(1);
 }
-console.log(`transport: ${config.grokTransport}`);
+console.log(`transport: ${transport()}`);
 const started = Date.now();
 const { data, citations } = await grokJson({
   name: 'check',
